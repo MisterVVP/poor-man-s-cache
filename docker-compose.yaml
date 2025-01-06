@@ -1,0 +1,18 @@
+services:
+  cache:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9001:9001"
+
+  tests:
+    build:
+      context: tests
+      dockerfile: Dockerfile
+    environment:
+      - CACHE_HOST=ws://cache
+      - CACHE_PORT=9001
+      - TEST_DELAY=1
+    depends_on:
+      - cache
