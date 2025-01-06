@@ -1,38 +1,38 @@
-import websocket
+import socket
 import time
 import os
 
 
-host = os.environ.get('CACHE_HOST', 'ws://localhost')
-port = os.environ.get('CACHE_PORT', 9001)
-delay_sec = os.environ.get('TEST_DELAY', 1)
-
-cache_url = f"{host}:{port}/"
+host = os.environ.get('CACHE_HOST', 'localhost')
+port = int(os.environ.get('CACHE_PORT', 9001))
+delay_sec = int(os.environ.get('TEST_DELAY', 1))
 
 def send_command(command):
+    """Send a command to the TCP server and return the response."""
     try:
-        # Connect to the WebSocket server
-        ws = websocket.WebSocket()
-        ws.connect(cache_url)
-        
-        # Send the command
-        ws.send(command)
-        
-        # Receive the response
-        response = ws.recv()
-        print(f"Command: {command}, Response: {response}")
-        
-        ws.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((host, port))
+            s.sendall(command.encode('utf-8'))
+            response = s.recv(1024).decode('utf-8')
+            return response.strip()
     except Exception as e:
-        print(f"Error: {e}")
+        return f"Error: {e}"
 
-time.sleep(delay_sec)
+if __name__ == "__main__":
+    time.sleep(delay_sec)
+    # Test SET command
+    print("Testing SET command:")
+    response = send_command("SET key value")
+    print(f"Response: {response}")
 
-# Test SET command
-send_command("SET myKey myValue")
+    time.sleep(delay_sec/2)
+    # Test GET command for an existing key
+    print("\nTesting GET command for existing key:")
+    response = send_command("GET key")
+    print(f"Response: {response}")
 
-# Test GET command
-send_command("GET myKey")
-
-# Test GET for a non-existing key
-send_command("GET unknownKey")
+    time.sleep(delay_sec/2)
+    # Test GET command for a non-existent key
+    print("\nTesting GET command for non-existent key:")
+    response = send_command("GET non_existent_key")
+    print(f"Response: {response}")

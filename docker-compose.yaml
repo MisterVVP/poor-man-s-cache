@@ -11,7 +11,7 @@ services:
       context: tests
       dockerfile: Dockerfile
     environment:
-      - CACHE_HOST=ws://cache
+      - CACHE_HOST=cache
       - CACHE_PORT=9001
       - TEST_DELAY=1
     depends_on:
