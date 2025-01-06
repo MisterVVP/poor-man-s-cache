@@ -77,16 +77,17 @@ int main() {
 
         int bytes_read = read(client_fd, buffer, BUFFER_SIZE);
         if (bytes_read > 0) {
-            auto start = std::chrono::high_resolution_clock::now();
+            //TODO: record performance metrics here and write to stdout only on graceful shutdown
+            //auto start = std::chrono::high_resolution_clock::now();
 
             buffer[bytes_read] = '\0'; // Ensure null-terminated string
             const char *response = processCommand(buffer, bytes_read);
 
             send(client_fd, response, strlen(response), 0);
 
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> elapsed = end - start;
-            std::cout << "Processed request in " << elapsed.count() * 1000 << " milliseconds" << std::endl;
+            //auto end = std::chrono::high_resolution_clock::now();
+            //std::chrono::duration<double> elapsed = end - start;
+            //std::cout << "Processed request in " << elapsed.count() * 1000 << " milliseconds" << std::endl;
         } else {
             std::cout << "Received empty request" << std::endl;
         }
