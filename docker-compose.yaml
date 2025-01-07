@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - DEBUG=False
+      - empty=empty
     ports:
       - "9001:9001"
 
