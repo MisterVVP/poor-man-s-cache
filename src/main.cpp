@@ -70,7 +70,15 @@ void workerThread(KeyValueStore &keyValueStore, int &epoll_fd) {
             const char *response;
             if (sscanf(buffer, "%9s %255s %255[^\n]", cmd, key, value) >= 2) {
                 if (strcmp(cmd, "SET") == 0) {
-                    response = keyValueStore.set(key, value) ? "OK" : "ERROR: Storage full";
+                    bool success = false;
+                    for (int i = 0; i < 5; ++i) { // Retry up to 5 times with exponential backoff
+                        success = keyValueStore.set(key, value);
+                        if (success) {
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds((1 << i) * 10));
+                    }
+                    response = success ? "OK" : "ERROR: Storage full after retries";
                 } else if (strcmp(cmd, "GET") == 0) {
                     response = keyValueStore.get(key);
                     response = response ? response : "(nil)";
@@ -87,6 +95,12 @@ void workerThread(KeyValueStore &keyValueStore, int &epoll_fd) {
             std::chrono::duration<double> elapsed = end - start;
             std::cout << "Processed request in " << elapsed.count() * 1000 << " milliseconds" << std::endl;
 #endif
+        } else {
+            if (bytes_read == 0) {
+                std::cerr << "Client closed the connection" << std::endl;
+            } else {
+                std::cerr << "Error reading from client socket: " << strerror(errno) << std::endl;
+            }
         }
 
         // Ensure client socket cleanup
