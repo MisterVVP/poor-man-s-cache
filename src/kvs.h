@@ -21,7 +21,7 @@ class KeyValueStore {
         void resize();
 
     public:
-        KeyValueStore(int initialSize = 1024);
+        KeyValueStore(int initialSize = 2048);
         ~KeyValueStore();
 
         bool set(const char *key, const char *value);

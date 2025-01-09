@@ -5,4 +5,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
 
+find_package(prometheus-cpp CONFIG REQUIRED)
+
+if(NOT DEFINED prometheus-cpp_VERSION)
+  message(FATAL_ERROR "prometheus-cpp_VERSION is not defined")
+endif()
+
 add_subdirectory(src)

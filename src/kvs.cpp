@@ -57,15 +57,16 @@ bool KeyValueStore::set(const char *key, const char *value) {
     int idx;
     do {
         idx = hash(key, attempt++);
-        if (!table[idx].occupied || strcmp(table[idx].key, key) == 0) {
+        if (!table[idx].occupied) {
             strncpy(table[idx].key, key, sizeof(table[idx].key));
             strncpy(table[idx].value, value, sizeof(table[idx].value));
             table[idx].occupied = true;
-            if (strcmp(table[idx].key, key) != 0) {
-                ++numEntries;
-            }
+            ++numEntries;
             return true;
         }
+//        else if (strcmp(table[idx].key, key) == 0) {
+//
+//        }
     } while (attempt < tableSize);
 
     return false; // Table full

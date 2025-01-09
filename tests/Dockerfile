@@ -1,5 +1,5 @@
 FROM python:alpine
-RUN apk update && apk upgrade
+RUN apk update && apk upgrade && pip install requests
 
 WORKDIR /tests
 COPY . .
