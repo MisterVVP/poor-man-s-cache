@@ -5,14 +5,10 @@
 #include <cstring>
 #include <iostream>
 #include <chrono>
-#include <thread>
 #include <vector>
 #include <atomic>
-#include <mutex>
-#include <queue>
 #include <fcntl.h>
 #include <sys/epoll.h>
-#include <condition_variable>
 #include <prometheus/exposer.h>
 #include <prometheus/registry.h>
 #include <prometheus/counter.h>
@@ -21,68 +17,51 @@
 #include "kvs.h"
 
 #define MAX_EVENTS 10
-#define THREAD_POOL_SIZE 4
 
 using namespace prometheus;
 
-// Thread-safe task queue
-class TaskQueue {
-private:
-    std::queue<int> tasks;
-    std::mutex queueMutex;
-    std::condition_variable condition;
+// Structures for parsed commands and queries
+struct Command {
+    int commandCode; // 0: Reserved, 1: SET
+    const char * key;   // String key
+    const char * value; // String value
+    int client_fd;  // Client file descriptor to send response
+};
 
-public:
-    void push(int client_fd) {
-        {
-            std::lock_guard<std::mutex> lock(queueMutex);
-            tasks.push(client_fd);
-        }
-        condition.notify_one();
-    }
-
-    int pop() {
-        std::unique_lock<std::mutex> lock(queueMutex);
-        condition.wait(lock, [this]() { return !tasks.empty(); });
-        int client_fd = tasks.front();
-        tasks.pop();
-        return client_fd;
-    }
-
-    size_t size() {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        return tasks.size();
-    }
+struct Query {
+    int queryCode; // 0: Reserved, 1: GET
+    const char * key;  // String key
+    int client_fd; // Client file descriptor to send response
 };
 
 // Global variables
-TaskQueue taskQueue;
+KeyValueStore keyValueStore;//(40000);
 std::atomic<bool> running(true);
 
 // Prometheus metrics
 auto registry = std::make_shared<Registry>();
 
 auto& request_count = BuildCounter()
-                          .Name("tcp_requests_total")
+                          .Name("endpoint_tcp_requests_total")
                           .Help("Total number of TCP requests")
                           .Register(*registry)
                           .Add({});
 
 auto& error_count = BuildCounter()
-                        .Name("tcp_errors_total")
+                        .Name("endpoint_tcp_errors_total")
                         .Help("Total number of TCP errors")
                         .Register(*registry)
                         .Add({});
 
 auto& request_latency = BuildHistogram()
-                            .Name("tcp_request_latency_seconds")
+                            .Name("endpoint_tcp_request_latency_seconds")
                             .Help("Histogram of request latencies in seconds")
                             .Register(*registry)
                             .Add({}, Histogram::BucketBoundaries{0.01, 0.1, 0.5, 1.0, 2.5, 5.0});
 
-auto& queue_length = BuildGauge()
-                         .Name("task_queue_length")
-                         .Help("Number of tasks in the queue")
+auto& storage_num_entries = BuildGauge()
+                         .Name("storage_num_entries")
+                         .Help("Number of entries in the storage")
                          .Register(*registry)
                          .Add({});
 
@@ -94,67 +73,38 @@ void handleSignal(int signal) {
     }
 }
 
-// Worker thread function
-void workerThread(KeyValueStore &keyValueStore, int &epoll_fd) {
-    while (running) {
-        int client_fd = taskQueue.pop();
+void processCommand(const Command& command) {
+    const char * response;
 
-        queue_length.Set(taskQueue.size()); // Monitor queue size
-
-        char buffer[1024] = {0};
-        auto start = std::chrono::steady_clock::now(); // Start latency timer
-
-        while (true) {
-            int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (bytes_read > 0) {
-                buffer[bytes_read] = '\0';
-
-                request_count.Increment(); // Increment request count
-
-                char cmd[10] = {0};
-                char key[256] = {0};
-                char value[256] = {0};
-
-                const char *response;
-                if (sscanf(buffer, "%9s %255s %255[^\n]", cmd, key, value) >= 2) {
-                    if (strcmp(cmd, "SET") == 0) {
-                        bool success = keyValueStore.set(key, value);
-                        response = success ? "OK" : "ERROR: Storage full";
-                    } else if (strcmp(cmd, "GET") == 0) {
-                        response = keyValueStore.get(key);
-                        response = response ? response : "(nil)";
-                    } else {
-                        response = "ERROR: Unknown command";
-                    }
-                } else {
-                    response = "ERROR: Invalid command";
-                    error_count.Increment(); // Increment error count
-                }
-
-                if (send(client_fd, response, strlen(response), 0) == -1) {
-                    std::cerr << "Error sending response: " << strerror(errno) << std::endl;
-                    error_count.Increment(); // Increment error count
-                }
-            } else if (bytes_read == 0) {
-                // Client closed connection
-                break;
-            } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                std::cerr << "Error reading from client socket: " << strerror(errno) << std::endl;
-                error_count.Increment(); // Increment error count
-                break;
-            } else {
-                break; // No more data
-            }
+    if (command.commandCode == 1) { // SET command
+        bool success = keyValueStore.set(command.key, command.value);
+        if (success) {
+            response = "OK";
+        } else {
+            response = "ERROR: Storage full";
         }
-
-        auto end = std::chrono::steady_clock::now(); // End latency timer
-        std::chrono::duration<double> elapsed_seconds = end - start;
-        request_latency.Observe(elapsed_seconds.count()); // Record latency
-
-        // Cleanup client socket
-        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
-        close(client_fd);
+    } else {
+        response = "ERROR: Invalid command code";
+        error_count.Increment(); // Increment error count
     }
+
+    send(command.client_fd, response, strlen(response), 0);
+    close(command.client_fd); // Close connection after sending response
+}
+
+void processQuery(const Query& query) {
+    const char * response;
+
+    if (query.queryCode == 1) { // GET query
+        const char *value = keyValueStore.get(query.key);
+        response = value ? value : "(nil)";
+    } else {
+        response = "ERROR: Invalid query code";
+        error_count.Increment(); // Increment error count
+    }
+
+    send(query.client_fd, response, strlen(response), 0);
+    close(query.client_fd); // Close connection after sending response
 }
 
 int main() {
@@ -189,8 +139,6 @@ int main() {
 
     std::cout << "Server started on port " << PORT << std::endl;
 
-    KeyValueStore keyValueStore;
-
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1) {
         std::cerr << "Failed to create epoll instance" << std::endl;
@@ -210,12 +158,6 @@ int main() {
     }
 
     epoll_event events[MAX_EVENTS];
-    std::vector<std::thread> threads;
-
-    // Start worker threads
-    for (int i = 0; i < THREAD_POOL_SIZE; ++i) {
-        threads.emplace_back(workerThread, std::ref(keyValueStore), std::ref(epoll_fd));
-    }
 
     Exposer exposer{"0.0.0.0:8080"}; // Expose on port 8080
     exposer.RegisterCollectable(registry);
@@ -231,29 +173,50 @@ int main() {
                 int client_fd = accept(server_fd, (struct sockaddr *)&client_address, &client_len);
 
                 if (client_fd >= 0) {
-                    fcntl(client_fd, F_SETFL, O_NONBLOCK);
+                    // fcntl(client_fd, F_SETFL, O_NONBLOCK);
 
-                    event.events = EPOLLIN | EPOLLONESHOT;
-                    event.data.fd = client_fd;
+                    char buffer[1024] = {0};
+                    int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        char *command = strtok(buffer, " ");
 
-                    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-                        std::cerr << "Failed to add client socket to epoll" << std::endl;
+                        if (strcmp(command, "SET") == 0) {
+                            char *key = strtok(nullptr, " ");
+                            char *value = strtok(nullptr, " ");
+                            if (key && value) {
+                                processCommand(Command{1, key, value, client_fd});
+                            } else {
+                                const char * response = "ERROR: Invalid SET command format";
+                                send(client_fd, response, strlen(response), 0);
+                                close(client_fd);
+                            }
+                        } else if (strcmp(command, "GET") == 0) {
+                            char *key = strtok(nullptr, " ");
+                            if (key) {
+                                processQuery(Query{1, key, client_fd});
+                            } else {
+                                const char * response = "ERROR: Invalid GET command format";
+                                send(client_fd, response, strlen(response), 0);
+                                close(client_fd);
+                            }
+                        } else {
+                            const char * response = "ERROR: Unknown command";
+                            send(client_fd, response, strlen(response), 0);
+                            close(client_fd);
+                        }
+                    } else {
                         close(client_fd);
                     }
                 }
-            } else {
-                taskQueue.push(events[i].data.fd);
+                storage_num_entries.Set(keyValueStore.getNumEntries());   
             }
         }
-    }
-
-    for (auto &thread : threads) {
-        thread.join();
     }
 
     close(server_fd);
     close(epoll_fd);
 
-    std::cout << "Server shut down cleanly." << std::endl;
+    std::cout << "Server shut down successfully" << std::endl;
     return 0;
 }

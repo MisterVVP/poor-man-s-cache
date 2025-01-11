@@ -1,89 +1,147 @@
 #include "kvs.h"
 
-KeyValueStore::KeyValueStore(int initialSize) : tableSize(initialSize), numEntries(0) {
+KeyValueStore::KeyValueStore(unsigned long long initialSize) : tableSize(initialSize), numEntries(0) {
+    isResizing = false;
     table = new Entry[tableSize];
-    for (int i = 0; i < tableSize; ++i) {
+    for (unsigned long long i = 0; i < tableSize; ++i) {
         table[i].occupied = false;
+    }
+    std::random_device rd;
+    std::mt19937_64 e2(rd());
+    std::uniform_int_distribution<unsigned long long> dist(
+        std::numeric_limits<std::uint64_t>::min(),
+        std::numeric_limits<std::uint64_t>::max()
+    );
+    for (int i = 0; i < HH_KEY_LEN; ++i) {
+        hhkey[i] = dist(e2);
     }
 }
 
 KeyValueStore::~KeyValueStore() {
+    for (unsigned long long i = 0; i < tableSize; ++i) {
+        delete[] table[i].key;
+        delete[] table[i].value;
+    }
     delete[] table;
 }
 
-// MurmurOAAT64
-int KeyValueStore::hash(const char *key, int attempt) const {
-    unsigned long hash(525201411107845655ull);
-    for (;*key;++key) {
-        hash ^= *key;
-        hash *= 0x5bd1e9955bd1e995;
-        hash ^= hash >> 47;
-    }
-    return (hash + attempt * attempt) % tableSize; // Quadratic probing
+unsigned long long KeyValueStore::hash(const char *key, int attempt) const {
+    highwayhash::HHResult64 result;
+    highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &result);
+    return (result + attempt * attempt) % tableSize;
 }
 
+unsigned long long KeyValueStore::rehash(const char *key, int attempt, unsigned long long newTableSize) const {
+    highwayhash::HHResult64 result;
+    highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &result);
+    return (result + attempt * attempt) % newTableSize;
+}
+
+
 void KeyValueStore::resize() {
-    int newTableSize = tableSize * 2;
-    Entry *newTable = new Entry[newTableSize];
-    for (int i = 0; i < newTableSize; ++i) {
+    isResizing = true;
+    std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << " isResizing = " << isResizing << std::endl;
+    auto newTableSize = tableSize * RESIZE_MULTIPLIER;
+    auto *newTable = new Entry[newTableSize];
+    for (unsigned long long i = 0; i < newTableSize; ++i) {
         newTable[i].occupied = false;
     }
 
-    for (int i = 0; i < tableSize; ++i) {
+    for (unsigned long long i = 0; i < tableSize; ++i) {
         if (table[i].occupied) {
             int attempt = 0;
-            int idx;
+            unsigned long long idx;
             do {
-                idx = hash(table[i].key, attempt++);
-            } while (newTable[idx].occupied);
+                idx = rehash(table[i].key, attempt++, newTableSize);
+            } while (newTable[idx].occupied && attempt < newTableSize);
 
-            strncpy(newTable[idx].key, table[i].key, sizeof(newTable[idx].key));
-            strncpy(newTable[idx].value, table[i].value, sizeof(newTable[idx].value));
-            newTable[idx].occupied = true;
+            if (!newTable[idx].occupied) {
+                newTable[idx].key = new char[strlen(table[i].key) + 1];
+                newTable[idx].value = new char[strlen(table[i].value) + 1];
+
+                strcpy(newTable[idx].key, table[i].key);
+                strcpy(newTable[idx].value, table[i].value);
+                newTable[idx].occupied = true;
+
+                delete[] table[i].key;
+                delete[] table[i].value;
+            } 
+#ifndef NDEBUG
+            else {
+                std::cerr << "Resize error: Could not insert key " << table[i].key << std::endl;
+            }
+#endif
         }
     }
 
     delete[] table;
     table = newTable;
     tableSize = newTableSize;
+    isResizing = false;
+    std::cout << "Resizing finished! numEntries = " << numEntries << " tableSize = " << tableSize << " isResizing = " << isResizing << std::endl;
 }
 
 bool KeyValueStore::set(const char *key, const char *value) {
-    if (numEntries >= tableSize / 2) { // Resize when load factor exceeds 50%
+    if (numEntries >= (tableSize / RESIZE_MULTIPLIER) && !isResizing) { // Resize when load factor exceeds 50%
         resize();
     }
 
     int attempt = 0;
-    int idx;
+    unsigned long long idx;
     do {
         idx = hash(key, attempt++);
+#ifndef NDEBUG
+        std::cout << "Setting key = " << key << " calculated hash idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;    
+#endif
         if (!table[idx].occupied) {
-            strncpy(table[idx].key, key, sizeof(table[idx].key));
-            strncpy(table[idx].value, value, sizeof(table[idx].value));
+            table[idx].key = new char[strlen(key) + 1];
+            table[idx].value = new char[strlen(value) + 1];
+
+            strcpy(table[idx].key, key);
+            strcpy(table[idx].value, value);
+
             table[idx].occupied = true;
             ++numEntries;
             return true;
+        } else if (strcmp(table[idx].key, key) == 0) {
+            delete[] table[idx].value;
+
+            table[idx].value = new char[strlen(value) + 1];            
+            strcpy(table[idx].value, value);
+            return true; // Update existing value
         }
-//        else if (strcmp(table[idx].key, key) == 0) {
-//
-//        }
     } while (attempt < tableSize);
 
+//#ifndef NDEBUG
+    if (attempt > 1) {
+        std::cout << "Inserted key = " << key << " attempt = " << attempt << std::endl;
+    }
+    std::cerr << "Set error: Could not insert key " << key << " numEntries = " << numEntries << " tableSize = " << tableSize<< std::endl;
+//#endif
     return false; // Table full
 }
 
 const char *KeyValueStore::get(const char *key) {
     int attempt = 0;
-    int idx;
+    unsigned long long idx;
     do {
         idx = hash(key, attempt++);
+#ifndef NDEBUG
+        std::cout << "Getting key = " << key << " calculated hash idx = " << idx << std::endl;    
+#endif
         if (table[idx].occupied && strcmp(table[idx].key, key) == 0) {
+#ifndef NDEBUG
+        std::cout << "Returning value = " << table[idx].value << " at key = " << key << " at idx = " << idx << std::endl;    
+#endif
             return table[idx].value;
         }
         if (!table[idx].occupied) {
-            break;
+            if (strcmp("non_existent_key", key) != 0) {
+                std::cout << "Empty slot found key = " << key << " idx = " << idx << " attempt = " << attempt  << " table[idx].key = " << table[idx].key << " table[idx].value = " << table[idx].value << std::endl;
+            }
+            break; // Stop searching if an empty slot is found
         }
     } while (attempt < tableSize);
-
+    
     return nullptr; // Key not found
 }
