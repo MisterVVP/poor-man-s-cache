@@ -10,23 +10,28 @@
 
 class KeyValueStore {
     private:
-        static const unsigned int HH_KEY_LEN = 4;
-        static const unsigned int RESIZE_MULTIPLIER = 2;
-
         struct Entry {
             char* key;
             char* value;
             bool occupied;
         };
 
+        static const unsigned int HH_KEY_LEN = 4;
+        static const unsigned int RESIZE_MULTIPLIER = 2;
+        static const unsigned int DOUBLE_HASHING_THRESHOLD = 500000;
+        static const unsigned int MAX_SCAN_ATTEMPTS = 5;
+
+
         Entry *table;
         unsigned long long tableSize;
         unsigned long long numEntries;
         bool isResizing;
+        unsigned int numResizes;
         uint64_t hhkey[HH_KEY_LEN];
 
         unsigned long long hash(const char *key, int attempt) const;
         unsigned long long rehash(const char *key, int attempt, unsigned long long newTableSize) const;
+        unsigned long MurmurOAAT64(const char *key) const;
         void resize();
 
     public:

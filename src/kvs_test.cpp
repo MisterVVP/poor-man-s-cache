@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <unistd.h>
 
 // Helper function to generate test data
 std::vector<std::pair<std::string, std::string>> generateTestData(size_t count) {
@@ -13,9 +14,10 @@ std::vector<std::pair<std::string, std::string>> generateTestData(size_t count) 
     return data;
 }
 
+const size_t N = 300000; // Number of elements to test
+
 // Test adding and retrieving elements
 TEST(KeyValueStoreTest, AddAndRetrieveElements) {
-    const size_t N = 10000; // Number of elements to test
     KeyValueStore kvStore;
 
     auto testData = generateTestData(N);
@@ -37,7 +39,6 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
 
 // Test overwriting elements
 TEST(KeyValueStoreTest, OverwriteElements) {
-    const size_t N = 10000; // Number of elements to test
     KeyValueStore kvStore;
 
     auto testData = generateTestData(N);
@@ -54,6 +55,8 @@ TEST(KeyValueStoreTest, OverwriteElements) {
         ASSERT_TRUE(kvStore.set(testData[i].first.c_str(), newValue.c_str()));
     }
 
+    std::cout << "Sleeping for 0.5 second..." << std::endl;
+    usleep(500000);
 
     // Retrieve elements and check correctness of overwritten values
     for (size_t i = 0; i < N; ++i) {

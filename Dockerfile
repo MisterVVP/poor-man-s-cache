@@ -18,8 +18,8 @@ COPY . .
 
 RUN cd /app/src && g++ -std=c++20 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ kvs.cpp kvs_test.cpp -lhighwayhash -lgtest -lgtest_main -o kvs_test && ./kvs_test
 
-RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Debug
-# Release
+RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+
 RUN cd /app/build && cmake --build .
 
 
