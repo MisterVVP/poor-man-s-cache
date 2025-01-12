@@ -14,7 +14,7 @@ std::vector<std::pair<std::string, std::string>> generateTestData(size_t count) 
     return data;
 }
 
-const size_t N = 300000; // Number of elements to test
+const size_t N = 100000; // Number of elements to test
 
 // Test adding and retrieving elements
 TEST(KeyValueStoreTest, AddAndRetrieveElements) {

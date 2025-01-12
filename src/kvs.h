@@ -16,33 +16,34 @@ class KeyValueStore {
             bool occupied;
         };
 
-        static const unsigned int HH_KEY_LEN = 4;
-        static const unsigned int RESIZE_MULTIPLIER = 2;
+        static const int_fast8_t HH_KEY_LEN = 4;
+        static const int_fast8_t RESIZE_MULTIPLIER = 2;
         static const unsigned int DOUBLE_HASHING_THRESHOLD = 500000;
-        static const unsigned int MAX_SCAN_ATTEMPTS = 5;
+        static const int_fast8_t MAX_SCAN_ATTEMPTS = 5;
 
 
         Entry *table;
-        unsigned long long tableSize;
-        unsigned long long numEntries;
+        uint_fast64_t tableSize;
+        uint_fast64_t numEntries;
         bool isResizing;
         unsigned int numResizes;
+        unsigned int numFullScans;
         uint64_t hhkey[HH_KEY_LEN];
 
-        unsigned long long hash(const char *key, int attempt) const;
-        unsigned long long rehash(const char *key, int attempt, unsigned long long newTableSize) const;
-        unsigned long MurmurOAAT64(const char *key) const;
+        uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2 = 0) const;
+        uint_fast64_t hash(const char *key) const;
+        uint_fast64_t hash2(const char *key) const;
         void resize();
 
     public:
-        KeyValueStore(unsigned long long initialSize = 2048);
+        KeyValueStore(uint_fast64_t initialSize = 2048);
         ~KeyValueStore();
 
-        unsigned long long getTableSize() {
+        uint_fast64_t getTableSize() {
             return tableSize;
         }
 
-        unsigned long long getNumEntries() {
+        uint_fast64_t getNumEntries() {
             return numEntries;
         }
 

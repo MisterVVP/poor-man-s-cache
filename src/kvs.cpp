@@ -1,51 +1,47 @@
 #include "kvs.h"
 
-KeyValueStore::KeyValueStore(unsigned long long initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), isResizing(false) {
+KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), isResizing(false), numFullScans(0) {
     table = new Entry[tableSize];
-    for (unsigned long long i = 0; i < tableSize; ++i) {
+    for (uint_fast64_t i = 0; i < tableSize; ++i) {
         table[i].occupied = false;
     }
     std::random_device rd;
     std::mt19937_64 e2(rd());
-    std::uniform_int_distribution<unsigned long long> dist(
+    std::uniform_int_distribution<uint_fast64_t> dist(
         std::numeric_limits<std::uint64_t>::min(),
         std::numeric_limits<std::uint64_t>::max()
     );
-    for (int i = 0; i < HH_KEY_LEN; ++i) {
+    for (int_fast8_t i = 0; i < HH_KEY_LEN; ++i) {
         hhkey[i] = dist(e2);
     }
 }
 
 KeyValueStore::~KeyValueStore() {
-    for (unsigned long long i = 0; i < tableSize; ++i) {
+    for (uint_fast64_t i = 0; i < tableSize; ++i) {
         delete[] table[i].key;
         delete[] table[i].value;
     }
     delete[] table;
 }
 
-unsigned long long KeyValueStore::hash(const char *key, int attempt) const {
-    highwayhash::HHResult64 primaryHash;
-    highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &primaryHash);
-    if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
-        unsigned long long secondaryHash = MurmurOAAT64(key);
-        return (primaryHash + attempt * (1 + (secondaryHash % (tableSize - 1)))) % tableSize;
+uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2) const
+{
+    if (hash2) {
+        return (hash + attempt * (1 + (hash2 % (tableSize - 1)))) % tableSize;
     } 
-    return (primaryHash + attempt * attempt) % tableSize;
+    return (hash + attempt * attempt) % tableSize;
 }
 
-unsigned long long KeyValueStore::rehash(const char *key, int attempt, unsigned long long newTableSize) const {
+uint_fast64_t KeyValueStore::hash(const char *key) const
+{
     highwayhash::HHResult64 primaryHash;
     highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &primaryHash);
-    if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
-        unsigned long long secondaryHash = MurmurOAAT64(key);
-        return (primaryHash + attempt * (1 + (secondaryHash % (newTableSize - 1)))) % newTableSize;
-    }
-    return (primaryHash + attempt * attempt) % newTableSize;
+    return primaryHash;
 }
 
-unsigned long KeyValueStore::MurmurOAAT64(const char *key) const {
-    unsigned long hash(525201411107845655ull);
+// MurmurOAAT64
+uint_fast64_t KeyValueStore::hash2(const char *key) const {
+    uint_fast64_t hash(525201411107845655ull);
     for (;*key;++key) {
         hash ^= *key;
         hash *= 0x5bd1e9955bd1e995;
@@ -60,18 +56,24 @@ void KeyValueStore::resize() {
 #ifndef NDEBUG
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
-    auto newTableSize = tableSize * RESIZE_MULTIPLIER;
+    uint_fast64_t newTableSize = tableSize * RESIZE_MULTIPLIER;
     auto *newTable = new Entry[newTableSize];
-    for (unsigned long long i = 0; i < newTableSize; ++i) {
+    for (uint_fast64_t i = 0; i < newTableSize; ++i) {
         newTable[i].occupied = false;
     }
 
-    for (unsigned long long i = 0; i < tableSize; ++i) {
+    for (uint_fast64_t i = 0; i < tableSize; ++i) {
         if (table[i].occupied) {
-            int attempt = 0;
-            unsigned long long idx;
+            uint_fast64_t attempt = 0;
+            uint_fast64_t idx;
+            uint_fast64_t primaryHash = hash(table[i].key);
+            uint_fast64_t secondaryHash = 0;
+            if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
+                secondaryHash = hash2(table[i].key);
+            }
+
             do {
-                idx = rehash(table[i].key, attempt++, newTableSize);
+                idx = calcIndex(primaryHash, attempt++, newTableSize, secondaryHash);
             } while (newTable[idx].occupied && attempt < newTableSize);
 
             if (!newTable[idx].occupied) {
@@ -106,10 +108,16 @@ bool KeyValueStore::set(const char *key, const char *value) {
         resize();
     }
 
-    int attempt = 0;
-    unsigned long long idx;
+    uint_fast64_t attempt = 0;
+    uint_fast64_t idx;
+    uint_fast64_t primaryHash = hash(key);
+    uint_fast64_t secondaryHash = 0;
+    if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
+        secondaryHash = hash2(key);
+    }
+
     do {
-        idx = hash(key, attempt++);
+        idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
 #ifndef NDEBUG
         std::cout << "Setting key = " << key << " calculated hash idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;    
 #endif
@@ -142,11 +150,16 @@ bool KeyValueStore::set(const char *key, const char *value) {
 }
 
 const char *KeyValueStore::get(const char *key) {
-    int attempt = 0;
-    unsigned long long idx;
+    uint_fast64_t attempt = 0;
+    uint_fast64_t idx;
+    uint_fast64_t primaryHash = hash(key);
+    uint_fast64_t secondaryHash = 0;
+    if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
+        secondaryHash = hash2(key);
+    }
 
     do {
-        idx = hash(key, attempt++);
+        idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
 #ifndef NDEBUG
         std::cout << "Getting key = " << key << " calculated hash idx = " << idx << std::endl;    
 #endif
@@ -161,10 +174,11 @@ const char *KeyValueStore::get(const char *key) {
 #ifndef NDEBUG
     std::cout << "Performing full scan for key = " << key << " numEntries = " << numEntries << " tableSize = " << tableSize  << " numResizes = " << numResizes << std::endl;
 #endif
-    for (unsigned long long i = 0; i < tableSize - 1; ++i) {
+    for (uint_fast64_t i = 0; i < tableSize - 1; ++i) {
         if (table[i].occupied && strcmp(table[i].key, key) == 0) {
             return table[i].value;
         }
     }
+    numFullScans++;
     return nullptr; // Key not found
 }
