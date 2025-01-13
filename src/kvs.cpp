@@ -1,9 +1,11 @@
 #include "kvs.h"
 
 KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), isResizing(false), numFullScans(0) {
-    table = new Entry[tableSize];
+    table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
-        table[i].occupied = false;
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            table[i].entries[j].occupied = false;
+        }
     }
     std::random_device rd;
     std::mt19937_64 e2(rd());
@@ -18,14 +20,15 @@ KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize)
 
 KeyValueStore::~KeyValueStore() {
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
-        delete[] table[i].key;
-        delete[] table[i].value;
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            delete[] table[i].entries[j].key;
+            delete[] table[i].entries[j].value;
+        }
     }
     delete[] table;
 }
 
-uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2) const
-{
+uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2) const {
     if (hash2) {
         return (hash + attempt * (1 + (hash2 % (tableSize - 1)))) % tableSize;
     } 
@@ -57,41 +60,47 @@ void KeyValueStore::resize() {
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
     uint_fast64_t newTableSize = tableSize * RESIZE_MULTIPLIER;
-    auto *newTable = new Entry[newTableSize];
+    auto *newTable = new Bucket[newTableSize];
     for (uint_fast64_t i = 0; i < newTableSize; ++i) {
-        newTable[i].occupied = false;
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            newTable[i].entries[j].occupied = false;
+        }
     }
 
+
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
-        if (table[i].occupied) {
-            uint_fast64_t attempt = 0;
-            uint_fast64_t idx;
-            uint_fast64_t primaryHash = hash(table[i].key);
-            uint_fast64_t secondaryHash = 0;
-            if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
-                secondaryHash = hash2(table[i].key);
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            if (table[i].entries[j].occupied) {
+                const char* key = table[i].entries[j].key;
+                const char* value = table[i].entries[j].value;
+
+                uint_fast64_t attempt = 0;
+                uint_fast64_t idx;
+                uint_fast64_t primaryHash = hash(key);
+                uint_fast64_t secondaryHash = 0;
+                if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
+                    secondaryHash = hash2(key);
+                }
+
+                bool inserted = false;
+                do {
+                    idx = calcIndex(primaryHash, attempt++, newTableSize, secondaryHash);
+                    for (int k = 0; k < BUCKET_SIZE; ++k) {
+                        if (!newTable[idx].entries[k].occupied) {
+                            newTable[idx].entries[k].key = new char[strlen(key) + 1];
+                            newTable[idx].entries[k].value = new char[strlen(value) + 1];
+
+                            strcpy(newTable[idx].entries[k].key, key);
+                            strcpy(newTable[idx].entries[k].value, value);
+                            newTable[idx].entries[k].occupied = true;
+                            inserted = true;
+                            break;
+                        }
+                    }
+                } while (!inserted && attempt < newTableSize);
+                delete[] key;
+                delete[] value;
             }
-
-            do {
-                idx = calcIndex(primaryHash, attempt++, newTableSize, secondaryHash);
-            } while (newTable[idx].occupied && attempt < newTableSize);
-
-            if (!newTable[idx].occupied) {
-                newTable[idx].key = new char[strlen(table[i].key) + 1];
-                newTable[idx].value = new char[strlen(table[i].value) + 1];
-
-                strcpy(newTable[idx].key, table[i].key);
-                strcpy(newTable[idx].value, table[i].value);
-                newTable[idx].occupied = true;
-
-                delete[] table[i].key;
-                delete[] table[i].value;
-            } 
-#ifndef NDEBUG
-            else {
-                std::cerr << "Resize error: Could not insert key " << table[i].key << std::endl;
-            }
-#endif
         }
     }
 
@@ -99,7 +108,7 @@ void KeyValueStore::resize() {
     table = newTable;
     tableSize = newTableSize;
     isResizing = false;
-    numResizes++;
+    ++numResizes;
     std::cout << "Resizing finished! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 }
 
@@ -118,25 +127,24 @@ bool KeyValueStore::set(const char *key, const char *value) {
 
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
-#ifndef NDEBUG
-        std::cout << "Setting key = " << key << " calculated hash idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;    
-#endif
-        if (!table[idx].occupied) {
-            table[idx].key = new char[strlen(key) + 1];
-            table[idx].value = new char[strlen(value) + 1];
+        for (int i = 0; i < BUCKET_SIZE; ++i) {
+            if (!table[idx].entries[i].occupied) {
+                table[idx].entries[i].key = new char[strlen(key) + 1];
+                table[idx].entries[i].value = new char[strlen(value) + 1];
 
-            strcpy(table[idx].key, key);
-            strcpy(table[idx].value, value);
+                strcpy(table[idx].entries[i].key, key);
+                strcpy(table[idx].entries[i].value, value);
 
-            table[idx].occupied = true;
-            ++numEntries;
-            return true;
-        } else if (strcmp(table[idx].key, key) == 0) {
-            delete[] table[idx].value;
+                table[idx].entries[i].occupied = true;
+                ++numEntries;
+                return true;
+            } else if (strcmp(table[idx].entries[i].key, key) == 0) {
+                delete[] table[idx].entries[i].value;
 
-            table[idx].value = new char[strlen(value) + 1];            
-            strcpy(table[idx].value, value);
-            return true; // Update existing value
+                table[idx].entries[i].value = new char[strlen(value) + 1];
+                strcpy(table[idx].entries[i].value, value);
+                return true;
+            }
         }
     } while (attempt < tableSize);
 
@@ -146,7 +154,7 @@ bool KeyValueStore::set(const char *key, const char *value) {
     }
 #endif
     std::cerr << "Set error: Could not insert key " << key << " numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
-    return false; // Table full
+    return false;
 }
 
 const char *KeyValueStore::get(const char *key) {
@@ -160,23 +168,28 @@ const char *KeyValueStore::get(const char *key) {
 
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
-#ifndef NDEBUG
-        std::cout << "Getting key = " << key << " calculated hash idx = " << idx << std::endl;    
-#endif
-        if (table[idx].occupied && strcmp(table[idx].key, key) == 0) {
-#ifndef NDEBUG
-            std::cout << "Returning value = " << table[idx].value << " at key = " << key << " at idx = " << idx << std::endl;    
-#endif
-            return table[idx].value;
+        for (int i = 0; i < BUCKET_SIZE; ++i) {
+            if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0) {
+                return table[idx].entries[i].value;
+            }
         }
     } while (attempt < MAX_SCAN_ATTEMPTS);
+
 
 #ifndef NDEBUG
     std::cout << "Performing full scan for key = " << key << " numEntries = " << numEntries << " tableSize = " << tableSize  << " numResizes = " << numResizes << std::endl;
 #endif
     for (uint_fast64_t i = 0; i < tableSize - 1; ++i) {
-        if (table[i].occupied && strcmp(table[i].key, key) == 0) {
-            return table[i].value;
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            if (table[i].entries[j].occupied && strcmp(table[i].entries[j].key, key) == 0) {
+                numFullScans++;
+                auto val = table[i].entries[j].value;
+#ifndef NDEBUG
+                std::cout << "Forcefully overwriting key = " << key << " value = " << val << std::endl;
+#endif
+                this->set(key, val);
+                return val;
+            }
         }
     }
     numFullScans++;

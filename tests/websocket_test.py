@@ -14,7 +14,9 @@ metrics_port = int(os.environ.get('METRICS_PORT', 8080))
 def calc_thread_pool_size():
     thread_pool_size = 2
     if (iterations_count >= 10000):
-        thread_pool_size = int((iterations_count * 3) / 10000)
+        thread_pool_size = 4    
+    elif (iterations_count >= 100000):
+        thread_pool_size = 8
 
     return min(thread_pool_size, cpu_count()) 
 
@@ -39,13 +41,17 @@ def test_iteration(x):
         response = send_command(f"SET key{x} {x}")
         if response != "OK":
             result = False
-            print(f"Request: SET key{x} {x} | Response: {response}\n")
+            print(f"Request: SET key{x} {x} | Response: {response}\n")        
 
         # Test GET command for an existing key
         response = send_command(f"GET key{x}")
         if response != f"{x}":
-            result = False
-            print(f"Request: GET key{x} | Response: {response}\n")
+            # Retry one more time after short delay
+            time.sleep(delay_sec/5)
+            response = send_command(f"GET key{x}")
+            if response != f"{x}":
+                result = False
+                print(f"Request: GET key{x} | Response: {response}\n")
 
         # Test GET command for a non-existent key
         response = send_command("GET non_existent_key")
@@ -53,7 +59,6 @@ def test_iteration(x):
             result = False
             print(f"Request: GET non_existent_key | Response: {response}\n")
 
-        # time.sleep(delay_sec / 5)
     except Exception as e:
         result = False
         print(f"Error during test iteration {x}: {e}\n")

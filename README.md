@@ -19,6 +19,6 @@ docker run cache-tests:latest
 
 ## TODO
 - Continue working on collision resolution
-- Invent smart condition for performing full scan
-- Add different rehashing mechanism for tables of more than 100 000 or N items, should be some heuristic to use different hashing strategies depending on table size
+- Better memory management (unique_ptr? own mini garbage collector thread? both? check memory leaks and pointer usage?)
+- Fix server code issues (check how others develop similar servers)
 - Nice to have things (configs from env variables, refactoring, splitting into different headers, e.t.c.)

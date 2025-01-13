@@ -35,7 +35,7 @@ struct Query {
 };
 
 // Global variables
-KeyValueStore keyValueStore;//(40000);
+KeyValueStore keyValueStore;
 std::atomic<bool> running(true);
 
 // Prometheus metrics
@@ -64,6 +64,14 @@ auto& storage_num_entries = BuildGauge()
                          .Help("Number of entries in the storage")
                          .Register(*registry)
                          .Add({});
+
+
+auto& storage_full_scans = BuildGauge()
+                        .Name("storage_full_scans")
+                        .Help("Number of full scan operations executed by storage")
+                        .Register(*registry)
+                        .Add({});
+
 
 // Signal handler for graceful shutdown
 void handleSignal(int signal) {
@@ -174,7 +182,6 @@ int main() {
 
                 if (client_fd >= 0) {
                     // fcntl(client_fd, F_SETFL, O_NONBLOCK);
-
                     char buffer[1024] = {0};
                     int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
                     if (bytes_read > 0) {
@@ -209,9 +216,11 @@ int main() {
                         close(client_fd);
                     }
                 }
-                storage_num_entries.Set(keyValueStore.getNumEntries());   
             }
         }
+        // TODO: make asynchronous or even parallel
+        storage_num_entries.Set(keyValueStore.getNumEntries());   
+        storage_full_scans.Set(keyValueStore.getNumFullScans()); 
     }
 
     close(server_fd);

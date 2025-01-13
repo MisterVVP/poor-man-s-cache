@@ -7,22 +7,25 @@
 #include "highwayhash/highwayhash_target.h"
 #include "highwayhash/instruction_sets.h"
 
-
 class KeyValueStore {
     private:
+        static const int_fast8_t HH_KEY_LEN = 4;
+        static const int_fast8_t RESIZE_MULTIPLIER = 2;
+        static const unsigned int DOUBLE_HASHING_THRESHOLD = 500000;
+        static const int_fast8_t MAX_SCAN_ATTEMPTS = 5;
+        static const int_fast8_t BUCKET_SIZE = 8; // Number of entries per index
+
         struct Entry {
             char* key;
             char* value;
             bool occupied;
         };
 
-        static const int_fast8_t HH_KEY_LEN = 4;
-        static const int_fast8_t RESIZE_MULTIPLIER = 2;
-        static const unsigned int DOUBLE_HASHING_THRESHOLD = 500000;
-        static const int_fast8_t MAX_SCAN_ATTEMPTS = 5;
+        struct Bucket {
+            Entry entries[BUCKET_SIZE];
+        };
 
-
-        Entry *table;
+        Bucket *table;
         uint_fast64_t tableSize;
         uint_fast64_t numEntries;
         bool isResizing;
@@ -45,6 +48,10 @@ class KeyValueStore {
 
         uint_fast64_t getNumEntries() {
             return numEntries;
+        }
+
+        uint_fast64_t getNumFullScans() {
+            return numFullScans;
         }
 
         bool set(const char *key, const char *value);
