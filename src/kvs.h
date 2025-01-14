@@ -12,9 +12,9 @@ class KeyValueStore {
     private:
         static const int_fast8_t HH_KEY_LEN = 4;
         static const unsigned int DOUBLE_HASHING_THRESHOLD = 500000;
-        static const int_fast8_t MAX_READ_WRITE_ATTEMPTS = 10;
-        static const int_fast8_t BUCKET_SIZE = 8; // Number of entries per index
-        static const int_fast8_t RESIZE_MULTIPLIER = 2; // Resize multiplier
+        static const int_fast8_t MAX_READ_WRITE_ATTEMPTS = 5;
+        static const int_fast8_t BUCKET_SIZE = 4; // Number of entries per index
+        const double_t RESIZE_MULTIPLIER = 1.5; // Resize multiplier
 
         struct Entry {
             char* key;
@@ -29,9 +29,10 @@ class KeyValueStore {
         Bucket *table;
         uint_fast64_t tableSize;
         uint_fast64_t numEntries;
+        uint_fast64_t numCollisions;
         bool isResizing;
-        unsigned int numResizes;
-        unsigned int numFullScans;
+
+        uint_fast64_t numResizes;
         uint64_t hhkey[HH_KEY_LEN];
 
         std::queue<uint_fast64_t> primeQueue;
@@ -57,10 +58,6 @@ class KeyValueStore {
 
         uint_fast64_t getNumEntries() {
             return numEntries;
-        }
-
-        uint_fast64_t getNumFullScans() {
-            return numFullScans;
         }
 
         bool set(const char *key, const char *value);

@@ -1,6 +1,7 @@
 #include "kvs.h"
 
-KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), isResizing(false), numFullScans(0) {
+KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), isResizing(false) {
+    std::cout << "Table initialization started! initialSize = " << initialSize << std::endl;
     table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
@@ -17,10 +18,24 @@ KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize)
         hhkey[i] = dist(e2);
     }
     generatePrimeQueue();
+    std::cout << "Table initialization finished!" << std::endl;
 }
 
 KeyValueStore::~KeyValueStore() {
+    uint_fast64_t emptyEntries = 0;
+    uint_fast64_t emptyBuckets = 0;
+    for (uint_fast64_t i = 0; i < tableSize; ++i) {
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            if (!table[i].entries[j].occupied) {
+                emptyEntries++;
+                if (j == 0) {
+                    emptyBuckets++;
+                }
+            }
+        }
+    }
     cleanTable(table, tableSize);
+    std::cout << "Key value storage is destroyed! total number of collisions = " << numCollisions << " total number of empty buckets = " << emptyBuckets << " total number of empty slots = " << emptyEntries << std::endl;
 }
 
 bool KeyValueStore::isPrime(uint_fast64_t n) const {
@@ -58,7 +73,7 @@ void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
         }
     }
     delete[] tableToDelete;
-    std::cout << "Table cleanup finished!" << std::endl;     
+    std::cout << "Table cleanup finished!" << std::endl;    
 }
 
 uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2) const {
@@ -68,13 +83,13 @@ uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fas
     return (hash + attempt * attempt) % tableSize;
 }
 
-uint_fast64_t KeyValueStore::hash(const char *key) const {
+uint_fast64_t KeyValueStore::hash2(const char *key) const {
     highwayhash::HHResult64 primaryHash;
     highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &primaryHash);
     return primaryHash;
 }
 
-uint_fast64_t KeyValueStore::hash2(const char *key) const {
+uint_fast64_t KeyValueStore::hash(const char *key) const {
     uint_fast64_t hash(525201411107845655ull);
     for (; *key; ++key) {
         hash ^= *key;
@@ -112,9 +127,9 @@ void KeyValueStore::resize() {
                 uint_fast64_t idx;
                 uint_fast64_t primaryHash = hash(key);
                 uint_fast64_t secondaryHash = 0;
-                if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
+               /* if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
                     secondaryHash = hash2(key);
-                }
+                }*/
 
                 bool inserted = false;
                 do {
@@ -131,7 +146,7 @@ void KeyValueStore::resize() {
                             break;
                         }
                     }
-                } while (!inserted && attempt < newTableSize);
+                } while (!inserted && attempt < MAX_READ_WRITE_ATTEMPTS);
                 if (!inserted) {
                     std::cerr << "Resize Error: Could not insert key during migration." << std::endl;
                 }
@@ -144,21 +159,22 @@ void KeyValueStore::resize() {
     tableSize = newTableSize;
     isResizing = false;
     ++numResizes;
+#ifndef NDEBUG
     std::cout << "Resizing finished! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
+#endif
 }
 
 bool KeyValueStore::set(const char *key, const char *value) {
     if (numEntries >= (tableSize / RESIZE_MULTIPLIER) && !isResizing) { // Resize when load factor exceeds 50%
         resize();
     }
-
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
     uint_fast64_t primaryHash = hash(key);
     uint_fast64_t secondaryHash = 0;
-    if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
+    /*if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
         secondaryHash = hash2(key);
-    }
+    }*/
 
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
@@ -184,7 +200,9 @@ bool KeyValueStore::set(const char *key, const char *value) {
                 return true;
             }
         }
-    } while (attempt < tableSize);
+        numCollisions++;
+    } while (attempt < MAX_READ_WRITE_ATTEMPTS);
+
 
 #ifndef NDEBUG
     std::cerr << "Failed to insert key = " << key << " after " << attempt << " attempts." << std::endl;
@@ -197,50 +215,21 @@ const char *KeyValueStore::get(const char *key) {
     uint_fast64_t idx;
     uint_fast64_t primaryHash = hash(key);
     uint_fast64_t secondaryHash = 0;
-    if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
+    /*if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
         secondaryHash = hash2(key);
-    }
+    }*/
 
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0){
                 return table[idx].entries[i].value;
-            }
-            if (!table[idx].entries[i].occupied) {
-        #ifndef NDEBUG
-                std::cout << "Found empty space for key = " << key << " at idx = " << idx << " at entry = " << i << " tableSize = " << tableSize  << " attempt = " << attempt << std::endl;
-        #endif
-                for (uint_fast64_t a = 0; a < tableSize - 1; ++a) {
-                    for (int b = 0; b < BUCKET_SIZE; ++b) {
-                        if (table[a].entries[b].occupied && strcmp(table[a].entries[b].key, key) == 0) {
-                            numFullScans++;  
-                            #ifndef NDEBUG
-                            std::cout << "Performing full scan for key = " << key << " value = " << table[a].entries[b].value << std::endl;
-                            #endif
-
-                            table[idx].entries[i].key = new char[strlen(table[a].entries[b].key) + 1];
-                            table[idx].entries[i].value = new char[strlen(table[a].entries[b].value) + 1];
-                            table[idx].entries[i].occupied = true;
-
-                            strcpy(table[idx].entries[i].key, table[a].entries[b].key);
-                            strcpy(table[idx].entries[i].value, table[a].entries[b].value);
-
-                            #ifndef NDEBUG
-                            std::cout << "Moved key = " << key << " from index = " << a << " and entry = " << b << " to index = " << idx << " and entry = " << i  << std::endl;
-                            #endif
-                            return table[idx].entries[i].value;
-                        }
-                    }
-                }
-            }        
+            }     
         }     
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
 #ifndef NDEBUG
-    if (attempt == MAX_READ_WRITE_ATTEMPTS) {
-        std::cout << "Unable to find key = " << key << " at idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize  << " attempt = " << attempt << std::endl;
-    }
+    std::cout << "Unable to find key = " << key << " at idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize  << " attempt = " << attempt << std::endl;
 #endif
 
     return nullptr; // Key not found

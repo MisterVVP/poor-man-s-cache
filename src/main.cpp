@@ -65,14 +65,6 @@ auto& storage_num_entries = BuildGauge()
                          .Register(*registry)
                          .Add({});
 
-
-auto& storage_full_scans = BuildGauge()
-                        .Name("storage_full_scans")
-                        .Help("Number of full scan operations executed by storage")
-                        .Register(*registry)
-                        .Add({});
-
-
 // Signal handler for graceful shutdown
 void handleSignal(int signal) {
     if (signal == SIGINT) {
@@ -219,8 +211,7 @@ int main() {
             }
         }
         // TODO: make asynchronous or even parallel
-        storage_num_entries.Set(keyValueStore.getNumEntries());   
-        storage_full_scans.Set(keyValueStore.getNumFullScans()); 
+        storage_num_entries.Set(keyValueStore.getNumEntries());
     }
 
     close(server_fd);
