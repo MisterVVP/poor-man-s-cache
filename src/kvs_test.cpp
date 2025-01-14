@@ -1,41 +1,63 @@
 #include "kvs.h"
 #include <gtest/gtest.h>
-#include <string>
-#include <vector>
+#include <cstring>
 #include <iostream>
+#include <cstdlib>
 #include <unistd.h>
 
-// Helper function to generate test data
-std::vector<std::pair<std::string, std::string>> generateTestData(size_t count) {
-    std::vector<std::pair<std::string, std::string>> data;
-    for (size_t i = 0; i < count; ++i) {
-        data.emplace_back("key" + std::to_string(i), "value" + std::to_string(i));
-    }
-    return data;
+// Constants
+const size_t N = 10000000; // Number of elements to test
+
+// Helper function to generate keys
+char* generateKey(int_fast32_t index) {
+    // Calculate the size needed for "key" + digits of index + null terminator
+    size_t numDigits = snprintf(nullptr, 0, "%zu", index);
+    size_t keySize = 3 + numDigits + 1; // "key" + index + '\0'
+
+    char* key = new char[keySize];
+    snprintf(key, keySize, "key%zu", index);
+    return key;
 }
 
-const size_t N = 10000000; // Number of elements to test
+// Helper function to generate values
+char* generateValue(int_fast32_t index) {
+    // Calculate the size needed for "value" + digits of index + null terminator
+    size_t numDigits = snprintf(nullptr, 0, "%zu", index);
+    size_t valueSize = 5 + numDigits + 1; // "value" + index + '\0'
+
+    char* value = new char[valueSize];
+    snprintf(value, valueSize, "value%zu", index);
+    return value;
+}
 
 // Test adding and retrieving elements
 TEST(KeyValueStoreTest, AddAndRetrieveElements) {
     KeyValueStore kvStore;
 
-    auto testData = generateTestData(N);
-
     // Add elements to the key-value store
-    for (const auto& [key, value] : testData) {
-        auto res = kvStore.set(key.c_str(), value.c_str());
+    for (int_fast32_t i = 0; i < N; ++i) {
+        char* key = generateKey(i);
+        char* value = generateValue(i);
+        auto res = kvStore.set(key, value);
         ASSERT_TRUE(res);
+
+        // Free allocated memory for key and value
+        delete[] key;
+        delete[] value;
     }
-
-    std::cout << "Sleeping for 1 second..." << std::endl;
     usleep(1000000);
-
     // Retrieve elements and check correctness
-    for (const auto& [key, value] : testData) {
-        auto retrievedValue = kvStore.get(key.c_str());
+    for (int_fast32_t i = 0; i < N; ++i) {
+        char* key = generateKey(i);
+        char* value = generateValue(i);
+
+        const char* retrievedValue = kvStore.get(key);
         ASSERT_NE(retrievedValue, nullptr);
-        EXPECT_STREQ(retrievedValue, value.c_str());
+        EXPECT_STREQ(retrievedValue, value);
+
+        // Free allocated memory for key and value
+        delete[] key;
+        delete[] value;
     }
 }
 
@@ -43,29 +65,55 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
 TEST(KeyValueStoreTest, OverwriteElements) {
     KeyValueStore kvStore;
 
-    auto testData = generateTestData(N);
-
     // Add elements to the key-value store
-    for (const auto& [key, value] : testData) {
-        auto res = kvStore.set(key.c_str(), value.c_str());
+    for (int_fast32_t i = 0; i < N; ++i) {
+        char* key = generateKey(i);
+        char* value = generateValue(i);
+        auto res = kvStore.set(key, value);
         ASSERT_TRUE(res);
-    }
 
+        // Free allocated memory for key and value
+        delete[] key;
+        delete[] value;
+    }
+    
     // Overwrite elements with new values
-    for (size_t i = 0; i < N; ++i) {
-        std::string newValue = "new_value" + std::to_string(i);
-        ASSERT_TRUE(kvStore.set(testData[i].first.c_str(), newValue.c_str()));
+    for (int_fast32_t i = 0; i < N; ++i) {
+        char* key = generateKey(i);
+
+        // Calculate new value for overwriting
+        size_t numDigits = snprintf(nullptr, 0, "%zu", i);
+        size_t newValueSize = 9 + numDigits + 1; // "new_value" + index + '\0'
+
+        char* newValue = new char[newValueSize];
+        snprintf(newValue, newValueSize, "new_value%zu", i);
+
+        ASSERT_TRUE(kvStore.set(key, newValue));
+
+        // Free allocated memory for key and newValue
+        delete[] key;
+        delete[] newValue;
     }
 
-    std::cout << "Sleeping for 1 second..." << std::endl;
     usleep(1000000);
-
     // Retrieve elements and check correctness of overwritten values
-    for (size_t i = 0; i < N; ++i) {
-        std::string newValue = "new_value" + std::to_string(i);
-        const char* retrievedValue = kvStore.get(testData[i].first.c_str());
+    for (int_fast32_t i = 0; i < N; ++i) {
+        char* key = generateKey(i);
+
+        // Calculate the expected overwritten value
+        size_t numDigits = snprintf(nullptr, 0, "%zu", i);
+        size_t expectedValueSize = 9 + numDigits + 1; // "new_value" + index + '\0'
+
+        char* expectedValue = new char[expectedValueSize];
+        snprintf(expectedValue, expectedValueSize, "new_value%zu", i);
+
+        const char* retrievedValue = kvStore.get(key);
         ASSERT_NE(retrievedValue, nullptr);
-        EXPECT_STREQ(retrievedValue, newValue.c_str());
+        EXPECT_STREQ(retrievedValue, expectedValue);
+
+        // Free allocated memory for key and expectedValue
+        delete[] key;
+        delete[] expectedValue;
     }
 }
 

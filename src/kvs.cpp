@@ -16,16 +16,49 @@ KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize)
     for (int_fast8_t i = 0; i < HH_KEY_LEN; ++i) {
         hhkey[i] = dist(e2);
     }
+    generatePrimeQueue();
 }
 
 KeyValueStore::~KeyValueStore() {
-    for (uint_fast64_t i = 0; i < tableSize; ++i) {
+    cleanTable(table, tableSize);
+}
+
+bool KeyValueStore::isPrime(uint_fast64_t n) const {
+    if (n < 2) return false;
+    if (n % 2 == 0 && n > 2) return false;
+    for (uint_fast64_t i = 3; i <= std::sqrt(n); i += 2) {
+        if (n % i == 0) return false;
+    }
+    return true;
+}
+
+uint_fast64_t KeyValueStore::nextPrime(uint_fast64_t start) const {
+    while (!isPrime(start)) {
+        ++start;
+    }
+    return start;
+}
+
+void KeyValueStore::generatePrimeQueue() {
+    uint_fast64_t prime = 2053; // Start with the first prime
+    while (prime < std::numeric_limits<uint_fast64_t>::max() / RESIZE_MULTIPLIER) {
+        primeQueue.push(prime);
+        prime = nextPrime(prime * RESIZE_MULTIPLIER);
+    }
+}
+
+void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
+    std::cout << "Table cleanup started! size = " << size << std::endl;
+    for (uint_fast64_t i = 0; i < size; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
-            delete[] table[i].entries[j].key;
-            delete[] table[i].entries[j].value;
+            if (tableToDelete[i].entries[j].occupied) {
+                delete[] tableToDelete[i].entries[j].key;
+                delete[] tableToDelete[i].entries[j].value;
+            }
         }
     }
-    delete[] table;
+    delete[] tableToDelete;
+    std::cout << "Table cleanup finished!" << std::endl;     
 }
 
 uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2) const {
@@ -35,17 +68,15 @@ uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fas
     return (hash + attempt * attempt) % tableSize;
 }
 
-uint_fast64_t KeyValueStore::hash(const char *key) const
-{
+uint_fast64_t KeyValueStore::hash(const char *key) const {
     highwayhash::HHResult64 primaryHash;
     highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &primaryHash);
     return primaryHash;
 }
 
-// MurmurOAAT64
 uint_fast64_t KeyValueStore::hash2(const char *key) const {
     uint_fast64_t hash(525201411107845655ull);
-    for (;*key;++key) {
+    for (; *key; ++key) {
         hash ^= *key;
         hash *= 0x5bd1e9955bd1e995;
         hash ^= hash >> 47;
@@ -53,20 +84,23 @@ uint_fast64_t KeyValueStore::hash2(const char *key) const {
     return hash;
 }
 
-
 void KeyValueStore::resize() {
     isResizing = true;
 #ifndef NDEBUG
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
-    uint_fast64_t newTableSize = tableSize * RESIZE_MULTIPLIER;
+    if (primeQueue.empty()) {
+        throw std::runtime_error("Max hashtable size was reached. Cannot resize further.");
+    }
+
+    uint_fast64_t newTableSize = primeQueue.front();
+    primeQueue.pop();
     auto *newTable = new Bucket[newTableSize];
     for (uint_fast64_t i = 0; i < newTableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             newTable[i].entries[j].occupied = false;
         }
     }
-
 
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
@@ -98,13 +132,14 @@ void KeyValueStore::resize() {
                         }
                     }
                 } while (!inserted && attempt < newTableSize);
-                delete[] key;
-                delete[] value;
+                if (!inserted) {
+                    std::cerr << "Resize Error: Could not insert key during migration." << std::endl;
+                }
             }
         }
     }
 
-    delete[] table;
+    cleanTable(table, tableSize);
     table = newTable;
     tableSize = newTableSize;
     isResizing = false;
@@ -139,21 +174,21 @@ bool KeyValueStore::set(const char *key, const char *value) {
                 ++numEntries;
                 return true;
             } else if (strcmp(table[idx].entries[i].key, key) == 0) {
-                delete[] table[idx].entries[i].value;
+                //delete[] table[idx].entries[i].value;
 
                 table[idx].entries[i].value = new char[strlen(value) + 1];
                 strcpy(table[idx].entries[i].value, value);
+
+                // Ensure the entry is marked as occupied, even if overwritten
+                table[idx].entries[i].occupied = true;
                 return true;
             }
         }
     } while (attempt < tableSize);
 
 #ifndef NDEBUG
-    if (attempt > 1) {
-        std::cout << "Inserted key = " << key << " attempt = " << attempt << std::endl;
-    }
+    std::cerr << "Failed to insert key = " << key << " after " << attempt << " attempts." << std::endl;
 #endif
-    std::cerr << "Set error: Could not insert key " << key << " numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
     return false;
 }
 
@@ -169,29 +204,44 @@ const char *KeyValueStore::get(const char *key) {
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
-            if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0) {
+            if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0){
                 return table[idx].entries[i].value;
             }
-        }
-    } while (attempt < MAX_SCAN_ATTEMPTS);
+            if (!table[idx].entries[i].occupied) {
+        #ifndef NDEBUG
+                std::cout << "Found empty space for key = " << key << " at idx = " << idx << " at entry = " << i << " tableSize = " << tableSize  << " attempt = " << attempt << std::endl;
+        #endif
+                for (uint_fast64_t a = 0; a < tableSize - 1; ++a) {
+                    for (int b = 0; b < BUCKET_SIZE; ++b) {
+                        if (table[a].entries[b].occupied && strcmp(table[a].entries[b].key, key) == 0) {
+                            numFullScans++;  
+                            #ifndef NDEBUG
+                            std::cout << "Performing full scan for key = " << key << " value = " << table[a].entries[b].value << std::endl;
+                            #endif
 
+                            table[idx].entries[i].key = new char[strlen(table[a].entries[b].key) + 1];
+                            table[idx].entries[i].value = new char[strlen(table[a].entries[b].value) + 1];
+                            table[idx].entries[i].occupied = true;
+
+                            strcpy(table[idx].entries[i].key, table[a].entries[b].key);
+                            strcpy(table[idx].entries[i].value, table[a].entries[b].value);
+
+                            #ifndef NDEBUG
+                            std::cout << "Moved key = " << key << " from index = " << a << " and entry = " << b << " to index = " << idx << " and entry = " << i  << std::endl;
+                            #endif
+                            return table[idx].entries[i].value;
+                        }
+                    }
+                }
+            }        
+        }     
+    } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
 #ifndef NDEBUG
-    std::cout << "Performing full scan for key = " << key << " numEntries = " << numEntries << " tableSize = " << tableSize  << " numResizes = " << numResizes << std::endl;
-#endif
-    for (uint_fast64_t i = 0; i < tableSize - 1; ++i) {
-        for (int j = 0; j < BUCKET_SIZE; ++j) {
-            if (table[i].entries[j].occupied && strcmp(table[i].entries[j].key, key) == 0) {
-                numFullScans++;
-                auto val = table[i].entries[j].value;
-#ifndef NDEBUG
-                std::cout << "Forcefully overwriting key = " << key << " value = " << val << std::endl;
-#endif
-                this->set(key, val);
-                return val;
-            }
-        }
+    if (attempt == MAX_READ_WRITE_ATTEMPTS) {
+        std::cout << "Unable to find key = " << key << " at idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize  << " attempt = " << attempt << std::endl;
     }
-    numFullScans++;
+#endif
+
     return nullptr; // Key not found
 }
