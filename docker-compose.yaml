@@ -4,10 +4,13 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - empty=empty
+      - SERVER_PORT=9001
+      - METRICS_PORT=8080
     ports:
       - "9001:9001"
       - "8080:8080"
+    profiles:
+      - main
 
   tests:
     build:
@@ -16,7 +19,7 @@ services:
     environment:
       - CACHE_HOST=cache
       - CACHE_PORT=9001
-      - TEST_DELAY=1
-      - TEST_ITERATIONS=100000
-    depends_on:
-      - cache
+      - TEST_DELAY_SEC=1
+      - TEST_ITERATIONS=1000000
+    profiles:
+      - tests

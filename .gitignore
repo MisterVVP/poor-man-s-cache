@@ -45,3 +45,4 @@ build
 _deps
 CMakeUserPresets.json
 .vscode
+Research.md

@@ -5,11 +5,23 @@ When you got no money to buy enterprise and no desire to contribute to open sour
 
 Run cache and tests
 ```
-docker compose build
-docker compose up
+docker compose --profile main --profile tests build
+docker compose --profile main up --detach
+```
+Wait a minute or two for server to start. Check server container logs for `TCP server is ready to process incoming connections`
+
+After server has started run test script
+```
+docker compose --profile tests up
 ```
 
+You can check prometheus metrics while tests are running by opening http://localhost:8080/metrics
 
+Don't forget to shut detached container down by issuing
+
+```
+docker compose --profile main down
+```
 
 ### To run only unit tests
 ```

@@ -1,15 +1,17 @@
-#include "kvs.h"
 #include <gtest/gtest.h>
 #include <cstring>
 #include <iostream>
 #include <cstdlib>
 #include <unistd.h>
+#include <cstdint>
+#include "kvs.h"
+#include "env.h"
 
-// Constants
-const size_t N = 10000000; // Number of elements to test
+// Number of elements to test
+const size_t NUM_ELEMENTS = getIntFromEnv("NUM_ELEMENTS", true);
 
 // Helper function to generate keys
-char* generateKey(int_fast32_t index) {
+char* generateKey(int_fast64_t index) {
     // Calculate the size needed for "key" + digits of index + null terminator
     size_t numDigits = snprintf(nullptr, 0, "%zu", index);
     size_t keySize = 3 + numDigits + 1; // "key" + index + '\0'
@@ -20,7 +22,7 @@ char* generateKey(int_fast32_t index) {
 }
 
 // Helper function to generate values
-char* generateValue(int_fast32_t index) {
+char* generateValue(int_fast64_t index) {
     // Calculate the size needed for "value" + digits of index + null terminator
     size_t numDigits = snprintf(nullptr, 0, "%zu", index);
     size_t valueSize = 5 + numDigits + 1; // "value" + index + '\0'
@@ -35,7 +37,7 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
     KeyValueStore kvStore;
 
     // Add elements to the key-value store
-    for (int_fast32_t i = 0; i < N; ++i) {
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
         char* key = generateKey(i);
         char* value = generateValue(i);
         auto res = kvStore.set(key, value);
@@ -47,7 +49,7 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
     }
     usleep(1000000);
     // Retrieve elements and check correctness
-    for (int_fast32_t i = 0; i < N; ++i) {
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
         char* key = generateKey(i);
         char* value = generateValue(i);
 
@@ -66,7 +68,7 @@ TEST(KeyValueStoreTest, OverwriteElements) {
     KeyValueStore kvStore;
 
     // Add elements to the key-value store
-    for (int_fast32_t i = 0; i < N; ++i) {
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
         char* key = generateKey(i);
         char* value = generateValue(i);
         auto res = kvStore.set(key, value);
@@ -78,7 +80,7 @@ TEST(KeyValueStoreTest, OverwriteElements) {
     }
     
     // Overwrite elements with new values
-    for (int_fast32_t i = 0; i < N; ++i) {
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
         char* key = generateKey(i);
 
         // Calculate new value for overwriting
@@ -97,7 +99,7 @@ TEST(KeyValueStoreTest, OverwriteElements) {
 
     usleep(1000000);
     // Retrieve elements and check correctness of overwritten values
-    for (int_fast32_t i = 0; i < N; ++i) {
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
         char* key = generateKey(i);
 
         // Calculate the expected overwritten value

@@ -1,21 +1,12 @@
 #include "kvs.h"
 
-KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), isResizing(false) {
+KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), numCollisions(0), numSetOperations(0), isResizing(false) {
     std::cout << "Table initialization started! initialSize = " << initialSize << std::endl;
     table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             table[i].entries[j].occupied = false;
         }
-    }
-    std::random_device rd;
-    std::mt19937_64 e2(rd());
-    std::uniform_int_distribution<uint_fast64_t> dist(
-        std::numeric_limits<std::uint64_t>::min(),
-        std::numeric_limits<std::uint64_t>::max()
-    );
-    for (int_fast8_t i = 0; i < HH_KEY_LEN; ++i) {
-        hhkey[i] = dist(e2);
     }
     generatePrimeQueue();
     std::cout << "Table initialization finished!" << std::endl;
@@ -27,15 +18,18 @@ KeyValueStore::~KeyValueStore() {
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             if (!table[i].entries[j].occupied) {
-                emptyEntries++;
+                ++emptyEntries;
                 if (j == 0) {
-                    emptyBuckets++;
+                    ++emptyBuckets;
                 }
             }
         }
     }
+    std::cout << "Key value storage is being destroyed! numCollisions = " << numCollisions << " emptyBuckets = "
+              << emptyBuckets << " emptyEntries = " << emptyEntries << " tableSize = " << tableSize 
+              << " numEntries = " << numEntries << " numSetOperations = " << numSetOperations 
+              << " numResizes = " << numResizes << std::endl;
     cleanTable(table, tableSize);
-    std::cout << "Key value storage is destroyed! total number of collisions = " << numCollisions << " total number of empty buckets = " << emptyBuckets << " total number of empty slots = " << emptyEntries << std::endl;
 }
 
 bool KeyValueStore::isPrime(uint_fast64_t n) const {
@@ -56,14 +50,34 @@ uint_fast64_t KeyValueStore::nextPrime(uint_fast64_t start) const {
 
 void KeyValueStore::generatePrimeQueue() {
     uint_fast64_t prime = 2053; // Start with the first prime
-    while (prime < std::numeric_limits<uint_fast64_t>::max() / RESIZE_MULTIPLIER) {
+    primeQueue.push(prime);
+
+    double growthFactor = 2.0; // Start with a higher growth factor for small primes
+    while (prime < std::numeric_limits<uint_fast64_t>::max() / 10) {
+        uint_fast64_t nextCandidate = static_cast<uint_fast64_t>(prime * growthFactor);
+        prime = nextPrime(nextCandidate); // Get the next prime >= nextCandidate
         primeQueue.push(prime);
-        prime = nextPrime(prime * RESIZE_MULTIPLIER);
+
+        // Dynamically adjust the growth factor
+        if (prime < 100000) {
+            growthFactor = 4;
+        } else if (prime < 100000) {
+            growthFactor = 2; // Faster growth for small primes
+        } else if (prime < 1000000) {
+            growthFactor = 1.5; // Moderate growth for medium primes
+        } else if (prime < 10000000) {
+            growthFactor = 1.2; // Slower growth for larger primes
+        } else if (prime < 100000000) {
+            growthFactor = 1.1; // Moderate growth for medium primes
+        } else {
+            growthFactor = 1.05; // Very slow growth for very large primes
+        }
     }
 }
-
 void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
+#ifndef NDEBUG
     std::cout << "Table cleanup started! size = " << size << std::endl;
+#endif
     for (uint_fast64_t i = 0; i < size; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             if (tableToDelete[i].entries[j].occupied) {
@@ -73,20 +87,13 @@ void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
         }
     }
     delete[] tableToDelete;
-    std::cout << "Table cleanup finished!" << std::endl;    
+#ifndef NDEBUG
+    std::cout << "Table cleanup finished!" << std::endl;
+#endif
 }
 
-uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize, uint_fast64_t hash2) const {
-    if (hash2) {
-        return (hash + attempt * (1 + (hash2 % (tableSize - 1)))) % tableSize;
-    } 
+inline uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const {
     return (hash + attempt * attempt) % tableSize;
-}
-
-uint_fast64_t KeyValueStore::hash2(const char *key) const {
-    highwayhash::HHResult64 primaryHash;
-    highwayhash::InstructionSets::Run<highwayhash::HighwayHash>(hhkey, key, sizeof(key), &primaryHash);
-    return primaryHash;
 }
 
 uint_fast64_t KeyValueStore::hash(const char *key) const {
@@ -105,11 +112,13 @@ void KeyValueStore::resize() {
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
     if (primeQueue.empty()) {
-        throw std::runtime_error("Max hashtable size was reached. Cannot resize further.");
+        throw std::runtime_error("Max hashtable size reached. Cannot resize further.");
     }
 
+    // Get the next table size from the prime queue
     uint_fast64_t newTableSize = primeQueue.front();
     primeQueue.pop();
+
     auto *newTable = new Bucket[newTableSize];
     for (uint_fast64_t i = 0; i < newTableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
@@ -126,14 +135,10 @@ void KeyValueStore::resize() {
                 uint_fast64_t attempt = 0;
                 uint_fast64_t idx;
                 uint_fast64_t primaryHash = hash(key);
-                uint_fast64_t secondaryHash = 0;
-               /* if (newTableSize >= DOUBLE_HASHING_THRESHOLD) {
-                    secondaryHash = hash2(key);
-                }*/
 
                 bool inserted = false;
                 do {
-                    idx = calcIndex(primaryHash, attempt++, newTableSize, secondaryHash);
+                    idx = calcIndex(primaryHash, attempt++, newTableSize);
                     for (int k = 0; k < BUCKET_SIZE; ++k) {
                         if (!newTable[idx].entries[k].occupied) {
                             newTable[idx].entries[k].key = new char[strlen(key) + 1];
@@ -165,19 +170,16 @@ void KeyValueStore::resize() {
 }
 
 bool KeyValueStore::set(const char *key, const char *value) {
-    if (numEntries >= (tableSize / RESIZE_MULTIPLIER) && !isResizing) { // Resize when load factor exceeds 50%
+    if (numEntries >= ((tableSize * 70) / 100)  && !isResizing) {
         resize();
     }
+
+    ++numSetOperations;
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
     uint_fast64_t primaryHash = hash(key);
-    uint_fast64_t secondaryHash = 0;
-    /*if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
-        secondaryHash = hash2(key);
-    }*/
-
     do {
-        idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
+        idx = calcIndex(primaryHash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (!table[idx].entries[i].occupied) {
                 table[idx].entries[i].key = new char[strlen(key) + 1];
@@ -214,13 +216,8 @@ const char *KeyValueStore::get(const char *key) {
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
     uint_fast64_t primaryHash = hash(key);
-    uint_fast64_t secondaryHash = 0;
-    /*if (tableSize >= DOUBLE_HASHING_THRESHOLD) {
-        secondaryHash = hash2(key);
-    }*/
-
     do {
-        idx = calcIndex(primaryHash, attempt++, tableSize, secondaryHash);
+        idx = calcIndex(primaryHash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0){
                 return table[idx].entries[i].value;

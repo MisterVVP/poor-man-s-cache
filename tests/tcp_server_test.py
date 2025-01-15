@@ -7,7 +7,7 @@ import requests
 # Configuration from environment or defaults
 host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
-delay_sec = int(os.environ.get('TEST_DELAY', 1))
+delay_sec = int(os.environ.get('TEST_DELAY_SEC', 90))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
 metrics_port = int(os.environ.get('METRICS_PORT', 8080))
 

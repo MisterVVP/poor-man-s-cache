@@ -15,6 +15,7 @@
 #include <prometheus/histogram.h>
 #include <prometheus/gauge.h>
 #include "kvs.h"
+#include "env.h"
 
 #define MAX_EVENTS 10
 
@@ -109,8 +110,8 @@ void processQuery(const Query& query) {
 
 int main() {
     signal(SIGINT, handleSignal);
-
-    const int PORT = 9001;
+    auto server_port = getIntFromEnv("SERVER_PORT", true);
+    auto metrics_port = getIntFromEnv("METRICS_PORT", true);
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -123,7 +124,7 @@ int main() {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons(server_port);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         std::cerr << "Bind failed" << std::endl;
@@ -137,7 +138,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "Server started on port " << PORT << std::endl;
+    std::cout << "Server started on port " << server_port << std::endl;
 
     int epoll_fd = epoll_create1(0);
     if (epoll_fd == -1) {
@@ -159,9 +160,10 @@ int main() {
 
     epoll_event events[MAX_EVENTS];
 
-    Exposer exposer{"0.0.0.0:8080"}; // Expose on port 8080
+    auto metrics_url = std::format("0.0.0.0:{}", metrics_port);
+    Exposer exposer{metrics_url};
     exposer.RegisterCollectable(registry);
-    std::cout << "Metrics server started on port 8080" << std::endl;
+    std::cout << "Metrics server started on port " << metrics_port << std::endl;
 
     std::cout << "TCP server is ready to process incoming connections" << std::endl;
     while (running) {
