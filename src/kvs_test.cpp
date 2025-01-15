@@ -3,7 +3,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <unistd.h>
-#include <cstdint>
 #include "kvs.h"
 #include "env.h"
 

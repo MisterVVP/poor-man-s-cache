@@ -1,6 +1,7 @@
 #pragma once
 #include <cstring>
 #include <cstdlib>
+#include <cstdint>
 #include <iostream>
 #include <cmath>
 #include <queue>
