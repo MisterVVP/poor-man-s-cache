@@ -66,6 +66,12 @@ auto& storage_num_entries = BuildGauge()
                          .Register(*registry)
                          .Add({});
 
+auto& storage_num_resizes = BuildGauge()
+                         .Name("storage_num_resizes")
+                         .Help("Number of resizes in the storage")
+                         .Register(*registry)
+                         .Add({});
+
 // Signal handler for graceful shutdown
 void handleSignal(int signal) {
     if (signal == SIGINT) {
@@ -214,6 +220,7 @@ int main() {
         }
         // TODO: make asynchronous or even parallel
         storage_num_entries.Set(keyValueStore.getNumEntries());
+        storage_num_resizes.Set(keyValueStore.getNumResizes());
     }
 
     close(server_fd);

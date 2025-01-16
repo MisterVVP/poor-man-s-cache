@@ -33,6 +33,7 @@ docker run cache-tests:latest
 - Continue working on collision resolution
 - Better memory management (unique_ptr? own mini garbage collector thread? both? check memory leaks and pointer usage?)
 - Fix server code issues (check how others develop similar servers)
+- Add key retention
 - Check how table works with prime numbers vs normal numbers multiplied by 2
 - Performance metrics (calculate under #ifndef NDEBUG)
 - Nice to have things (configs from env variables, refactoring, splitting into different headers, e.t.c.)

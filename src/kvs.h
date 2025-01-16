@@ -26,7 +26,6 @@ class KeyValueStore {
         uint_fast64_t tableSize;
         uint_fast64_t numEntries;
         uint_fast64_t numCollisions;
-        uint_fast64_t numSetOperations;
 
         bool isResizing;
 
@@ -56,6 +55,10 @@ class KeyValueStore {
 
         uint_fast64_t getNumEntries() {
             return numEntries;
+        }
+
+        uint_fast64_t getNumResizes() {
+            return numResizes;
         }
 
         bool set(const char *key, const char *value);

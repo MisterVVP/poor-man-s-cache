@@ -1,6 +1,6 @@
 #include "kvs.h"
 
-KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), numCollisions(0), numSetOperations(0), isResizing(false) {
+KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), numCollisions(0), isResizing(false) {
     std::cout << "Table initialization started! initialSize = " << initialSize << std::endl;
     table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
@@ -27,8 +27,7 @@ KeyValueStore::~KeyValueStore() {
     }
     std::cout << "Key value storage is being destroyed! numCollisions = " << numCollisions << " emptyBuckets = "
               << emptyBuckets << " emptyEntries = " << emptyEntries << " tableSize = " << tableSize 
-              << " numEntries = " << numEntries << " numSetOperations = " << numSetOperations 
-              << " numResizes = " << numResizes << std::endl;
+              << " numEntries = " << numEntries << " numResizes = " << numResizes << std::endl;
     cleanTable(table, tableSize);
 }
 
@@ -174,7 +173,6 @@ bool KeyValueStore::set(const char *key, const char *value) {
         resize();
     }
 
-    ++numSetOperations;
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
     uint_fast64_t primaryHash = hash(key);
