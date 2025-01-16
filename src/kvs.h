@@ -6,12 +6,12 @@
 #include <cmath>
 #include <queue>
 
+#define BUCKET_SIZE 4
+#define MAX_READ_WRITE_ATTEMPTS 5
+#define RESIZE_THRESHOLD_PERCENTAGE 70
+
 class KeyValueStore {
     private:
-        static const unsigned int DOUBLE_HASHING_THRESHOLD = 500000;
-        static const uint_fast8_t MAX_READ_WRITE_ATTEMPTS = 5;
-        static const uint_fast8_t BUCKET_SIZE = 4;
-
         struct Entry {
             char* key;
             char* value;
@@ -29,7 +29,7 @@ class KeyValueStore {
 
         bool isResizing;
 
-        uint_fast64_t numResizes;
+        uint_fast32_t numResizes;
 
         std::queue<uint_fast64_t> primeQueue;
 
@@ -57,7 +57,7 @@ class KeyValueStore {
             return numEntries;
         }
 
-        uint_fast64_t getNumResizes() {
+        uint_fast32_t getNumResizes() {
             return numResizes;
         }
 

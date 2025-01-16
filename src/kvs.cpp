@@ -95,6 +95,10 @@ inline uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, u
     return (hash + attempt * attempt) % tableSize;
 }
 
+//-----------------------------------------------------------------------------
+// MurmurHash3 was written by Austin Appleby, and is placed in the public
+// domain. The author hereby disclaims copyright to this function source code.
+//-----------------------------------------------------------------------------
 uint_fast64_t KeyValueStore::hash(const char *key) const {
     uint_fast64_t hash(525201411107845655ull);
     for (; *key; ++key) {
@@ -104,6 +108,7 @@ uint_fast64_t KeyValueStore::hash(const char *key) const {
     }
     return hash;
 }
+//-----------------------------------------------------------------------------
 
 void KeyValueStore::resize() {
     isResizing = true;
@@ -169,7 +174,7 @@ void KeyValueStore::resize() {
 }
 
 bool KeyValueStore::set(const char *key, const char *value) {
-    if (numEntries >= ((tableSize * 70) / 100)  && !isResizing) {
+    if (numEntries >= ((tableSize * RESIZE_THRESHOLD_PERCENTAGE) / 100)  && !isResizing) {
         resize();
     }
 
@@ -190,7 +195,6 @@ bool KeyValueStore::set(const char *key, const char *value) {
                 ++numEntries;
                 return true;
             } else if (strcmp(table[idx].entries[i].key, key) == 0) {
-                //delete[] table[idx].entries[i].value;
 
                 table[idx].entries[i].value = new char[strlen(value) + 1];
                 strcpy(table[idx].entries[i].value, value);

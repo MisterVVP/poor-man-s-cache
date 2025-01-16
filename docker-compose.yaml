@@ -19,7 +19,43 @@ services:
     environment:
       - CACHE_HOST=cache
       - CACHE_PORT=9001
+      - CACHE_TYPE=custom
       - TEST_DELAY_SEC=1
       - TEST_ITERATIONS=100000000
     profiles:
       - tests
+
+  redis:
+    image: redis:latest
+    container_name: redis-server
+    ports:
+      - "6379:6379"
+    command: ["redis-server"]
+    profiles:
+      - redis
+
+  tests_redis:
+    build:
+      context: tests
+      dockerfile: Dockerfile
+    environment:
+      - CACHE_HOST=redis
+      - CACHE_PORT=6379
+      - CACHE_TYPE=redis
+      - TEST_DELAY_SEC=2
+      - TEST_ITERATIONS=100000000
+    profiles:
+      - redis
+    depends_on:
+      - redis
+
+  redis-exporter:
+    image: oliver006/redis_exporter:alpine
+    ports:
+      - 9121:9121
+    command:
+      - '--redis.addr=redis://redis:6379'
+    profiles:
+      - redis
+    depends_on:
+      - redis
