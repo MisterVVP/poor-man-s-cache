@@ -11,6 +11,7 @@ WORKDIR /app
 COPY . .
 
 ENV NUM_ELEMENTS=1000000
+RUN cd /app/src && g++ -m64 -std=c++20 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ encoding_test.cpp -lgtest -lgtest_main -o encoding_test && ./encoding_test
 RUN cd /app/src && g++ -std=c++20 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ kvs.cpp kvs_test.cpp -lgtest -lgtest_main -o kvs_test && ./kvs_test
 
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release

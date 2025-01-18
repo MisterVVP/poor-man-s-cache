@@ -1,7 +1,8 @@
 #include "kvs.h"
+#include "delta_encoding.h"
 
-KeyValueStore::KeyValueStore(uint_fast64_t initialSize) : tableSize(initialSize), numEntries(0), numResizes(0), numCollisions(0), isResizing(false) {
-    std::cout << "Table initialization started! initialSize = " << initialSize << std::endl;
+KeyValueStore::KeyValueStore(KeyValueStoreSettings settings) : tableSize(settings.initialSize), numEntries(0), numResizes(0), numCollisions(0), isResizing(false) {
+    std::cout << "Table initialization started! initialSize = " << tableSize << std::endl;
     table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
@@ -186,18 +187,24 @@ bool KeyValueStore::set(const char *key, const char *value) {
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (!table[idx].entries[i].occupied) {
                 table[idx].entries[i].key = new char[strlen(key) + 1];
-                table[idx].entries[i].value = new char[strlen(value) + 1];
-
                 strcpy(table[idx].entries[i].key, key);
-                strcpy(table[idx].entries[i].value, value);
+                auto encodedValue = value;
+                if (encodingEnabled) {
+                    encodedValue = DeltaEncoding::encode(value);
+                }
+                table[idx].entries[i].value = new char[strlen(encodedValue) + 1];
+                strcpy(table[idx].entries[i].value, encodedValue);
 
                 table[idx].entries[i].occupied = true;
                 ++numEntries;
                 return true;
             } else if (strcmp(table[idx].entries[i].key, key) == 0) {
-
-                table[idx].entries[i].value = new char[strlen(value) + 1];
-                strcpy(table[idx].entries[i].value, value);
+                auto encodedValue = value;
+                if (encodingEnabled) {
+                    encodedValue = DeltaEncoding::encode(value);
+                }
+                table[idx].entries[i].value = new char[strlen(encodedValue) + 1];
+                strcpy(table[idx].entries[i].value, encodedValue);
 
                 // Ensure the entry is marked as occupied, even if overwritten
                 table[idx].entries[i].occupied = true;
@@ -221,8 +228,8 @@ const char *KeyValueStore::get(const char *key) {
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
-            if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0){
-                return table[idx].entries[i].value;
+            if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0) {
+                return encodingEnabled && table[idx].entries[i].value ? DeltaEncoding::decode(table[idx].entries[i].value) : table[idx].entries[i].value;
             }     
         }     
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);

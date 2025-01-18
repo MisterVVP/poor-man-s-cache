@@ -10,6 +10,11 @@
 #define MAX_READ_WRITE_ATTEMPTS 5
 #define RESIZE_THRESHOLD_PERCENTAGE 70
 
+struct KeyValueStoreSettings {
+    uint_fast64_t initialSize = 2053;
+    bool encodingEnabled = false; //TODO : Delta encoding does not really compress data a lot, so encoding is better to be disabled by default
+};
+
 class KeyValueStore {
     private:
         struct Entry {
@@ -28,7 +33,7 @@ class KeyValueStore {
         uint_fast64_t numCollisions;
 
         bool isResizing;
-
+        bool encodingEnabled;
         uint_fast32_t numResizes;
 
         std::queue<uint_fast64_t> primeQueue;
@@ -46,7 +51,7 @@ class KeyValueStore {
         void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
 
     public:
-        KeyValueStore(uint_fast64_t initialSize = 2053);
+        KeyValueStore(KeyValueStoreSettings settings = KeyValueStoreSettings{});
         ~KeyValueStore();
 
         uint_fast64_t getTableSize() {

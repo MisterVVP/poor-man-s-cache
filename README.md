@@ -35,12 +35,13 @@ docker run cache-tests:latest
 docker compose --profile redis build
 docker compose --profile redis up
 ```
+Check redis metrics at http://localhost:9121/metrics
 
-## Results
+#### Results
 - Redis just stop processing requests normally at 10M or especially 100M operations. poor-man-s-cache works.
 - Redis eats a small amount of memory, poor-man-s-cache eats plenty
 - Redis stopped responding normally even for 10000 requests sent from 4 threads. Typical redis error is Response: Socket error: [Errno 99] Address not available. This might be related to some antiDDOS protection of Redis
-Check redis metrics at http://localhost:9121/metrics
+
 
 
 ## TODO
@@ -49,6 +50,7 @@ Check redis metrics at http://localhost:9121/metrics
 - Move everything server related to server.h or maybe server.cpp
 - Better memory management (unique_ptr? own mini garbage collector thread? both? check memory leaks and pointer usage?)
 - Improve server code
+- Refactor how tests are executed and organised
 - Add compression of stored key value pairs
 - Add key retention
 - Check how table works with prime numbers vs normal numbers multiplied by 2
