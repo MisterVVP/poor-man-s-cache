@@ -45,7 +45,7 @@ Check redis metrics at http://localhost:9121/metrics
 
 
 ## TODO
-- Fix bug with compression (rapid memory usage spike detected when testing with 10 million records during records overwriting test)
+- Check if we can reduce memory usage during decompression as well
 - Continue improving collision resolution
 - Move everything metrics related to metrics.h or maybe metrics.cpp
 - Move everything server related to server.h or maybe server.cpp

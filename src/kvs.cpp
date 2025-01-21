@@ -175,8 +175,7 @@ char* KeyValueStore::compress(const char* value) {
         delete[] compressedResult;
         return result;
     } else {
-        delete[] compressedResult;
-        //std::cout << "Unable to properly compress value = " << value << " compressedResult = " << compressedResult << " compressedResult length = " << strlen(compressedResult) << " valueLen = " << valueLen << std::endl;
+        delete[] compressedResult;        
         return nullptr;
     }
 
@@ -385,8 +384,10 @@ bool KeyValueStore::set(const char *key, const char *value) {
         idx = calcIndex(primaryHash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (!table[idx].entries[i].occupied) {
+
                 table[idx].entries[i].key = new char[strlen(key) + 1];
                 strcpy(table[idx].entries[i].key, key);
+
                 if (compressionEnabled) {
                     auto compressed = compress(value);
                     if (compressed) {
@@ -404,12 +405,14 @@ bool KeyValueStore::set(const char *key, const char *value) {
                 ++numEntries;
                 return true;
             } else if (strcmp(table[idx].entries[i].key, key) == 0) {
+
+                delete[] table[idx].entries[i].value;
+
                 if (compressionEnabled) {
                     auto compressed = compress(value);
                     if (compressed) {
-                        delete[] table[idx].entries[i].value;
                         table[idx].entries[i].value = compressed;
-                    } else {
+                    } else {                        
                         table[idx].entries[i].value = new char[strlen(value) + 1];
                         strcpy(table[idx].entries[i].value, value);
                     }

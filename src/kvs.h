@@ -12,7 +12,7 @@
 #define BUCKET_SIZE 4
 #define MAX_READ_WRITE_ATTEMPTS 5
 #define RESIZE_THRESHOLD_PERCENTAGE 70
-#define FREQ_DICT_SIZE 1024
+#define FREQ_DICT_SIZE 512
 
 struct KeyValueStoreSettings {
     uint_fast64_t initialSize = 2053;
