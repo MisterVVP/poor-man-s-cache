@@ -54,7 +54,7 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
 
         const char* retrievedValue = kvStore.get(key);
         ASSERT_NE(retrievedValue, nullptr);
-        EXPECT_STREQ(retrievedValue, value);
+        ASSERT_STREQ(retrievedValue, value);
 
         // Free allocated memory for key and value
         delete[] key;
@@ -110,7 +110,7 @@ TEST(KeyValueStoreTest, OverwriteElements) {
 
         const char* retrievedValue = kvStore.get(key);
         ASSERT_NE(retrievedValue, nullptr);
-        EXPECT_STREQ(retrievedValue, expectedValue);
+        ASSERT_STREQ(retrievedValue, expectedValue);
 
         // Free allocated memory for key and expectedValue
         delete[] key;
