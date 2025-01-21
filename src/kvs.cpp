@@ -46,7 +46,7 @@ KeyValueStore::~KeyValueStore() {
     std::cout << "Key value storage is being destroyed! numCollisions = " << numCollisions << " emptyBuckets = "
               << emptyBuckets << " emptyEntries = " << emptyEntries << " tableSize = " << tableSize 
               << " numEntries = " << numEntries << " numResizes = " << numResizes << std::endl;
-    cleanTable(table, tableSize, true);
+    cleanTable(table, tableSize);
     if (compressionEnabled) {        
         delete compressDictionary;
     }
@@ -94,7 +94,7 @@ void KeyValueStore::generatePrimeQueue() {
         }
     }
 }
-void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size, bool dropTable) {
+void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
 #ifndef NDEBUG
     std::cout << "Table cleanup started! size = " << size << std::endl;
 #endif
@@ -170,8 +170,9 @@ char* KeyValueStore::compress(const char* value) {
     compressedResult[compressedPos] = '\0';
     
     if (strlen(compressedResult) < valueLen) {
-        char* result = new char[strlen(compressedResult) + 1];
-        strcpy(result, compressedResult);
+        auto rSize = strlen(compressedResult) + 1;
+        char* result = new char[rSize];
+        memcpy(result, compressedResult, rSize);
         delete[] compressedResult;
         return result;
     } else {
@@ -277,10 +278,6 @@ void KeyValueStore::rebuildCompressionDictionary() {
 
     for (size_t i = 0; i < frequencyCount; ++i) {
         if (frequencies[i].count > 1) {
-#ifndef NDEBUG
-                std::cout << "Adding to compression dictionary: key = " << std::to_string(i).c_str() << " value = " << frequencies[i].substring
-                          << " freq count = " << frequencies[i].count << std::endl;
-#endif
                 compressDictionary->set(std::to_string(i).c_str(), frequencies[i].substring);
         }
     }
@@ -288,23 +285,12 @@ void KeyValueStore::rebuildCompressionDictionary() {
     for (size_t i = 0; i < frequencyCount; ++i) {
         delete[] frequencies[i].substring;
     }
-
-#ifndef NDEBUG
-    std::cout << "Compression dictionary content: " << std::endl;
-    for (uint_fast64_t i = 0; i < compressDictionary->tableSize; ++i) {
-        for (int j = 0; j < BUCKET_SIZE; ++j) {
-            if (compressDictionary->table[i].entries[j].occupied) {
-                std::cout << "compressDictionary->table[i].entries[j].key = " << compressDictionary->table[i].entries[j].key 
-                          << " compressDictionary->table[i].entries[j].value = " << compressDictionary->table[i].entries[j].value << std::endl;
-            }
-        }
-    }
-#endif
 }
 
 void KeyValueStore::resize() {
     isResizing = true;
 #ifndef NDEBUG
+    auto start = std::chrono::high_resolution_clock::now();
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
     uint_fast64_t newTableSize;
@@ -330,7 +316,8 @@ void KeyValueStore::resize() {
             if (table[i].entries[j].occupied) {
                 const char* key = table[i].entries[j].key;
                 const char* value = table[i].entries[j].value;
-
+                auto kSize = strlen(key) + 1;
+                auto vSize = strlen(value) + 1;
                 uint_fast64_t attempt = 0;
                 uint_fast64_t idx;
                 uint_fast64_t primaryHash = hash(key);
@@ -340,13 +327,14 @@ void KeyValueStore::resize() {
                     idx = calcIndex(primaryHash, attempt++, newTableSize);
                     for (int k = 0; k < BUCKET_SIZE; ++k) {
                         if (!newTable[idx].entries[k].occupied) {
-                            newTable[idx].entries[k].key = new char[strlen(key) + 1];
-                            newTable[idx].entries[k].value = new char[strlen(value) + 1];
-
-                            strcpy(newTable[idx].entries[k].key, key);
-                            strcpy(newTable[idx].entries[k].value, value);
+                            newTable[idx].entries[k].key = new char[kSize];
+                            newTable[idx].entries[k].value = new char[vSize];
+                            memcpy(newTable[idx].entries[k].key, key, kSize);
+                            memcpy(newTable[idx].entries[k].value, value, vSize);
                             newTable[idx].entries[k].occupied = true;
                             inserted = true;
+                            delete[] key;
+                            delete[] value;
                             break;
                         }
                     }
@@ -358,18 +346,29 @@ void KeyValueStore::resize() {
         }
     }
 
-    cleanTable(table, tableSize, true);
+    delete[] table;
+
     table = newTable;
     tableSize = newTableSize;
 
-    if (compressionEnabled) {
+    if (compressionEnabled && !(numResizes % COMPRESSION_FREQUENCY)) {
+#ifndef NDEBUG
+    auto rcd_start = std::chrono::high_resolution_clock::now();
+#endif
         rebuildCompressionDictionary();
+#ifndef NDEBUG
+    auto rcd_stop = std::chrono::high_resolution_clock::now();
+    auto rcd_dur = std::chrono::duration_cast<std::chrono::milliseconds>(rcd_stop - rcd_start);
+    std::cout << "Rebuilding of compression dictionary took " << rcd_dur.count() << " ms !" << std::endl;
+#endif
     }
     isResizing = false;
     ++numResizes;
-//#ifndef NDEBUG
-    std::cout << "Resizing finished! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
-//#endif
+#ifndef NDEBUG
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    std::cout << "Resizing finished in " << duration.count() << " ms ! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
+#endif
 }
 
 bool KeyValueStore::set(const char *key, const char *value) {
@@ -380,25 +379,27 @@ bool KeyValueStore::set(const char *key, const char *value) {
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
     uint_fast64_t primaryHash = hash(key);
+    auto kSize = strlen(key) + 1;
+    auto vSize = strlen(value) + 1;
     do {
         idx = calcIndex(primaryHash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (!table[idx].entries[i].occupied) {
 
-                table[idx].entries[i].key = new char[strlen(key) + 1];
-                strcpy(table[idx].entries[i].key, key);
+                table[idx].entries[i].key = new char[kSize];
+                memcpy(table[idx].entries[i].key, key, kSize);
 
                 if (compressionEnabled) {
                     auto compressed = compress(value);
                     if (compressed) {
                         table[idx].entries[i].value = compressed;
                     } else {
-                        table[idx].entries[i].value = new char[strlen(value) + 1];
-                        strcpy(table[idx].entries[i].value, value);
+                        table[idx].entries[i].value = new char[vSize];
+                        memcpy(table[idx].entries[i].value, value, vSize);
                     }
                 } else {
-                    table[idx].entries[i].value = new char[strlen(value) + 1];
-                    strcpy(table[idx].entries[i].value, value);
+                    table[idx].entries[i].value = new char[vSize];
+                    memcpy(table[idx].entries[i].value, value, vSize);
                 }
 
                 table[idx].entries[i].occupied = true;
@@ -413,12 +414,12 @@ bool KeyValueStore::set(const char *key, const char *value) {
                     if (compressed) {
                         table[idx].entries[i].value = compressed;
                     } else {                        
-                        table[idx].entries[i].value = new char[strlen(value) + 1];
-                        strcpy(table[idx].entries[i].value, value);
+                        table[idx].entries[i].value = new char[vSize];
+                        memcpy(table[idx].entries[i].value, value, vSize);
                     }
                 } else {
-                    table[idx].entries[i].value = new char[strlen(value) + 1];
-                    strcpy(table[idx].entries[i].value, value);
+                    table[idx].entries[i].value = new char[vSize];
+                    memcpy(table[idx].entries[i].value, value, vSize);
                 }
                 return true;
             }

@@ -8,11 +8,17 @@
 #include <queue>
 #include <algorithm>
 
+#ifndef NDEBUG
+#include <chrono>
+#endif
+
 #define UNIT_SEPARATOR 0x1F
 #define BUCKET_SIZE 4
 #define MAX_READ_WRITE_ATTEMPTS 5
 #define RESIZE_THRESHOLD_PERCENTAGE 70
 #define FREQ_DICT_SIZE 512
+#define COMPRESSION_FREQUENCY 3
+
 
 struct KeyValueStoreSettings {
     uint_fast64_t initialSize = 2053;
@@ -43,7 +49,7 @@ private:
     void resize();
     uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
     uint_fast64_t hash(const char *key) const;
-    void cleanTable(Bucket* tableToDelete, uint_fast64_t size, bool dropTable = true);
+    void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
 
     
     bool usePrimeNumbers;

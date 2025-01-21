@@ -25,8 +25,10 @@ docker compose --profile main down
 ```
 
 ### To run only unit tests
+!Use --build-arg GPP_FLAGS="-m64 -std=c++20 -O3 -DNDEBUG" to disable debug code!
+
 ```
-docker build -f Dockerfile.utests . -t cache-tests:latest
+docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++20 -O3" . -t cache-tests:latest
 docker run cache-tests:latest
 ```
 
@@ -47,6 +49,8 @@ Check redis metrics at http://localhost:9121/metrics
 ## TODO
 - Check if we can reduce memory usage during decompression as well
 - Continue improving collision resolution
+- Add profiler
+- Review compression algorithm
 - Move everything metrics related to metrics.h or maybe metrics.cpp
 - Move everything server related to server.h or maybe server.cpp
 - Better memory management (unique_ptr? own mini garbage collector thread? both? check memory leaks and pointer usage?)
