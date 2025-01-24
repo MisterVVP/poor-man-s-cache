@@ -2,6 +2,18 @@
 When you got no money to buy enterprise tooling and no desire to contribute to open source - build your own thing.
 Another pet project to practice.
 
+## Goals and philosophy
+
+### Goals
+- Build alternative to Redis cache from scratch. Requirements are limited to simple distributed keyvalue storage for string data.
+
+### Philosophy (or means to achieve goals)
+- Choose relatively fast programming language, which I am relatively familiar with (Chose C++)
+- Focus on performance, not readability. Use as little of standard std:: code as possible and prefer plain C-like code over ideomatic C++ approaches.
+- Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string is fast enough for a few operation, but should be avoided for highload)
+- Prefer manual memory management instead of smart pointers
+
+
 ## Quick start
 
 Run cache and tests
@@ -23,12 +35,28 @@ Don't forget to shut detached container down by issuing
 ```
 docker compose --profile main down
 ```
+### To debug memory issues
+
+Run cache (in debug mode) and tests
+```
+docker compose --profile debug --profile tests-debug build
+docker compose --profile debug up --detach
+```
+Wait a few moments for server to start (debug mode does not require long initialisation time). Check server container logs for `TCP server is ready to process incoming connections`
+
+After server has started run test script
+```
+docker compose --profile tests-debug up
+```
+
+Check valgrind output in container std during and after execution.
+
 
 ### To run only unit tests
-!Use --build-arg GPP_FLAGS="-m64 -std=c++20 -O3 -DNDEBUG" to disable debug code!
+!Use --build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG" to disable debug code!
 
 ```
-docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++20 -O3" . -t cache-tests:latest
+docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++26 -O3" . -t cache-tests:latest
 docker run cache-tests:latest
 ```
 

@@ -5,7 +5,7 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
       numEntries(0),
       numCollisions(0),
       numResizes(0),
-      isResizing(false),
+      isResizing(0),
       compressionEnabled(settings.compressionEnabled),
       usePrimeNumbers(settings.usePrimeNumbers) {
 
@@ -13,9 +13,12 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
     table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
-            table[i].entries[j].occupied = false;
+            table[i].entries[j].occupied = 0;
         }
     }
+#ifndef NDEBUG
+    usePrimeNumbers = false; // disable prime numbers generation for debugging purposes, because it's slow
+#endif
     if (usePrimeNumbers) {
         generatePrimeQueue();
     }
@@ -133,17 +136,23 @@ uint_fast64_t KeyValueStore::hash(const char *key) const {
 
 // Performs value compression and allocates new value in memory
 char* KeyValueStore::compress(const char* value) {
+    // Does not make sense to compress nullptr or nothing
     if (!value || value[0] == '\0') {
         return nullptr;
     }
     const size_t valueLen = strlen(value);
-    char* compressedResult = new char[valueLen];
 
+    // Does not make sense to compress small data
+    if (valueLen < MIN_COMPRESSED_SIZE) {
+        return nullptr;
+    }
+
+    char* compressedResult = new char[valueLen + 1];
     size_t compressedPos = 0;
     size_t i = 0;
 
     while (i < valueLen) {
-        bool matchFound = false;
+        int_fast8_t matchFound = 0;
 
         // Check for matches in compressDictionary
         for (size_t dictIndex = 0; dictIndex < compressDictionary->getNumEntries(); ++dictIndex) {
@@ -156,7 +165,7 @@ char* KeyValueStore::compress(const char* value) {
                         compressedPos += sprintf(compressedResult + compressedPos, "%zu", dictIndex);
                         compressedResult[compressedPos++] = UNIT_SEPARATOR;
                         i += entryLen;
-                        matchFound = true;
+                        matchFound ^= 1;
                         break;
                 }
             }
@@ -167,12 +176,12 @@ char* KeyValueStore::compress(const char* value) {
             compressedResult[compressedPos++] = value[i++];
         }
     }
-    compressedResult[compressedPos] = '\0';
-    
-    if (strlen(compressedResult) < valueLen) {
-        auto rSize = strlen(compressedResult) + 1;
-        char* result = new char[rSize];
-        memcpy(result, compressedResult, rSize);
+    compressedResult[valueLen] = '\0';
+
+    if (compressedPos < valueLen) {
+        char* result = new char[compressedPos+1];
+        memcpy(result, compressedResult, compressedPos);
+        result[compressedPos] = '\0';
         delete[] compressedResult;
         return result;
     } else {
@@ -184,7 +193,7 @@ char* KeyValueStore::compress(const char* value) {
 
 // Performs value decompression and allocates new value in memory
 char* KeyValueStore::decompress(const char* compressedValue) {
-    if (!compressedValue || compressedValue[0] == '\0') {
+    if (!compressedValue || compressedValue == nullptr || compressedValue[0] == '\0') {
         return nullptr; // Handle empty values
     }
     const size_t compressedLen = strlen(compressedValue);
@@ -213,7 +222,7 @@ char* KeyValueStore::decompress(const char* compressedValue) {
         }
     }
 
-    decompressedResult[decompressedPos] = '\0'; // Null-terminate
+    decompressedResult[decompressedPos] = '\0';
     return decompressedResult;
 }
 
@@ -238,22 +247,22 @@ void KeyValueStore::rebuildCompressionDictionary() {
                         substring[length] = '\0'; // Null-terminate
 
                         // Check if substring is already in the frequency list
-                        bool found = false;
+                        int_fast8_t found = 0;
                         for (size_t j = 0; j < frequencyCount; ++j) {
                             if (strcmp(frequencies[j].substring, substring) == 0) {
                                 ++frequencies[j].count;
-                                found = true;
+                                found ^= 1;
                                 delete[] substring;
                                 break;
                             }
                         }
                         
                         if (!found) {
-                            bool skip = false;
+                            int_fast8_t skip = 0;
                             for (int k = 0; k < frequencyCount; ++k) {
                                 if (std::strstr(frequencies[k].substring, substring) != NULL)
                                 {
-                                    skip = true;
+                                    skip ^= 1;
                                     break;
                                 }
                             }
@@ -288,7 +297,7 @@ void KeyValueStore::rebuildCompressionDictionary() {
 }
 
 void KeyValueStore::resize() {
-    isResizing = true;
+    isResizing ^= 1;
 #ifndef NDEBUG
     auto start = std::chrono::high_resolution_clock::now();
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
@@ -307,34 +316,32 @@ void KeyValueStore::resize() {
     auto *newTable = new Bucket[newTableSize];
     for (uint_fast64_t i = 0; i < newTableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
-            newTable[i].entries[j].occupied = false;
+            newTable[i].entries[j].occupied = 0;
         }
     }
 
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             if (table[i].entries[j].occupied) {
-                const char* key = table[i].entries[j].key;
-                const char* value = table[i].entries[j].value;
-                auto kSize = strlen(key) + 1;
-                auto vSize = strlen(value) + 1;
+                auto kSize = strlen(table[i].entries[j].key) + 1;
+                auto vSize = strlen(table[i].entries[j].value) + 1;
                 uint_fast64_t attempt = 0;
                 uint_fast64_t idx;
-                uint_fast64_t primaryHash = hash(key);
+                uint_fast64_t primaryHash = hash(table[i].entries[j].key);
 
-                bool inserted = false;
+                int_fast8_t inserted = 0;
                 do {
                     idx = calcIndex(primaryHash, attempt++, newTableSize);
                     for (int k = 0; k < BUCKET_SIZE; ++k) {
                         if (!newTable[idx].entries[k].occupied) {
                             newTable[idx].entries[k].key = new char[kSize];
                             newTable[idx].entries[k].value = new char[vSize];
-                            memcpy(newTable[idx].entries[k].key, key, kSize);
-                            memcpy(newTable[idx].entries[k].value, value, vSize);
-                            newTable[idx].entries[k].occupied = true;
-                            inserted = true;
-                            delete[] key;
-                            delete[] value;
+                            memcpy(newTable[idx].entries[k].key, table[i].entries[j].key, kSize);
+                            memcpy(newTable[idx].entries[k].value, table[i].entries[j].value, vSize);
+                            newTable[idx].entries[k].occupied ^= 1;
+                            inserted ^= 1;
+                            delete[] table[i].entries[j].key;
+                            delete[] table[i].entries[j].value;
                             break;
                         }
                     }
@@ -362,7 +369,7 @@ void KeyValueStore::resize() {
     std::cout << "Rebuilding of compression dictionary took " << rcd_dur.count() << " ms !" << std::endl;
 #endif
     }
-    isResizing = false;
+    isResizing ^= 1;
     ++numResizes;
 #ifndef NDEBUG
     auto stop = std::chrono::high_resolution_clock::now();
@@ -402,7 +409,7 @@ bool KeyValueStore::set(const char *key, const char *value) {
                     memcpy(table[idx].entries[i].value, value, vSize);
                 }
 
-                table[idx].entries[i].occupied = true;
+                table[idx].entries[i].occupied ^= 1;
                 ++numEntries;
                 return true;
             } else if (strcmp(table[idx].entries[i].key, key) == 0) {
@@ -445,10 +452,6 @@ const char* KeyValueStore::get(const char *key) {
             }
         }
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
-
-#ifndef NDEBUG
-    std::cout << "Unable to find key = " << key << " at idx = " << idx << " numEntries = " << numEntries << " tableSize = " << tableSize  << " attempt = " << attempt << std::endl;
-#endif
 
     return nullptr;
 }

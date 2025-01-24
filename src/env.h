@@ -5,13 +5,25 @@
 #include <iostream>
 
 int getIntFromEnv(const char * env_var_name, bool isRequired)  {
-    const char* env_server_port = getenv(env_var_name);
-    if (env_server_port != nullptr) {
-        return atoi(env_server_port);
+    const char* env_var = std::getenv(env_var_name);
+    if (env_var != nullptr) {
+        return atoi(env_var);
     }
     else if (isRequired) {
         std::cerr << "Environment variable " << env_var_name << " not found." << std::endl;
         exit(1);
     }
     return 0;
+}
+
+const char* getStrFromEnv(const char* env_var_name, bool isRequired)  {
+    const char* env_var = getenv(env_var_name);
+    if (env_var != nullptr) {
+        return env_var;
+    }
+    else if (isRequired) {
+        std::cerr << "Environment variable " << env_var_name << " not found." << std::endl;
+        exit(1);
+    }
+    return nullptr;
 }

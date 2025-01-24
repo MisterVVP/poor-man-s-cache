@@ -74,14 +74,14 @@ def test_iteration(x):
     result = True
     try:
         # Test SET command
-        response = send_command(f"SET key{x} {x}")
+        response = send_command(f"SET key{x} value{x}")
         if response != "OK":
             result = False
-            print(f"Request: SET key{x} {x} | Response: {response}\n")
+            print(f"Request: SET key{x} value{x} | Response: {response}\n")
 
         # Test GET command for an existing key
         response = send_command(f"GET key{x}")
-        expected_response = f"{x}" if cache_type == "redis" else f"{x}"
+        expected_response = f"value{x}" if cache_type == "redis" else f"value{x}"
         if response != expected_response:
             # Retry one more time after short delay
             time.sleep(delay_sec / 5)

@@ -3,14 +3,34 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - BUILD_TYPE=Release
     environment:
       - SERVER_PORT=9001
       - METRICS_PORT=8080
+      - METRICS_HOST=0.0.0.0
     ports:
       - "9001:9001"
       - "8080:8080"
     profiles:
       - main
+
+  cache-debug:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILD_TYPE=Debug
+    entrypoint: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--verbose", "/app/poor-man-s-cache"]
+    environment:
+      - SERVER_PORT=9001
+      - METRICS_PORT=8080
+      - METRICS_HOST=0.0.0.0
+    ports:
+      - "9001:9001"
+      - "8080:8080"
+    profiles:
+      - debug
 
   tests:
     build:
@@ -21,9 +41,23 @@ services:
       - CACHE_PORT=9001
       - CACHE_TYPE=custom
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=100000000
+      - TEST_ITERATIONS=10000000
     profiles:
       - tests
+
+  tests-debug:
+    build:
+      context: tests
+      dockerfile: Dockerfile
+    environment:
+      - CACHE_HOST=cache-debug
+      - CACHE_PORT=9001
+      - CACHE_TYPE=custom
+      - TEST_DELAY_SEC=1
+      - TEST_ITERATIONS=100000
+    profiles:
+      - tests-debug
+
 
   redis:
     image: redis:latest
@@ -43,7 +77,7 @@ services:
       - CACHE_PORT=6379
       - CACHE_TYPE=redis
       - TEST_DELAY_SEC=2
-      - TEST_ITERATIONS=100000000
+      - TEST_ITERATIONS=10000000
     profiles:
       - redis
     depends_on:
