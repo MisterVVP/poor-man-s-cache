@@ -1,4 +1,5 @@
 # poor-man-s-cache
+
 When you got no money to buy enterprise tooling and no desire to contribute to open source - build your own thing.
 Another pet project to practice.
 
@@ -8,7 +9,6 @@ Another pet project to practice.
 - Build alternative to Redis cache from scratch. Requirements are limited to simple distributed keyvalue storage for string data.
 
 ### Philosophy (or means to achieve goals)
-- Choose relatively fast programming language, which I am relatively familiar with (Chose C++)
 - Focus on performance, not readability. Use as little of standard std:: code as possible and prefer plain C-like code over ideomatic C++ approaches.
 - Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string is fast enough for a few operation, but should be avoided for highload)
 - Prefer manual memory management instead of smart pointers
@@ -36,8 +36,10 @@ Don't forget to shut detached container down by issuing
 docker compose --profile main down
 ```
 ### To debug memory issues
+> [!WARNING]
+> Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in docker-compose file under 'cache-debug' service configuration.
 
-Run cache (in debug mode) and tests
+To run cache (in debug mode) and tests:
 ```
 docker compose --profile debug --profile tests-debug build
 docker compose --profile debug up --detach
@@ -49,11 +51,12 @@ After server has started run test script
 docker compose --profile tests-debug up
 ```
 
-Check valgrind output in container std during and after execution.
+Check Valgrind output in container std during and after execution.
 
 
 ### To run only unit tests
-!Use --build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG" to disable debug code!
+> [!TIP]
+> Use --build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG" to disable debugging helpers in code
 
 ```
 docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++26 -O3" . -t cache-tests:latest
@@ -76,16 +79,12 @@ Check redis metrics at http://localhost:9121/metrics
 
 ## TODO
 - Check if we can reduce memory usage during decompression as well
+- Speed up prime numbers generation, maybe separate it into small module
 - Continue improving collision resolution
-- Add profiler
 - Review compression algorithm
-- Move everything metrics related to metrics.h or maybe metrics.cpp
-- Move everything server related to server.h or maybe server.cpp
-- Better memory management (unique_ptr? own mini garbage collector thread? both? check memory leaks and pointer usage?)
+- Better memory management (unique_ptr? own mini garbage collector thread? both?)
 - Improve server code
 - Refactor how tests are executed and organised
-- Add compression of stored key value pairs
-- Add key retention
+- Support key expiration
 - Check how table works with prime numbers vs normal numbers multiplied by 2
 - Performance metrics (calculate under #ifndef NDEBUG)
-- Nice to have things (configs from env variables, refactoring, splitting into different headers, e.t.c.)

@@ -1,4 +1,5 @@
 #include "metrics.h"
+#include "../server.h"
 
 using namespace metrics;
 
@@ -21,9 +22,9 @@ void MetricsServer::RegisterMetrics()
                           .Register(*registry)
                           .Add({});
 
-    error_count = &BuildCounter()
-                        .Name("endpoint_tcp_errors_total")
-                        .Help("Total number of TCP errors")
+    server_num_errors = &BuildGauge()
+                        .Name("server_num_errors")
+                        .Help("Total number of TCP server errors")
                         .Register(*registry)
                         .Add({});
 
@@ -34,30 +35,18 @@ void MetricsServer::RegisterMetrics()
                             .Add({}, Histogram::BucketBoundaries{0.01, 0.1, 0.5, 1.0, 2.5, 5.0});
 }
 
-MetricsServer::MetricsServer(std::string metrics_url, std::shared_ptr<KeyValueStore> kvs_ptr)
+MetricsServer::MetricsServer(std::string metrics_url)
 {
     registry = std::make_shared<Registry>();
     server = std::make_shared<Exposer>(metrics_url);
-    keyValueStore_ptr = kvs_ptr;
     RegisterMetrics();
     server.get()->RegisterCollectable(registry);
     std::cout << "Metrics server started on " << metrics_url << std::endl;
 }
 
-MetricsServer::~MetricsServer() {
-
-}
-
-MetricsServer::task MetricsServer::UpdateMetrics()
+void MetricsServer::UpdateMetrics(CacheServerMetrics& serverMetrics)
 {
-    for (;;) {
-        storage_num_entries->Set(keyValueStore_ptr.get()->getNumEntries());
-        storage_num_resizes->Set(keyValueStore_ptr.get()->getNumResizes());
-        co_await switch_to_main();
-    }
-}
-
-void MetricsServer::IncNumErrors()
-{
-    error_count->Increment();
+    storage_num_entries->Set(serverMetrics.storageNumEntries);
+    storage_num_resizes->Set(serverMetrics.storageNumResizes);
+    server_num_errors->Set(serverMetrics.serverNumErrors);    
 }

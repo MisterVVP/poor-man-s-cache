@@ -44,11 +44,12 @@ int_fast8_t CacheServer::processQuery(const Query &query)
     return result;
 }
 
-CacheServer::CacheServer(int port, std::shared_ptr<KeyValueStore> kvs_ptr, std::atomic<bool>& cToken): keyValueStore_ptr(kvs_ptr), port(port), cancellationToken(cToken)
+CacheServer::CacheServer(int port, std::shared_ptr<KeyValueStore> kvs_ptr, std::atomic<bool>& cToken): 
+    keyValueStore_ptr(kvs_ptr), port(port), cancellationToken(cToken), numErrors(0)
 {
 }
 
-int CacheServer::Start()
+int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -99,6 +100,7 @@ int CacheServer::Start()
 
     std::cout << "TCP server is ready to process incoming connections" << std::endl;
     while (!cancellationToken) {
+        channel.push(CacheServerMetrics{ numErrors, keyValueStore_ptr.get()->getNumEntries(), keyValueStore_ptr.get()->getNumResizes() });
         int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
         for (int i = 0; i < event_count; ++i) {
@@ -108,7 +110,7 @@ int CacheServer::Start()
                 int client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
 
                 if (client_fd >= 0) {
-                    char buffer[1024] = {0};
+                    char buffer[READ_BUFFER_SIZE] = {0};
                     int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
                     if (bytes_read > 0) {
                         buffer[bytes_read] = '\0';
@@ -136,10 +138,8 @@ int CacheServer::Start()
                                 memcpy(cmd.value, value, vSize);
                                 cmd.value[vSize-1] = '\0';
 
-                                auto cmdRes = processCommand(cmd);
-                                if (!cmdRes) {
-                                   //metricsServer.IncNumErrors();
-                                }
+                                numErrors += processCommand(cmd);
+
                                 delete[] cmd.key;
                                 delete[] cmd.value;
                             } else {
@@ -158,16 +158,14 @@ int CacheServer::Start()
                                 query.key = new char[kSize];
                                 memcpy(query.key, key, kSize);
                                 query.key[kSize-1] = '\0';
-                                auto qRes = processQuery(query);
-                                if (!qRes) {
-                                   //metricsServer.IncNumErrors();
-                                }
+                                numErrors += processQuery(query);
                                 delete[] query.key;
                             } else {
                                 const char* response = "ERROR: Invalid GET command format";
                                 #ifndef NDEBUG
                                 std::cerr << response << " command:" << command << std::endl;
                                 #endif
+                                numErrors++;
                                 send(client_fd, response, strlen(response), 0);
                                 close(client_fd);
                             }
@@ -176,6 +174,7 @@ int CacheServer::Start()
                             #ifndef NDEBUG
                             std::cerr << response << ":" << command << std::endl;
                             #endif
+                            numErrors++;
                             send(client_fd, response, strlen(response), 0);
                             close(client_fd);
                         }
@@ -185,10 +184,9 @@ int CacheServer::Start()
                     }
                 }
             }
-        }
-       //metricsServer.UpdateMetrics();
+        }        
     }
-    std::cerr << "Shutting down gracefully..." << std::endl;
+    std::cout << "Shutting down gracefully..." << std::endl;
 
     close(server_fd);
     close(epoll_fd);

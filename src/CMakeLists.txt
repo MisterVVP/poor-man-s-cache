@@ -1,4 +1,4 @@
-add_executable(${PROJECT_NAME} main.cpp server.cpp kvs.cpp metrics/metrics.cpp)
+add_executable(${PROJECT_NAME} main.cpp server.cpp kvs/kvs.cpp metrics/metrics.cpp)
 
 if(PROMETHEUS_CPP_ENABLE_PUSH)
   target_link_libraries(${PROJECT_NAME} PRIVATE prometheus-cpp::push $<$<BOOL:${WIN32}>:Ws2_32>)

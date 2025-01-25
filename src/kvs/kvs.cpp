@@ -1,5 +1,7 @@
 #include "kvs.h"
 
+using namespace kvs;
+
 KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
     : tableSize(settings.initialSize),
       numEntries(0),

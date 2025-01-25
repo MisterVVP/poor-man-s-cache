@@ -4,7 +4,9 @@
 #include <cstdlib>
 #include <unistd.h>
 #include "kvs.h"
-#include "env.h"
+#include "../env.h"
+
+using namespace kvs;
 
 // Number of elements to test
 const size_t NUM_ELEMENTS = getIntFromEnv("NUM_ELEMENTS", true);

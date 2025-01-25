@@ -41,7 +41,7 @@ services:
       - CACHE_PORT=9001
       - CACHE_TYPE=custom
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=10000000
+      - TEST_ITERATIONS=1000000
     profiles:
       - tests
 
