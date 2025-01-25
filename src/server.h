@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include "kvs/kvs.h"
 
 #define MAX_EVENTS 24

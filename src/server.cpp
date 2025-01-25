@@ -56,7 +56,8 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         std::cerr << "Socket creation failed" << std::endl;
         return 1;
     }
-
+    int flag = 1;
+    setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (void*)&flag, sizeof(flag));
     fcntl(server_fd, F_SETFL, O_NONBLOCK);
 
     sockaddr_in address{};
