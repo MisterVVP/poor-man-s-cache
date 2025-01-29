@@ -7,6 +7,7 @@
 #include <cmath>
 #include <queue>
 #include <algorithm>
+#include "../primegen/primegen.h"
 
 #ifndef NDEBUG
 #include <chrono>
@@ -56,10 +57,7 @@ namespace kvs
 
             
             bool usePrimeNumbers;
-            std::queue<uint_fast64_t> primeQueue;
-            bool isPrime(uint_fast64_t n) const;
-            uint_fast64_t nextPrime(uint_fast64_t start) const;
-            void generatePrimeQueue();
+            Primegen primegen;
 
 
             struct SubstringFrequency {

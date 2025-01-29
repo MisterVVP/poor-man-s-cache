@@ -10,9 +10,6 @@ RUN git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp 
 WORKDIR /app
 COPY . .
 
-ENV NUM_ELEMENTS=1000000
-RUN cd /app/src && g++ -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ kvs/kvs.cpp primegen/primegen.cpp kvs/kvs_test.cpp -lgtest -lgtest_main -o kvs_test && ./kvs_test
-
 ARG BUILD_TYPE="Release"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .
 
@@ -20,13 +17,16 @@ RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$B
 FROM alpine:latest
 COPY ./sysctl.conf /etc/sysctl.conf
 
-RUN apk update && apk upgrade && apk add libstdc++ valgrind && sysctl -p
+RUN apk update && apk upgrade && apk add libstdc++ valgrind valgrind-scripts bash && sysctl -p
 
 COPY --from=build /app/build/src/poor-man-s-cache /app/poor-man-s-cache
 COPY --from=build /usr/local/include/prometheus/ /usr/local/include/prometheus/
 COPY --from=build /usr/local/lib/ /usr/local/lib/
 
+WORKDIR /callgrind
+COPY ./callgrind.bash ./callgrind.bash
+
 EXPOSE 9001
 EXPOSE 8080
 
-ENTRYPOINT ["/app/poor-man-s-cache"]
+ENTRYPOINT  ["/callgrind/callgrind.bash"]

@@ -21,7 +21,7 @@ Run cache and tests
 docker compose --profile main --profile tests build
 docker compose --profile main up --detach
 ```
-Wait a minute or two for server to start. Check server container logs for `TCP server is ready to process incoming connections`
+Wait a few moments for server to start. Check server container logs for `TCP server is ready to process incoming connections`
 
 After server has started run test script
 ```
@@ -37,21 +37,49 @@ docker compose --profile main down
 ```
 ### To debug memory issues
 > [!WARNING]
-> Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in docker-compose file under 'cache-debug' service configuration.
+> Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in docker-compose file under 'cache-valgrind' service configuration.
+> [!TIP]
+> Modify `BUILD_TYPE` build argument to switch between Debug (contains extra output to std and starts server much faster) and Release (optimized) builds
 
-To run cache (in debug mode) and tests:
+To run cache and tests:
 ```
-docker compose --profile debug --profile tests-debug build
-docker compose --profile debug up --detach
+docker compose --profile valgrind --profile tests-valgrind build
+docker compose --profile valgrind up --detach
 ```
-Wait a few moments for server to start (debug mode does not require long initialisation time). Check server container logs for `TCP server is ready to process incoming connections`
+Wait a few moments for server to start (valgrind mode does not require long initialisation time). Check server container logs for `TCP server is ready to process incoming connections`
 
 After server has started run test script
 ```
-docker compose --profile tests-debug up
+docker compose --profile tests-valgrind up
 ```
-
 Check Valgrind output in container std during and after execution.
+
+
+### To run callgrind profiler 
+
+To run cache and tests:
+```
+docker compose --profile callgrind --profile tests-callgrind build
+docker compose --profile callgrind up --detach
+```
+Wait a few minutes for server to start (callgrind slows down startup). Check server container logs for `TCP server is ready to process incoming connections`
+
+After server has started run test script
+```
+docker compose --profile tests-callgrind up
+```
+> [!TIP]
+> `ps aux` can help to find server process id inside cache-callgrind container
+
+- exec into cache-callgrind container shell
+- send termination signal to cache server process (`kill -s SIGTERM <server process id>`, e.g. `kill -s SIGTERM 7`)
+- check Callgrind output in container stdout after execution.
+- execute `callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.<server process id>` (e.g. `callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.7` )
+
+> [!TIP]
+> Results of callgrind_annotate command are hard to read without GUI. This repository does not provide any GUI example, but it's recommended to use (kcachegrind)[https://kcachegrind.github.io/html/Home.html]
+> callgrind.out file can be found in /callgrind directory inside docker container
+
 
 
 ### To run only unit tests

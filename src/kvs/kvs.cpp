@@ -18,12 +18,6 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
             table[i].entries[j].occupied = 0;
         }
     }
-#ifndef NDEBUG
-    usePrimeNumbers = false; // disable prime numbers generation for debugging purposes, because it's slow
-#endif
-    if (usePrimeNumbers) {
-        generatePrimeQueue();
-    }
 
     if (compressionEnabled) {
         KeyValueStoreSettings dictSettings;
@@ -52,53 +46,11 @@ KeyValueStore::~KeyValueStore() {
               << emptyBuckets << " emptyEntries = " << emptyEntries << " tableSize = " << tableSize 
               << " numEntries = " << numEntries << " numResizes = " << numResizes << std::endl;
     cleanTable(table, tableSize);
-    if (compressionEnabled) {        
+    if (compressionEnabled || compressDictionary) {        
         delete compressDictionary;
     }
 }
 
-bool KeyValueStore::isPrime(uint_fast64_t n) const {
-    if (n < 2) return false;
-    if (n % 2 == 0 && n > 2) return false;
-    for (uint_fast64_t i = 3; i <= std::sqrt(n); i += 2) {
-        if (n % i == 0) return false;
-    }
-    return true;
-}
-
-uint_fast64_t KeyValueStore::nextPrime(uint_fast64_t start) const {
-    while (!isPrime(start)) {
-        ++start;
-    }
-    return start;
-}
-
-void KeyValueStore::generatePrimeQueue() {
-    uint_fast64_t prime = 2053; // Start with the first prime
-    primeQueue.push(prime);
-
-    double growthFactor = 2.0; // Start with a higher growth factor for small primes
-    while (prime < std::numeric_limits<uint_fast64_t>::max() / 10) {
-        uint_fast64_t nextCandidate = static_cast<uint_fast64_t>(prime * growthFactor);
-        prime = nextPrime(nextCandidate); // Get the next prime >= nextCandidate
-        primeQueue.push(prime);
-
-        // Dynamically adjust the growth factor
-        if (prime < 100000) {
-            growthFactor = 4;
-        } else if (prime < 100000) {
-            growthFactor = 2; // Faster growth for small primes
-        } else if (prime < 1000000) {
-            growthFactor = 1.5; // Moderate growth for medium primes
-        } else if (prime < 10000000) {
-            growthFactor = 1.2; // Slower growth for larger primes
-        } else if (prime < 100000000) {
-            growthFactor = 1.1; // Moderate growth for medium primes
-        } else {
-            growthFactor = 1.05; // Very slow growth for very large primes
-        }
-    }
-}
 void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
 #ifndef NDEBUG
     std::cout << "Table cleanup started! size = " << size << std::endl;
@@ -306,11 +258,7 @@ void KeyValueStore::resize() {
 #endif
     uint_fast64_t newTableSize;
     if (usePrimeNumbers) {
-        if (primeQueue.empty()) {
-            throw std::runtime_error("Max hashtable size reached. Cannot resize further.");
-        }
-        newTableSize = primeQueue.front();
-        primeQueue.pop();
+        newTableSize = primegen.PopNext();
     } else {
         newTableSize =  tableSize * 2;
     }

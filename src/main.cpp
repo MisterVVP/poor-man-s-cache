@@ -1,5 +1,6 @@
 #include <thread>
 #include <iostream>
+#include <signal.h>
 #include "metrics/metrics.h"
 #include "env.h"
 #include "server.h"
