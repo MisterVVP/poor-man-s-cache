@@ -19,10 +19,11 @@ namespace metrics
             std::shared_ptr<Exposer> server;
 
             Gauge* storage_num_entries = nullptr;
-            Gauge* storage_num_resizes = nullptr;
-            Histogram* request_latency = nullptr;
-            Gauge* server_num_errors = nullptr;
-            Counter* request_count = nullptr;            
+            Counter* storage_num_resizes_total = nullptr;
+
+            Gauge* server_num_active_connections = nullptr;
+            Counter* server_num_requests_total = nullptr;
+            Counter* server_num_errors_total = nullptr;
 
             void RegisterMetrics();
 

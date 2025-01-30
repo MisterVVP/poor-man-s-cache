@@ -11,28 +11,29 @@ void MetricsServer::RegisterMetrics()
                             .Register(*registry)
                             .Add({});
 
-    storage_num_resizes = &BuildGauge()
-                            .Name("storage_num_resizes")
+    storage_num_resizes_total = &BuildCounter()
+                            .Name("storage_num_resizes_total")
                             .Help("Number of resizes in the storage")
                             .Register(*registry)
                             .Add({});
-    request_count = &BuildCounter()
-                          .Name("endpoint_tcp_requests_total")
-                          .Help("Total number of TCP requests")
-                          .Register(*registry)
-                          .Add({});
 
-    server_num_errors = &BuildGauge()
-                        .Name("server_num_errors")
+    server_num_errors_total = &BuildCounter()
+                        .Name("server_num_errors_total")
                         .Help("Total number of TCP server errors")
                         .Register(*registry)
                         .Add({});
 
-    request_latency = &BuildHistogram()
-                            .Name("endpoint_tcp_request_latency_seconds")
-                            .Help("Histogram of request latencies in seconds")
-                            .Register(*registry)
-                            .Add({}, Histogram::BucketBoundaries{0.01, 0.1, 0.5, 1.0, 2.5, 5.0});
+    server_num_active_connections = &BuildGauge()
+                        .Name("server_num_active_connections")
+                        .Help("Total number of active connections")
+                        .Register(*registry)
+                        .Add({});
+
+    server_num_requests_total = &BuildCounter()
+                        .Name("server_num_requests_total")
+                        .Help("Total number of server requests")
+                        .Register(*registry)
+                        .Add({});
 }
 
 MetricsServer::MetricsServer(std::string metrics_url)
@@ -47,6 +48,15 @@ MetricsServer::MetricsServer(std::string metrics_url)
 void MetricsServer::UpdateMetrics(CacheServerMetrics& serverMetrics)
 {
     storage_num_entries->Set(serverMetrics.storageNumEntries);
-    storage_num_resizes->Set(serverMetrics.storageNumResizes);
-    server_num_errors->Set(serverMetrics.serverNumErrors);    
+
+    auto numResizesInc = serverMetrics.storageNumResizes - storage_num_resizes_total->Value();
+    storage_num_resizes_total->Increment(numResizesInc);
+
+    server_num_active_connections->Set(serverMetrics.serverNumActiveConnections);
+
+    auto numErrorsInc = serverMetrics.serverNumErrors - server_num_errors_total->Value();
+    server_num_errors_total->Increment(numErrorsInc);
+
+    auto numRequestsInc = serverMetrics.serverNumRequests - server_num_requests_total->Value();
+    server_num_requests_total->Increment(numRequestsInc);
 }

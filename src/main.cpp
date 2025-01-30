@@ -30,8 +30,6 @@ int main() {
     signal(SIGTERM, signalDispatcher);
 
     std::queue<CacheServerMetrics> serverChannel;
-    auto keyValueStore_ptr = std::make_shared<KeyValueStore>();
-
 
     auto metrics_host = getStrFromEnv("METRICS_HOST", true);
     auto metrics_port = getIntFromEnv("METRICS_PORT", true);
@@ -40,13 +38,13 @@ int main() {
 
 
     auto server_port = getIntFromEnv("SERVER_PORT", true);
-    CacheServer cacheServer(server_port, keyValueStore_ptr, cancellationToken);
+    CacheServer cacheServer(server_port, cancellationToken);
 
 
     auto metricsUpdaterThread = std::jthread(
         [&serverChannel, &metricsServer](std::stop_token stopToken)
         {
-            std::cout << "metrics updater thread is running!" << std::endl;
+            std::cout << "Metrics updater thread is running!" << std::endl;
             while (!stopToken.stop_requested())
             {
                 while (!serverChannel.empty()) {

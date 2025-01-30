@@ -107,7 +107,7 @@ Check redis metrics at http://localhost:9121/metrics
 
 ## TODO
 - Check if we can reduce memory usage during decompression as well
-- Speed up prime numbers generation, maybe separate it into small module
+- Think about buffer size for incoming connections, at least make it configurable and add logic to read the data in chunks. Right now server won't work well if amount of data inside TCP request is bigger than our allocated buffer
 - Continue improving collision resolution
 - Review compression algorithm
 - Better memory management (unique_ptr? own mini garbage collector thread? both?)
@@ -116,3 +116,4 @@ Check redis metrics at http://localhost:9121/metrics
 - Support key expiration
 - Check how table works with prime numbers vs normal numbers multiplied by 2
 - Performance metrics (calculate under #ifndef NDEBUG)
+- Check out https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face

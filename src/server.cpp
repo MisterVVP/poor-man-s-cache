@@ -5,7 +5,8 @@ int_fast8_t CacheServer::processCommand(const Command &command)
     const char* response = nullptr;
     int_fast8_t result = 0;
     if (command.commandCode == 1) {
-        auto setRes = keyValueStore_ptr.get()->set(command.key, command.value);
+        std::unique_lock lock(kvsMutex);
+        auto setRes = keyValueStore.set(command.key, command.value);
         if (setRes) {
             result ^= 1;
             response = "OK";
@@ -17,7 +18,7 @@ int_fast8_t CacheServer::processCommand(const Command &command)
     }
 
     send(command.client_fd, response, strlen(response), 0);
-    close(command.client_fd);
+    closeConnection(command.client_fd);
 
     return result;
 }
@@ -27,7 +28,8 @@ int_fast8_t CacheServer::processQuery(const Query &query)
     const char* response = nullptr;
     int_fast8_t result = 0;
     if (query.queryCode == 1) {
-        const char* value = keyValueStore_ptr.get()->get(query.key);
+        std::shared_lock lock(kvsMutex);
+        const char* value = keyValueStore.get(query.key);
         if (value) {
             response = value;
             result ^= 1;
@@ -39,25 +41,172 @@ int_fast8_t CacheServer::processQuery(const Query &query)
     }
 
     send(query.client_fd, response, strlen(response), 0);
-    close(query.client_fd);
+    closeConnection(query.client_fd);
 
     return result;
 }
 
-CacheServer::CacheServer(int port, std::shared_ptr<KeyValueStore> kvs_ptr, std::atomic<bool>& cToken): 
-    keyValueStore_ptr(kvs_ptr), port(port), cancellationToken(cToken), numErrors(0)
+CacheServer::CacheServer(int port, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
+    server_fd(-1), isRunning(false), activeConnections(0), numRequests(0)
 {
+}
+
+CacheServer::~CacheServer() {
+    Stop();
+    if (server_fd >= 0) {
+        close(server_fd);
+    }
+    for (int epoll_fd : epollInstances) {
+        close(epoll_fd);
+    }
+}
+
+void CacheServer::workerLoop(int epoll_fd, std::stop_token stopToken) {
+    std::cout << "Started worker loop for epoll_fd = " << epoll_fd << std::endl;
+    epoll_event events[MAX_EVENTS];
+    while (!stopToken.stop_requested()) {
+        int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
+        if (event_count == -1) {
+            if (errno == EINTR) continue; // Retry if interrupted
+            perror("epoll_wait failed");
+            break;
+        }
+
+        for (int i = 0; i < event_count; ++i) {
+            int client_fd = events[i].data.fd;
+
+            if (events[i].events & EPOLLIN) {
+                char buffer[READ_BUFFER_SIZE] = {0};
+                int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+                if (bytes_read > 0) {
+                    buffer[bytes_read] = '\0';
+                    char* com_saveptr = nullptr;
+                    char* command = strtok_r(buffer, " ", &com_saveptr);
+                    if (command == NULL) {
+                        const char* response = "ERROR: Unable to parse command";
+                        send(client_fd, response, strlen(response), 0);
+                        closeConnection(client_fd);
+                        continue;
+                    }
+                    if (strcmp(command, "SET") == 0) {
+                        char* key = strtok_r(nullptr, " ", &com_saveptr);
+                        char* value = strtok_r(nullptr, " ", &com_saveptr);
+                        if (key && value) {
+                            Command cmd{1, nullptr, nullptr, client_fd};
+
+                            auto kSize = strlen(key) + 1;
+                            cmd.key = new char[kSize];
+                            memcpy(cmd.key, key, kSize);
+                            cmd.key[kSize-1] = '\0';
+
+                            auto vSize = strlen(value) + 1;
+                            cmd.value = new char[vSize];
+                            memcpy(cmd.value, value, vSize);
+                            cmd.value[vSize-1] = '\0';
+
+                            numErrors += processCommand(cmd);
+
+                            delete[] cmd.key;
+                            delete[] cmd.value;
+                        } else {
+                            const char* response = "ERROR: Invalid SET command format";
+                            #ifndef NDEBUG
+                            std::cerr << response << " command:" << command << std::endl;
+                            #endif
+                            send(client_fd, response, strlen(response), 0);
+                            closeConnection(client_fd);
+                        }
+                    } else if (strcmp(command, "GET") == 0) {
+                        char* key = strtok_r(nullptr, " ", &com_saveptr);
+                        if (key) {
+                            Query query{1, nullptr, client_fd};                                
+                            auto kSize = strlen(key) + 1;
+                            query.key = new char[kSize];
+                            memcpy(query.key, key, kSize);
+                            query.key[kSize-1] = '\0';
+                            numErrors += processQuery(query);
+                            delete[] query.key;
+                        } else {
+                            const char* response = "ERROR: Invalid GET command format";
+                            #ifndef NDEBUG
+                            std::cerr << response << " command:" << command << std::endl;
+                            #endif
+                            numErrors++;
+                            send(client_fd, response, strlen(response), 0);
+                            closeConnection(client_fd);
+                        }
+                    } else {
+                        const char* response = "ERROR: Unknown command";
+                        #ifndef NDEBUG
+                        std::cerr << response << ":" << command << std::endl;
+                        #endif
+                        numErrors++;
+                        send(client_fd, response, strlen(response), 0);
+                        closeConnection(client_fd);
+                    }
+                } else {
+                    closeConnection(client_fd);
+                }
+            }
+        }
+    }
+    std::cout << "Exited worker loop for epoll_fd = " << epoll_fd << std::endl;
+}
+
+void CacheServer::distributeConnection(int client_fd) {
+    std::lock_guard<std::mutex> lock(epollMutex);
+
+    int epoll_fd = epollInstances[nextThread];
+    nextThread = (nextThread + 1) % workerThreads.size(); // Round-robin distribution
+
+    epoll_event event{};
+    event.events = EPOLLIN | EPOLLET; // Edge-triggered
+    event.data.fd = client_fd;
+
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+        perror("Failed to add client_fd to epoll");
+        closeConnection(client_fd);
+    }
+}
+
+void CacheServer::closeConnection(int client_fd)
+{
+    shutdown(client_fd, SHUT_RDWR);
+    close(client_fd);
+    if(activeConnections > 0) { // TODO investigate
+        --activeConnections;
+    }
+}
+
+void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
+{
+
+    while (!stopToken.stop_requested()) {
+        sendMetricsUpdates(channel);
+        std::this_thread::sleep_for(std::chrono::seconds(METRICS_UPDATE_FREQUENCY_SEC));
+    }
+}
+
+__attribute__ ((noinline)) void CacheServer::sendMetricsUpdates(std::queue<CacheServerMetrics> &channel)
+{
+    std::shared_lock lock(kvsMutex);
+    channel.push(CacheServerMetrics{ numErrors, activeConnections,  keyValueStore.getNumEntries(), keyValueStore.getNumResizes(), numRequests });
 }
 
 int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    isRunning = true;
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        std::cerr << "Socket creation failed" << std::endl;
+        perror("Socket creation failed");
         return 1;
     }
+
     int flag = 1;
     setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (void*)&flag, sizeof(flag));
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+    int qlen = 5;
+    setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen));
     fcntl(server_fd, F_SETFL, O_NONBLOCK);
 
     sockaddr_in address{};
@@ -71,132 +220,78 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         return 1;
     }
 
-    if (listen(server_fd, 3) < 0) {
-        std::cerr << "Listen failed" << std::endl;
+    if (listen(server_fd, CONN_QUEUE_LIMIT) < 0) {
+        perror("Listen failed");
         close(server_fd);
         return 1;
     }
 
-    std::cout << "Server started on port " << port << std::endl;
+    auto workerThreadCount = std::thread::hardware_concurrency(); // std::min(std::thread::hardware_concurrency(), WORKER_THREAD_COUNT);
 
-    int epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) {
-        std::cerr << "Failed to create epoll instance" << std::endl;
-        close(server_fd);
-        return 1;
+    for (int i = 0; i < workerThreadCount; ++i) {
+        int epoll_fd = epoll_create1(0);
+        if (epoll_fd == -1) {
+            perror("Failed to create epoll instance");
+            return 1;
+        }
+
+        epollInstances.push_back(epoll_fd);
+
+        workerThreads.emplace_back(std::jthread([this, epoll_fd](std::stop_token stopToken)
+        {
+            workerLoop(epoll_fd, stopToken);
+        }));
     }
+    
+    metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
+    {
+        metricsUpdater(channel, stopToken);
+    });
 
-    epoll_event event{};
-    event.events = EPOLLIN;
-    event.data.fd = server_fd;
+    std::cout << "Server started on port " << port << ", " << workerThreadCount << " worker threads are ready" << std::endl;
 
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event) == -1) {
-        std::cerr << "Failed to add server socket to epoll" << std::endl;
-        close(server_fd);
-        close(epoll_fd);
-        return 1;
-    }
-
-    epoll_event events[MAX_EVENTS];
-
-    std::cout << "TCP server is ready to process incoming connections" << std::endl;
     while (!cancellationToken) {
-        channel.push(CacheServerMetrics{ numErrors, keyValueStore_ptr.get()->getNumEntries(), keyValueStore_ptr.get()->getNumResizes() });
-        int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+        sockaddr_in client_address;
+        socklen_t client_len = sizeof(client_address);
+        int client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
 
-        for (int i = 0; i < event_count; ++i) {
-            if (events[i].data.fd == server_fd) {
-                sockaddr_in client_address;
-                socklen_t client_len = sizeof(client_address);
-                int client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
-
-                if (client_fd >= 0) {
-                    char buffer[READ_BUFFER_SIZE] = {0};
-                    int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-                    if (bytes_read > 0) {
-                        buffer[bytes_read] = '\0';
-                        char* com_saveptr = nullptr;
-                        char* command = strtok_r(buffer, " ", &com_saveptr);
-                        if (command == NULL) {
-                            const char* response = "ERROR: Unable to parse command";
-                            send(client_fd, response, strlen(response), 0);
-                            close(client_fd);
-                            continue;
-                        }
-                        if (strcmp(command, "SET") == 0) {
-                            char* key = strtok_r(nullptr, " ", &com_saveptr);
-                            char* value = strtok_r(nullptr, " ", &com_saveptr);
-                            if (key && value) {
-                                Command cmd{1, nullptr, nullptr, client_fd};
-
-                                auto kSize = strlen(key) + 1;
-                                cmd.key = new char[kSize];
-                                memcpy(cmd.key, key, kSize);
-                                cmd.key[kSize-1] = '\0';
-
-                                auto vSize = strlen(value) + 1;
-                                cmd.value = new char[vSize];
-                                memcpy(cmd.value, value, vSize);
-                                cmd.value[vSize-1] = '\0';
-
-                                numErrors += processCommand(cmd);
-
-                                delete[] cmd.key;
-                                delete[] cmd.value;
-                            } else {
-                                const char* response = "ERROR: Invalid SET command format";
-                                #ifndef NDEBUG
-                                std::cerr << response << " command:" << command << std::endl;
-                                #endif
-                                send(client_fd, response, strlen(response), 0);
-                                close(client_fd);
-                            }
-                        } else if (strcmp(command, "GET") == 0) {
-                            char* key = strtok_r(nullptr, " ", &com_saveptr);
-                            if (key) {
-                                Query query{1, nullptr, client_fd};                                
-                                auto kSize = strlen(key) + 1;
-                                query.key = new char[kSize];
-                                memcpy(query.key, key, kSize);
-                                query.key[kSize-1] = '\0';
-                                numErrors += processQuery(query);
-                                delete[] query.key;
-                            } else {
-                                const char* response = "ERROR: Invalid GET command format";
-                                #ifndef NDEBUG
-                                std::cerr << response << " command:" << command << std::endl;
-                                #endif
-                                numErrors++;
-                                send(client_fd, response, strlen(response), 0);
-                                close(client_fd);
-                            }
-                        } else {
-                            const char* response = "ERROR: Unknown command";
-                            #ifndef NDEBUG
-                            std::cerr << response << ":" << command << std::endl;
-                            #endif
-                            numErrors++;
-                            send(client_fd, response, strlen(response), 0);
-                            close(client_fd);
-                        }
-                    } else {
-                        close(client_fd);
-                        continue;
-                    }
-                }
-            }
-        }        
+        if (client_fd >= 0) {
+            ++activeConnections;
+            ++numRequests;
+            distributeConnection(client_fd);
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            perror("Failed to accept connection");
+        }      
     }
+
     std::cout << "Shutting down gracefully..." << std::endl;
-
-    close(server_fd);
-    close(epoll_fd);
-
+    Stop();
     std::cout << "Server shut down successfully" << std::endl;
-    return 0;
+    return 0;    
 }
 
 void CacheServer::Stop()
 {
-    cancellationToken = true;
+    if(isRunning) {
+        isRunning = false;
+
+        std::cout << "Stopping metrics updater thread..." << std::endl;
+        auto mu_sSource =  metricsUpdaterThread.get_stop_source();
+        if (mu_sSource.stop_possible()) {
+            mu_sSource.request_stop();
+        }
+        std::cout << "Metrics updater thread stopped" << std::endl;
+
+        std::cout << "Stopping worker threads..." << std::endl;
+        cancellationToken = true;
+
+        for (auto& worker_thread : workerThreads) {
+            auto sSource = worker_thread.get_stop_source();
+            
+            if (sSource.stop_possible()) {
+                sSource.request_stop();
+            }
+        }
+        std::cout << "Worker threads stopped" << std::endl;
+    }
 }

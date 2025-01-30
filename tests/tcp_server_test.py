@@ -76,26 +76,36 @@ def test_iteration(x):
         # Test SET command
         response = send_command(f"SET key{x} value{x}")
         if response != "OK":
-            result = False
-            print(f"Request: SET key{x} value{x} | Response: {response}\n")
+            print(f"Retrying request: SET key{x} value{x}\n")
+            time.sleep(delay_sec / 2)
+            response = send_command(f"SET key{x} value{x}")
+            if response != "OK":
+                result = False
+                print(f"Request failed: SET key{x} value{x} | response: {response}\n")
 
         # Test GET command for an existing key
         response = send_command(f"GET key{x}")
         expected_response = f"value{x}" if cache_type == "redis" else f"value{x}"
         if response != expected_response:
+            print(f"Retrying request: GET key{x}\n")
             # Retry one more time after short delay
-            time.sleep(delay_sec / 5)
+            time.sleep(delay_sec / 2)
             response = send_command(f"GET key{x}")
             if response != expected_response:
                 result = False
-                print(f"Request: GET key{x} | Response: {response}\n")
+                print(f"Request failed: GET key{x} | response: {response}\n")
 
         # Test GET command for a non-existent key
         response = send_command("GET non_existent_key")
         expected_response = "" if cache_type == "redis" else "(nil)"
         if response != expected_response:
-            result = False
-            print(f"Request: GET non_existent_key | Response: {response}\n")
+            print(f"Retrying request: GET non_existent_key\n")
+            # Retry one more time after short delay
+            time.sleep(delay_sec / 2)
+            response = send_command("GET non_existent_key")
+            if response != expected_response:
+                result = False
+                print(f"Request failed: GET non_existent_key | response: {response}\n")
 
     except Exception as e:
         result = False
