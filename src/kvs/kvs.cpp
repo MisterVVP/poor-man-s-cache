@@ -10,8 +10,9 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
       isResizing(0),
       compressionEnabled(settings.compressionEnabled),
       usePrimeNumbers(settings.usePrimeNumbers) {
-
+#ifndef NDEBUG
     std::cout << "Table initialization started! initialSize = " << tableSize << " usePrimeNumbers = " << usePrimeNumbers << " compressionEnabled = " << compressionEnabled << std::endl;
+#endif
     table = new Bucket[tableSize];
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
@@ -26,7 +27,9 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
         dictSettings.initialSize = FREQ_DICT_SIZE;
         compressDictionary = new KeyValueStore(dictSettings);
     }
+#ifndef NDEBUG
     std::cout << "Table initialization finished!" << std::endl;
+#endif
 }
 
 KeyValueStore::~KeyValueStore() {
@@ -72,21 +75,6 @@ void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
 inline uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const {
     return (hash + attempt * attempt) % tableSize;
 }
-
-//-----------------------------------------------------------------------------
-// MurmurHash3 was written by Austin Appleby, and is placed in the public
-// domain. The author hereby disclaims copyright to this function source code.
-//-----------------------------------------------------------------------------
-uint_fast64_t KeyValueStore::hash(const char *key) const {
-    uint_fast64_t hash(525201411107845655ull);
-    for (; *key; ++key) {
-        hash ^= *key;
-        hash *= 0x5bd1e9955bd1e995;
-        hash ^= hash >> 47;
-    }
-    return hash;
-}
-//-----------------------------------------------------------------------------
 
 // Performs value compression and allocates new value in memory
 char* KeyValueStore::compress(const char* value) {
@@ -277,7 +265,7 @@ void KeyValueStore::resize() {
                 auto vSize = strlen(table[i].entries[j].value) + 1;
                 uint_fast64_t attempt = 0;
                 uint_fast64_t idx;
-                uint_fast64_t primaryHash = hash(table[i].entries[j].key);
+                uint_fast64_t primaryHash = hashFunc(table[i].entries[j].key);
 
                 int_fast8_t inserted = 0;
                 do {
@@ -328,18 +316,18 @@ void KeyValueStore::resize() {
 #endif
 }
 
-bool KeyValueStore::set(const char *key, const char *value) {
+bool kvs::KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash)
+{
     if (numEntries >= ((tableSize * RESIZE_THRESHOLD_PERCENTAGE) / 100) && !isResizing) {
         resize();
     }
 
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
-    uint_fast64_t primaryHash = hash(key);
     auto kSize = strlen(key) + 1;
     auto vSize = strlen(value) + 1;
     do {
-        idx = calcIndex(primaryHash, attempt++, tableSize);
+        idx = calcIndex(hash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (!table[idx].entries[i].occupied) {
 
@@ -390,12 +378,17 @@ bool KeyValueStore::set(const char *key, const char *value) {
     return false;
 }
 
-const char* KeyValueStore::get(const char *key) {
+bool KeyValueStore::set(const char *key, const char *value) {
+    auto primaryHash = hashFunc(key);
+    return set(key, value, primaryHash);
+}
+
+const char *kvs::KeyValueStore::get(const char *key, uint_fast64_t hash)
+{
     uint_fast64_t attempt = 0;
     uint_fast64_t idx;
-    uint_fast64_t primaryHash = hash(key);
     do {
-        idx = calcIndex(primaryHash, attempt++, tableSize);
+        idx = calcIndex(hash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0) {
                 return compressionEnabled ? decompress(table[idx].entries[i].value) : table[idx].entries[i].value;
@@ -404,4 +397,9 @@ const char* KeyValueStore::get(const char *key) {
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
     return nullptr;
+}
+
+const char* KeyValueStore::get(const char *key) {
+    auto primaryHash = hashFunc(key);
+    return get(key, primaryHash);
 }

@@ -11,7 +11,7 @@ WORKDIR /app
 COPY . .
 
 ENV NUM_ELEMENTS=1000000
-RUN cd /app/src && g++ -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ kvs/kvs.cpp primegen/primegen.cpp kvs/kvs_test.cpp -lgtest -lgtest_main -o kvs_test && ./kvs_test
+#RUN cd /app/src && g++ -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ MurmurHash3.cpp hash.cpp kvs/kvs.cpp primegen/primegen.cpp kvs/kvs_test.cpp -lgtest -lgtest_main -o kvs_test && ./kvs_test
 
 ARG BUILD_TYPE="Release"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .

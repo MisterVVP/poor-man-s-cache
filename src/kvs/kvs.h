@@ -8,6 +8,7 @@
 #include <queue>
 #include <algorithm>
 #include "../primegen/primegen.h"
+#include "../hash.h"
 
 #ifndef NDEBUG
 #include <chrono>
@@ -24,13 +25,26 @@
 
 namespace kvs
 {
+
+    // Rule of 5 is nice, but no, thanks.
+    struct NonCopyable
+    {
+        NonCopyable() = default;
+
+        NonCopyable(const NonCopyable&) = delete;
+        NonCopyable(NonCopyable&&) = delete;
+
+        NonCopyable& operator=(const NonCopyable&) = delete;
+        NonCopyable& operator=(NonCopyable&&) = delete;
+    };
+
     struct KeyValueStoreSettings {
         uint_fast64_t initialSize = 2053;
         bool compressionEnabled = true;
         bool usePrimeNumbers = true;
     };
 
-    class KeyValueStore {
+    class KeyValueStore : NonCopyable {
         private:
             struct Entry {
                 char* key;
@@ -51,10 +65,8 @@ namespace kvs
 
             int_fast8_t isResizing;
             void resize();
-            uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
-            uint_fast64_t hash(const char *key) const;
             void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
-
+            uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
             
             bool usePrimeNumbers;
             Primegen primegen;
@@ -87,6 +99,9 @@ namespace kvs
             }
 
             bool set(const char *key, const char *value);
+            bool set(const char *key, const char *value, uint_fast64_t hash); // use friend functions?
+
             const char *get(const char *key);
+            const char *get(const char *key, uint_fast64_t hash); // use friend functions?
     };
 }

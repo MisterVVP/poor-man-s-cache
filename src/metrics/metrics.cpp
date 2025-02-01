@@ -5,18 +5,6 @@ using namespace metrics;
 
 void MetricsServer::RegisterMetrics()
 {
-    storage_num_entries = &BuildGauge()
-                            .Name("storage_num_entries")
-                            .Help("Number of entries in the storage")
-                            .Register(*registry)
-                            .Add({});
-
-    storage_num_resizes_total = &BuildCounter()
-                            .Name("storage_num_resizes_total")
-                            .Help("Number of resizes in the storage")
-                            .Register(*registry)
-                            .Add({});
-
     server_num_errors_total = &BuildCounter()
                         .Name("server_num_errors_total")
                         .Help("Total number of TCP server errors")
@@ -47,11 +35,6 @@ MetricsServer::MetricsServer(std::string metrics_url)
 
 void MetricsServer::UpdateMetrics(CacheServerMetrics& serverMetrics)
 {
-    storage_num_entries->Set(serverMetrics.storageNumEntries);
-
-    auto numResizesInc = serverMetrics.storageNumResizes - storage_num_resizes_total->Value();
-    storage_num_resizes_total->Increment(numResizesInc);
-
     server_num_active_connections->Set(serverMetrics.serverNumActiveConnections);
 
     auto numErrorsInc = serverMetrics.serverNumErrors - server_num_errors_total->Value();

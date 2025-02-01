@@ -1,12 +1,11 @@
 #include "server.h"
 
-int_fast8_t CacheServer::processCommand(const Command &command)
+int_fast8_t CacheServer::processCommand(const Command &command, KeyValueStore &keyValueStore)
 {
     const char* response = nullptr;
     int_fast8_t result = 0;
     if (command.commandCode == 1) {
-        std::unique_lock lock(kvsMutex);
-        auto setRes = keyValueStore.set(command.key, command.value);
+        auto setRes = keyValueStore.set(command.key, command.value, command.hash);
         if (setRes) {
             result ^= 1;
             response = "OK";
@@ -23,13 +22,12 @@ int_fast8_t CacheServer::processCommand(const Command &command)
     return result;
 }
 
-int_fast8_t CacheServer::processQuery(const Query &query)
+int_fast8_t CacheServer::processQuery(const Query &query, KeyValueStore &keyValueStore)
 {
     const char* response = nullptr;
     int_fast8_t result = 0;
     if (query.queryCode == 1) {
-        std::shared_lock lock(kvsMutex);
-        const char* value = keyValueStore.get(query.key);
+        const char* value = keyValueStore.get(query.key, query.hash);
         if (value) {
             response = value;
             result ^= 1;
@@ -56,118 +54,39 @@ CacheServer::~CacheServer() {
     if (server_fd >= 0) {
         close(server_fd);
     }
-    for (int epoll_fd : epollInstances) {
+    if (epoll_fd >= 0) {
         close(epoll_fd);
     }
 }
 
-void CacheServer::workerLoop(int epoll_fd, std::stop_token stopToken) {
-    std::cout << "Started worker loop for epoll_fd = " << epoll_fd << std::endl;
-    epoll_event events[MAX_EVENTS];
+void CacheServer::workerLoop(ServerShard& shard, std::stop_token stopToken) {
+    std::cout << "Started worker loop for shard = " << shard.shardId << std::endl;
     while (!stopToken.stop_requested()) {
-        int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
-        if (event_count == -1) {
-            if (errno == EINTR) continue; // Retry if interrupted
-            perror("epoll_wait failed");
-            break;
+
+        std::unique_lock<std::mutex> lock(shard.mtx);
+        shard.cv.wait(lock, [&]{
+            return !shard.commandQueue.empty() || !shard.queryQueue.empty() || stopToken.stop_requested();
+        });
+
+        if(!shard.commandQueue.empty()) {
+            auto cmd = shard.commandQueue.front();
+            shard.commandQueue.pop();
+            numErrors += processCommand(cmd, shard.keyValueStore);
+            delete[] cmd.key;
+            delete[] cmd.value;
         }
 
-        for (int i = 0; i < event_count; ++i) {
-            int client_fd = events[i].data.fd;
-
-            if (events[i].events & EPOLLIN) {
-                char buffer[READ_BUFFER_SIZE] = {0};
-                int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-                if (bytes_read > 0) {
-                    buffer[bytes_read] = '\0';
-                    char* com_saveptr = nullptr;
-                    char* command = strtok_r(buffer, " ", &com_saveptr);
-                    if (command == NULL) {
-                        const char* response = "ERROR: Unable to parse command";
-                        send(client_fd, response, strlen(response), 0);
-                        closeConnection(client_fd);
-                        continue;
-                    }
-                    if (strcmp(command, "SET") == 0) {
-                        char* key = strtok_r(nullptr, " ", &com_saveptr);
-                        char* value = strtok_r(nullptr, " ", &com_saveptr);
-                        if (key && value) {
-                            Command cmd{1, nullptr, nullptr, client_fd};
-
-                            auto kSize = strlen(key) + 1;
-                            cmd.key = new char[kSize];
-                            memcpy(cmd.key, key, kSize);
-                            cmd.key[kSize-1] = '\0';
-
-                            auto vSize = strlen(value) + 1;
-                            cmd.value = new char[vSize];
-                            memcpy(cmd.value, value, vSize);
-                            cmd.value[vSize-1] = '\0';
-
-                            numErrors += processCommand(cmd);
-
-                            delete[] cmd.key;
-                            delete[] cmd.value;
-                        } else {
-                            const char* response = "ERROR: Invalid SET command format";
-                            #ifndef NDEBUG
-                            std::cerr << response << " command:" << command << std::endl;
-                            #endif
-                            send(client_fd, response, strlen(response), 0);
-                            closeConnection(client_fd);
-                        }
-                    } else if (strcmp(command, "GET") == 0) {
-                        char* key = strtok_r(nullptr, " ", &com_saveptr);
-                        if (key) {
-                            Query query{1, nullptr, client_fd};                                
-                            auto kSize = strlen(key) + 1;
-                            query.key = new char[kSize];
-                            memcpy(query.key, key, kSize);
-                            query.key[kSize-1] = '\0';
-                            numErrors += processQuery(query);
-                            delete[] query.key;
-                        } else {
-                            const char* response = "ERROR: Invalid GET command format";
-                            #ifndef NDEBUG
-                            std::cerr << response << " command:" << command << std::endl;
-                            #endif
-                            numErrors++;
-                            send(client_fd, response, strlen(response), 0);
-                            closeConnection(client_fd);
-                        }
-                    } else {
-                        const char* response = "ERROR: Unknown command";
-                        #ifndef NDEBUG
-                        std::cerr << response << ":" << command << std::endl;
-                        #endif
-                        numErrors++;
-                        send(client_fd, response, strlen(response), 0);
-                        closeConnection(client_fd);
-                    }
-                } else {
-                    closeConnection(client_fd);
-                }
-            }
+        if(!shard.queryQueue.empty()) {
+            auto query = shard.queryQueue.front();
+            shard.queryQueue.pop();
+            numErrors += processQuery(query, shard.keyValueStore);
+            delete[] query.key;
         }
+        lock.unlock(); // We must ensure this happens
     }
-    std::cout << "Exited worker loop for epoll_fd = " << epoll_fd << std::endl;
+    std::cout << "Exited worker loop for shard = " << shard.shardId << std::endl;
 }
 
-void CacheServer::distributeConnection(int client_fd) {
-    std::lock_guard<std::mutex> lock(epollMutex);
-
-    int epoll_fd = epollInstances[nextThread];
-    nextThread = (nextThread + 1) % workerThreads.size(); // Round-robin distribution
-
-    epoll_event event{};
-    event.events = EPOLLIN | EPOLLET; // Edge-triggered
-    event.data.fd = client_fd;
-
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-        perror("Failed to add client_fd to epoll");
-        closeConnection(client_fd);
-    }
-}
 
 void CacheServer::closeConnection(int client_fd)
 {
@@ -182,15 +101,9 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 {
 
     while (!stopToken.stop_requested()) {
-        sendMetricsUpdates(channel);
+        channel.push(CacheServerMetrics{ numErrors, activeConnections, numRequests });
         std::this_thread::sleep_for(std::chrono::seconds(METRICS_UPDATE_FREQUENCY_SEC));
     }
-}
-
-__attribute__ ((noinline)) void CacheServer::sendMetricsUpdates(std::queue<CacheServerMetrics> &channel)
-{
-    std::shared_lock lock(kvsMutex);
-    channel.push(CacheServerMetrics{ numErrors, activeConnections,  keyValueStore.getNumEntries(), keyValueStore.getNumResizes(), numRequests });
 }
 
 int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
@@ -226,20 +139,15 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         return 1;
     }
 
-    auto workerThreadCount = std::thread::hardware_concurrency(); // std::min(std::thread::hardware_concurrency(), WORKER_THREAD_COUNT);
+    workerThreadCount = std::thread::hardware_concurrency();
+    std::cout << "Initializing " << workerThreadCount << " worker threads and server shards" << std::endl;
+    serverShards = std::make_unique<ServerShard[]>(workerThreadCount);
 
     for (int i = 0; i < workerThreadCount; ++i) {
-        int epoll_fd = epoll_create1(0);
-        if (epoll_fd == -1) {
-            perror("Failed to create epoll instance");
-            return 1;
-        }
-
-        epollInstances.push_back(epoll_fd);
-
-        workerThreads.emplace_back(std::jthread([this, epoll_fd](std::stop_token stopToken)
+        serverShards[i].shardId = i;
+        workerThreads.emplace_back(std::jthread([this, i](std::stop_token stopToken)
         {
-            workerLoop(epoll_fd, stopToken);
+            workerLoop(serverShards[i], stopToken);
         }));
     }
     
@@ -247,6 +155,14 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     {
         metricsUpdater(channel, stopToken);
     });
+
+    epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        perror("Failed to create epoll instance");
+        return 1;
+    }
+    fcntl(epoll_fd, F_SETFL, O_NONBLOCK);
+    fcntl(epoll_fd, F_SETFD, FD_CLOEXEC);
 
     std::cout << "Server started on port " << port << ", " << workerThreadCount << " worker threads are ready" << std::endl;
 
@@ -258,10 +174,95 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         if (client_fd >= 0) {
             ++activeConnections;
             ++numRequests;
-            distributeConnection(client_fd);
+
+            epoll_event event{};
+            event.events = EPOLLIN | EPOLLET;
+
+            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+                perror("Failed to add client_fd to epoll");
+                closeConnection(client_fd);
+            }
+
+            epoll_event events[MAX_EVENTS];
+            int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
+            if (event_count == -1) {
+                if (errno == EINTR) continue;
+                perror("epoll_wait failed");
+                break;
+            }
+
+            for (int i = 0; i < event_count; ++i) {
+                if (events[i].events & EPOLLIN) {
+                    char buffer[READ_BUFFER_SIZE] = {0};
+                    int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+                    if (bytes_read > 0) {
+                        buffer[bytes_read] = '\0';
+                        char* com_saveptr = nullptr;
+                        char* command = strtok_r(buffer, " ", &com_saveptr);
+                        if (command == NULL) {
+                            const char* response = "ERROR: Unable to parse command";
+                            send(client_fd, response, strlen(response), 0);
+                            closeConnection(client_fd);
+                            continue;
+                        }
+                        char* key = strtok_r(nullptr, " ", &com_saveptr);
+                        if (key) {
+                            auto hash = hashFunc(key);
+                            auto shardId = hash % workerThreadCount;
+                            auto kSize = strlen(key) + 1;
+                            auto& shard = serverShards[shardId];
+                            if (strcmp(command, "GET") == 0) {
+                                Query query{1, nullptr, hash, client_fd};
+
+                                query.key = new char[kSize];
+                                memcpy(query.key, key, kSize);
+                                query.key[kSize-1] = '\0';
+
+                                std::lock_guard<std::mutex> lock(shard.mtx);
+                                shard.queryQueue.push(query);
+                                shard.cv.notify_one();
+                            } else if (strcmp(command, "SET") == 0) {
+                                char* value = strtok_r(nullptr, " ", &com_saveptr);
+                                if (value) {
+                                    Command cmd{1, nullptr, nullptr, hash, client_fd};
+
+                                    auto vSize = strlen(value) + 1;
+                                    cmd.value = new char[vSize];
+                                    memcpy(cmd.value, value, vSize);
+                                    cmd.value[vSize-1] = '\0';
+
+                                    cmd.key = new char[kSize];
+                                    memcpy(cmd.key, key, kSize);
+                                    cmd.key[kSize-1] = '\0';
+                                    std::lock_guard<std::mutex> lock(shard.mtx);
+                                    shard.commandQueue.push(cmd);
+                                    shard.cv.notify_one();
+                                } else {
+                                    const char* response = "ERROR: Invalid SET command format";
+                                    #ifndef NDEBUG
+                                    std::cerr << response << " command:" << command << std::endl;
+                                    #endif
+                                    send(client_fd, response, strlen(response), 0);
+                                    closeConnection(client_fd);
+                                }
+                            }
+                        } else { // TODO: support more commands here
+                            const char* response = "ERROR: Unknown command";
+                            #ifndef NDEBUG
+                            std::cerr << response << ":" << command << std::endl;
+                            #endif
+                            numErrors++;
+                            send(client_fd, response, strlen(response), 0);
+                            closeConnection(client_fd);
+                        }
+                    } else {
+                        closeConnection(client_fd);
+                    }
+                }
+            }
         } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("Failed to accept connection");
-        }      
+        }
     }
 
     std::cout << "Shutting down gracefully..." << std::endl;

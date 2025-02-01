@@ -99,21 +99,22 @@ docker compose --profile redis up
 Check redis metrics at http://localhost:9121/metrics
 
 #### Results
+> [!NOTE]
+> There could be a way to configure Redis to work with the same amount of data, however I can not verify this without diving deep into Redis configuration, thus I am comparing against default redis configuration
+> It is possible that there automatic is DDoS protection integrated at Redis as well, though I do not think this is fair to enable such functionality by default.
 - Redis just stop processing requests normally at 10M or especially 100M operations. poor-man-s-cache works.
-- Redis eats a small amount of memory, poor-man-s-cache eats plenty
 - Redis stopped responding normally even for 10000 requests sent from 4 threads. Typical redis error is Response: Socket error: [Errno 99] Address not available. This might be related to some antiDDOS protection of Redis
+- Redis eats a small amount of memory, poor-man-s-cache eats plenty
 
 
 
 ## TODO
 - Check if we can reduce memory usage during decompression as well
 - Think about buffer size for incoming connections, at least make it configurable and add logic to read the data in chunks. Right now server won't work well if amount of data inside TCP request is bigger than our allocated buffer
-- Continue improving collision resolution
-- Review compression algorithm
-- Better memory management (unique_ptr? own mini garbage collector thread? both?)
-- Improve server code
+- Continue improving collision resolution (endless task, tbh...)
+- Review compression algorithm (also endless task, potential way to improve could be heuristical logic to determine optimal compression algo + storing a number of algos as a strategy pattern)
 - Refactor how tests are executed and organised
-- Support key expiration
-- Check how table works with prime numbers vs normal numbers multiplied by 2
-- Performance metrics (calculate under #ifndef NDEBUG)
+- Support key expiration, support more operations
 - Check out https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
+- Refactoring of kvs.cpp, maybe extract hash function into separate header to reuse it as external function in multiple places... 
+- Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
