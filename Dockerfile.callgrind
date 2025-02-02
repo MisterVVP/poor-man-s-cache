@@ -15,9 +15,8 @@ RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$B
 
 
 FROM alpine:latest
-COPY ./sysctl.conf /etc/sysctl.conf
 
-RUN apk update && apk upgrade && apk add libstdc++ valgrind valgrind-scripts bash && sysctl -p
+RUN apk update && apk upgrade && apk add libstdc++ valgrind valgrind-scripts bash
 
 COPY --from=build /app/build/src/poor-man-s-cache /app/poor-man-s-cache
 COPY --from=build /usr/local/include/prometheus/ /usr/local/include/prometheus/

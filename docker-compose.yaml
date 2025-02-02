@@ -2,35 +2,40 @@ services:
   cache:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.debug # replace with Dockerfile to remove debugging tools
       args:
         - BUILD_TYPE=Release
-    environment:
-      - SERVER_PORT=9001
-      - METRICS_PORT=8080
-      - METRICS_HOST=0.0.0.0
-    ports:
-      - "9001:9001"
-      - "8080:8080"
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
     profiles:
       - main
 
   cache-valgrind:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.debug
       args:
         - BUILD_TYPE=Debug
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
     entrypoint: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--verbose", "/app/poor-man-s-cache"]
-    environment:
-      - SERVER_PORT=9001
-      - METRICS_PORT=8080
-      - METRICS_HOST=0.0.0.0
-    ports:
-      - "9001:9001"
-      - "8080:8080"
     profiles:
       - valgrind
+
+  cache-helgrind:
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
+      args:
+        - BUILD_TYPE=Debug
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    entrypoint: ["valgrind", "--tool=helgrind", "/app/poor-man-s-cache"]
+    profiles:
+      - helgrind
 
   cache-callgrind:
     build:
@@ -38,50 +43,51 @@ services:
       dockerfile: Dockerfile.callgrindd
       args:
         - BUILD_TYPE=Release
-    environment:
-      - SERVER_PORT=9001
-      - METRICS_PORT=8080
-      - METRICS_HOST=0.0.0.0
-    ports:
-      - "9001:9001"
-      - "8080:8080"
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
     profiles:
       - callgrind
 
   tests:
-    build:
-      context: tests
-      dockerfile: Dockerfile
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
     environment:
       - CACHE_HOST=cache
-      - CACHE_PORT=9001
-      - CACHE_TYPE=custom
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=1000000
+      - TEST_ITERATIONS=10000000
     profiles:
       - tests
 
   tests-valgrind:
-    build:
-      context: tests
-      dockerfile: Dockerfile
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
     environment:
       - CACHE_HOST=cache-valgrind
-      - CACHE_PORT=9001
-      - CACHE_TYPE=custom
       - TEST_DELAY_SEC=1
       - TEST_ITERATIONS=10000
     profiles:
       - tests-valgrind
 
+  tests-helgrind:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache-helgrind
+      - TEST_DELAY_SEC=1
+      - TEST_ITERATIONS=10000
+    profiles:
+      - tests-helgrind
+
   tests-callgrind:
-    build:
-      context: tests
-      dockerfile: Dockerfile
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
     environment:
       - CACHE_HOST=cache-callgrind
-      - CACHE_PORT=9001
-      - CACHE_TYPE=custom
       - TEST_DELAY_SEC=1
       - TEST_ITERATIONS=10000
     profiles:
@@ -93,6 +99,17 @@ services:
     ports:
       - "6379:6379"
     command: ["redis-server"]
+    sysctls:
+        - net.ipv4.tcp_rmem=4096 87380 524288
+        - net.ipv4.tcp_wmem=4096 65536 524288
+        - net.core.somaxconn=65535
+        - net.ipv4.tcp_tw_reuse=1
+        - net.ipv4.ip_local_port_range=1200    65000
+        - net.ipv4.tcp_fin_timeout=1
+    ulimits:
+      nofile:
+        soft: "1048576"
+        hard: "1048576"
     profiles:
       - redis
 

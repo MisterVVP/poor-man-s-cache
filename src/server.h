@@ -8,9 +8,9 @@
 #include <functional>
 #include <thread>
 #include <vector>
-#include <mutex>
-#include <condition_variable>
 #include <queue>
+#include <semaphore>
+#include <mutex>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -41,7 +41,7 @@ class CacheServer {
         static constexpr uint_fast16_t ACTIVE_CONN_LIMIT = 65000;
 
         struct Command {
-            int commandCode; // 0: Reserved, 1: SET
+            uint_fast16_t commandCode; // 0: Reserved, 1: SET
             char* key = nullptr;
             char* value = nullptr;
             uint_fast64_t hash;
@@ -49,7 +49,7 @@ class CacheServer {
         };
 
         struct Query {
-            int queryCode;  // 0: Reserved, 1: GET
+            uint_fast16_t queryCode;  // 0: Reserved, 1: GET
             char* key = nullptr;
             uint_fast64_t hash;
             int client_fd;
@@ -60,16 +60,22 @@ class CacheServer {
             std::queue<Query> queryQueue;
             std::queue<Command> commandQueue;
             KeyValueStore keyValueStore;
-            std::mutex mtx;
-            std::condition_variable cv;
+            std::binary_semaphore in_semaphore{0};
+            std::binary_semaphore out_semaphore{0};
         };
 
+        std::mutex shardMutex;
+        std::mutex metricsMutex;
         std::atomic<uint_fast32_t> activeConnections = 0;
         std::atomic<uint_fast64_t> numErrors = 0;
         std::atomic<uint_fast64_t> numRequests = 0;
         std::atomic<bool>& cancellationToken;
+        std::vector<int> epollInstances;
         std::vector<std::jthread> workerThreads;
-        uint_fast16_t workerThreadCount;
+        std::vector<std::jthread> epollThreads;
+        std::atomic<uint_fast16_t> nextThread = 0;
+        uint_fast16_t workerThreadCount = 0;
+        uint_fast16_t epollThreadCount = 0;
 
         std::jthread metricsUpdaterThread;
         std::unique_ptr<ServerShard[]> serverShards;
@@ -82,9 +88,11 @@ class CacheServer {
         int_fast8_t processQuery(const Query& query, KeyValueStore &keyValueStore);
 
         void workerLoop(ServerShard& shard, std::stop_token stopToken);
+        void epollLoop(int epoll_fd, std::stop_token stopToken);
+        void loadBalancer(int client_fd);
         void closeConnection(int client_fd);
         void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
-
+        std::pair<uint_fast16_t, uint_fast16_t> splitWorkerThreads(uint_fast16_t workerThreads);
     public:
         CacheServer(int port, std::atomic<bool>& cToken);
         ~CacheServer();

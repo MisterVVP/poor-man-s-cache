@@ -40,6 +40,8 @@ docker compose --profile main down
 > Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in docker-compose file under 'cache-valgrind' service configuration.
 > [!TIP]
 > Modify `BUILD_TYPE` build argument to switch between Debug (contains extra output to std and starts server much faster) and Release (optimized) builds
+> [!TIP]
+> Replace `valgrind` with helgrind to debug multithreading issues 
 
 To run cache and tests:
 ```
@@ -91,6 +93,11 @@ docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++26 -O3" . 
 docker run cache-tests:latest
 ```
 
+### Various helpful shell commands
+`sysctl -a` - check that all required sysctl options were overwritten successfully in docker
+`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - check what's going on with sockets, useful during execution of python test script, example in sockmon.bash
+
+
 ### To check how redis works with the same task
 ```
 docker compose --profile redis build
@@ -118,3 +125,4 @@ Check redis metrics at http://localhost:9121/metrics
 - Check out https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
 - Refactoring of kvs.cpp, maybe extract hash function into separate header to reuse it as external function in multiple places... 
 - Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
+
