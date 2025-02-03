@@ -1,6 +1,6 @@
 #include "server.h"
 
-int_fast8_t CacheServer::processCommand(const Command &command, KeyValueStore &keyValueStore)
+int_fast8_t ServerShard::processCommand(const Command &command)
 {
     const char* response = nullptr;
     int_fast8_t result = 0;
@@ -17,12 +17,10 @@ int_fast8_t CacheServer::processCommand(const Command &command, KeyValueStore &k
     }
 
     send(command.client_fd, response, strlen(response), 0);
-    closeConnection(command.client_fd);
-
     return result;
 }
 
-int_fast8_t CacheServer::processQuery(const Query &query, KeyValueStore &keyValueStore)
+int_fast8_t ServerShard::processQuery(const Query &query)
 {
     const char* response = nullptr;
     int_fast8_t result = 0;
@@ -39,13 +37,11 @@ int_fast8_t CacheServer::processQuery(const Query &query, KeyValueStore &keyValu
     }
 
     send(query.client_fd, response, strlen(response), 0);
-    closeConnection(query.client_fd);
-
     return result;
 }
 
-CacheServer::CacheServer(int port, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
-    server_fd(-1), isRunning(false), activeConnections(0), numRequests(0)
+CacheServer::CacheServer(int port, uint_fast16_t threadCount, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
+    server_fd(-1), isRunning(false), activeConnections(0), numRequests(0), workerThreadCount(threadCount)
 {
 }
 
@@ -61,32 +57,11 @@ CacheServer::~CacheServer() {
     }
 }
 
-void CacheServer::workerLoop(ServerShard& shard, std::stop_token stopToken) {
-    std::cout << "Started worker loop for shard = " << shard.shardId << std::endl;
-    while (!stopToken.stop_requested()) {
-        shard.in_semaphore.acquire();
-        while(!shard.commandQueue.empty()) {
-            auto cmd = shard.commandQueue.front();
-            shard.commandQueue.pop();
-            numErrors += processCommand(cmd, shard.keyValueStore);
-            delete[] cmd.key;
-            delete[] cmd.value;
-        }
-
-        while(!shard.queryQueue.empty()) {
-            auto query = shard.queryQueue.front();
-            shard.queryQueue.pop();
-            numErrors += processQuery(query, shard.keyValueStore);
-            delete[] query.key;
-        }
-        shard.out_semaphore.release();
-    }
-    std::cout << "Exited worker loop for shard = " << shard.shardId << std::endl;
-}
-
-void CacheServer::epollLoop(int epoll_fd, std::stop_token stopToken)
+void CacheServer::workerLoop(int epoll_fd, std::stop_token stopToken)
 {
+#ifndef NDEBUG
     std::cout << "Started epoll loop for epoll_fd = " << epoll_fd << std::endl;
+#endif
     epoll_event events[MAX_EVENTS];
     while (!stopToken.stop_requested()) {
         int event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
@@ -112,23 +87,28 @@ void CacheServer::epollLoop(int epoll_fd, std::stop_token stopToken)
                         continue;
                     }
                     char* key = strtok_r(nullptr, " ", &com_saveptr);
-                    if (key) {
+                    if (key) {                        
                         auto hash = hashFunc(key);
-                        auto shardId = hash % workerThreadCount;
                         auto kSize = strlen(key) + 1;
-                        auto& shard = serverShards[shardId];
-                        std::lock_guard<std::mutex> lock(shardMutex);
+                        auto shardId = hash % workerThreadCount;
 
+                        std::lock_guard<std::mutex> lock(shardMutex);
+                        auto& shard = serverShards[shardId];
                         if (strcmp(command, "GET") == 0) {
+
                             Query query{1, nullptr, hash, client_fd};
 
                             query.key = new char[kSize];
                             memcpy(query.key, key, kSize);
                             query.key[kSize-1] = '\0';
 
-                            shard.queryQueue.push(query);
-                            shard.in_semaphore.release();
-                            shard.out_semaphore.acquire();
+
+                            numErrors += shard.processQuery(query);
+#ifndef NDEBUG
+                            std::cout << "read " << query.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
+#endif
+                            closeConnection(client_fd);
+                            delete[] query.key;
                         } else if (strcmp(command, "SET") == 0) {
                             char* value = strtok_r(nullptr, " ", &com_saveptr);
                             if (value) {
@@ -143,9 +123,13 @@ void CacheServer::epollLoop(int epoll_fd, std::stop_token stopToken)
                                 memcpy(cmd.key, key, kSize);
                                 cmd.key[kSize-1] = '\0';
 
-                                shard.commandQueue.push(cmd);
-                                shard.in_semaphore.release();
-                                shard.out_semaphore.acquire();
+                                numErrors += shard.processCommand(cmd);
+#ifndef NDEBUG
+                                std::cout << "wrote " << cmd.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
+#endif
+                                closeConnection(client_fd);
+                                delete[] cmd.key;
+                                delete[] cmd.value;
                             } else {
                                 const char* response = "ERROR: Invalid SET command format";
                                 #ifndef NDEBUG
@@ -172,12 +156,34 @@ void CacheServer::epollLoop(int epoll_fd, std::stop_token stopToken)
     }
 }
 
+int CacheServer::acceptConnection()
+{
+    std::shared_lock<std::shared_mutex> lock(epollMutex);
+    //std::lock_guard<std::mutex> lock(epollMutex);
+    sockaddr_in client_address;
+    socklen_t client_len = sizeof(client_address);
+    auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
+    ++numRequests;
+    return client_fd;
+}
+
 void CacheServer::closeConnection(int client_fd)
 {
     shutdown(client_fd, SHUT_RDWR);
     close(client_fd);
-    if(activeConnections > 0) { // TODO investigate
-        --activeConnections;
+    --activeConnections;
+}
+
+void CacheServer::distributeConnection(int client_fd) {
+    int epoll_fd = epollInstances[nextThread];
+    nextThread = (nextThread + 1) % workerThreadCount;
+    epoll_event event{};
+    event.events = EPOLLIN | EPOLLET;
+    event.data.fd = client_fd;
+    ++activeConnections;
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+        perror("Failed to add client_fd to epoll");
+        closeConnection(client_fd);
     }
 }
 
@@ -189,32 +195,6 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
             channel.push(CacheServerMetrics{ numErrors, activeConnections, numRequests });
         }
         std::this_thread::sleep_for(std::chrono::seconds(METRICS_UPDATE_FREQUENCY_SEC));
-    }
-}
-
-std::pair<uint_fast16_t, uint_fast16_t> CacheServer::splitWorkerThreads(uint_fast16_t workerThreads)
-{
-    uint_fast16_t part1 = 1;
-    auto oneFourth = workerThreads / 4;
-    if (oneFourth > 1) {
-        part1 = oneFourth;
-    }
-
-    uint_fast16_t part2 = workerThreads - part1;
-    return {part1, part2};
-}
-
-void CacheServer::loadBalancer(int client_fd) {
-    int epoll_fd = epollInstances[nextThread];    
-    nextThread = (nextThread + 1) % epollThreadCount;
-
-    epoll_event event{};
-    event.events = EPOLLIN | EPOLLET;
-    event.data.fd = client_fd;
-
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-        perror("Failed to add client_fd to epoll");
-        closeConnection(client_fd);
     }
 }
 
@@ -251,37 +231,31 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         return 1;
     }
 
-    auto totalThreadCount = std::thread::hardware_concurrency();
+    if (!workerThreadCount) {
+        std::cout << "workerThreadCount is not defined, calculating automatically..." << std::endl;
+        if (std::thread::hardware_concurrency() <= 4) {
+            workerThreadCount = 1;
+        } else {
+            workerThreadCount = std::thread::hardware_concurrency() / 4;
+        }
+    }
 
-    auto workers = splitWorkerThreads(totalThreadCount);    
-    epollThreadCount = workers.first;
-    workerThreadCount = workers.second;
-
-    std::cout << "Initializing " << epollThreadCount << " epoll instances" << std::endl;
-    for (int i = 0; i < epollThreadCount; ++i) {
+    std::cout << "Initializing " << workerThreadCount << " epoll instances and server shards" << std::endl;
+    serverShards = std::make_unique<ServerShard[]>(workerThreadCount);
+    for (int i = 0; i < workerThreadCount; ++i) {
         int epoll_fd = epoll_create1(0);
         if (epoll_fd == -1) {
             perror("Failed to create epoll instance");
             return 1;
         }
-        epollInstances.push_back(epoll_fd);    
-        epollThreads.emplace_back(std::jthread([this, epoll_fd](std::stop_token stopToken)
-        {
-            epollLoop(epoll_fd, stopToken);
-        }));
-    }
-    
-    std::cout << "Initializing " << workerThreadCount << " server shards" << std::endl;
-    serverShards = std::make_unique<ServerShard[]>(workerThreadCount);
-
-    for (int i = 0; i < workerThreadCount; ++i) {
+        epollInstances.push_back(epoll_fd);
         serverShards[i].shardId = i;
-        workerThreads.emplace_back(std::jthread([this, i](std::stop_token stopToken)
+        workerThreads.emplace_back(std::jthread([this, epoll_fd](std::stop_token stopToken)
         {
-            workerLoop(serverShards[i], stopToken);
+            workerLoop(epoll_fd, stopToken);
         }));
     }
-    
+
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
     {
         metricsUpdater(channel, stopToken);
@@ -289,15 +263,10 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 
     std::cout << "Server started on port " << port << ", " << workerThreadCount << " worker threads are ready" << std::endl;
 
-    while (!cancellationToken) {
-        sockaddr_in client_address;
-        socklen_t client_len = sizeof(client_address);
-        int client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
-
+    while (!cancellationToken) {        
+        auto client_fd = acceptConnection();
         if (client_fd >= 0) {
-            ++activeConnections;
-            ++numRequests;
-            loadBalancer(client_fd);
+            distributeConnection(client_fd);
         } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("Failed to accept connection");
         }     
@@ -313,18 +282,6 @@ void CacheServer::Stop()
 {
     if(isRunning) {
         isRunning = false;
-
-        std::cout << "Stopping epoll threads..." << std::endl;
-        cancellationToken = true;
-
-        for (auto& epoll_thread : epollThreads) {
-            auto sSource = epoll_thread.get_stop_source();
-            
-            if (sSource.stop_possible()) {
-                sSource.request_stop();
-            }
-        }
-        std::cout << "Epoll threads stopped" << std::endl;
 
         std::cout << "Stopping worker threads..." << std::endl;
         cancellationToken = true;

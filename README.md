@@ -9,10 +9,9 @@ Another pet project to practice.
 - Build alternative to Redis cache from scratch. Requirements are limited to simple distributed keyvalue storage for string data.
 
 ### Philosophy (or means to achieve goals)
-- Focus on performance, not readability. Use as little of standard std:: code as possible and prefer plain C-like code over ideomatic C++ approaches.
-- Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string is fast enough for a few operation, but should be avoided for highload)
-- Prefer manual memory management instead of smart pointers
-
+- Focus on performance, not readability or some 'patterns' and ideoms. Prefer plain C-like code, when necessary.
+- Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string should be avoided for highload, std::unordered_map is complete no-no)
+- Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. prometheus metrics)
 
 ## Quick start
 

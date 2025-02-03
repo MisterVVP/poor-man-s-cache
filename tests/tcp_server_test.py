@@ -133,6 +133,11 @@ if __name__ == "__main__":
     rps = num_requests / test_time
     if failed_iterations > 0:
         print(f"Test completed with {failed_iterations} failed iterations. Test time: {test_time} seconds. Requests count: {num_requests}. Average RPS: {rps}\n")
-        exit(1)
     else:
         print(f"The test was completed successfully with no errors. Test time: {test_time} seconds. Requests count: {num_requests}. Average RPS: {rps} \n")
+    time.sleep(delay_sec)
+    
+    if (failed_iterations > 0):
+        exit(1)
+    else:
+        exit(0)

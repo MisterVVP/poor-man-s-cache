@@ -300,7 +300,7 @@ void KeyValueStore::resize() {
 #ifndef NDEBUG
     auto rcd_start = std::chrono::high_resolution_clock::now();
 #endif
-        rebuildCompressionDictionary();
+    rebuildCompressionDictionary();
 #ifndef NDEBUG
     auto rcd_stop = std::chrono::high_resolution_clock::now();
     auto rcd_dur = std::chrono::duration_cast<std::chrono::milliseconds>(rcd_stop - rcd_start);

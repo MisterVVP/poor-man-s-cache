@@ -38,7 +38,8 @@ int main() {
 
 
     auto server_port = getIntFromEnv("SERVER_PORT", true);
-    CacheServer cacheServer(server_port, cancellationToken);
+    auto worker_threads = getIntFromEnv("WORKER_THREADS", false, 0);
+    CacheServer cacheServer(server_port, worker_threads, cancellationToken);
 
 
     auto metricsUpdaterThread = std::jthread(

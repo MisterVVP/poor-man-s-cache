@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 #include <queue>
-#include <semaphore>
+#include <shared_mutex>
 #include <mutex>
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,14 +23,36 @@
 using namespace kvs;
 
 #define EPOLL_WAIT_TIMEOUT -1
-#define MAX_EVENTS 1024
-#define READ_BUFFER_SIZE 1024
-#define SEMAPHORE_TRY_ACQUIRE_FOR_MSEC 1000
+#define MAX_EVENTS 24
+#define READ_BUFFER_SIZE 8096
 
 struct CacheServerMetrics {
     uint_fast64_t serverNumErrors = 0;
     uint_fast32_t serverNumActiveConnections = 0;
     uint_fast64_t serverNumRequests = 0;
+};
+
+struct Command {
+    uint_fast16_t commandCode; // 0: Reserved, 1: SET
+    char* key = nullptr;
+    char* value = nullptr;
+    uint_fast64_t hash;
+    int client_fd;
+};
+
+struct Query {
+    uint_fast16_t queryCode;  // 0: Reserved, 1: GET
+    char* key = nullptr;
+    uint_fast64_t hash;
+    int client_fd;
+};
+
+struct ServerShard {
+    int_fast16_t shardId;
+    KeyValueStore keyValueStore;
+
+    int_fast8_t processCommand(const Command& command);
+    int_fast8_t processQuery(const Query& query);
 };
 
 class CacheServer {
@@ -39,31 +61,7 @@ class CacheServer {
         static constexpr uint_fast16_t METRICS_UPDATE_FREQUENCY_SEC = 5;
         static constexpr uint_fast16_t CONN_QUEUE_LIMIT = 65535;
         static constexpr uint_fast16_t ACTIVE_CONN_LIMIT = 65000;
-
-        struct Command {
-            uint_fast16_t commandCode; // 0: Reserved, 1: SET
-            char* key = nullptr;
-            char* value = nullptr;
-            uint_fast64_t hash;
-            int client_fd;
-        };
-
-        struct Query {
-            uint_fast16_t queryCode;  // 0: Reserved, 1: GET
-            char* key = nullptr;
-            uint_fast64_t hash;
-            int client_fd;
-        };
-
-        struct ServerShard {
-            int_fast16_t shardId;
-            std::queue<Query> queryQueue;
-            std::queue<Command> commandQueue;
-            KeyValueStore keyValueStore;
-            std::binary_semaphore in_semaphore{0};
-            std::binary_semaphore out_semaphore{0};
-        };
-
+        std::shared_mutex epollMutex;
         std::mutex shardMutex;
         std::mutex metricsMutex;
         std::atomic<uint_fast32_t> activeConnections = 0;
@@ -72,10 +70,8 @@ class CacheServer {
         std::atomic<bool>& cancellationToken;
         std::vector<int> epollInstances;
         std::vector<std::jthread> workerThreads;
-        std::vector<std::jthread> epollThreads;
         std::atomic<uint_fast16_t> nextThread = 0;
         uint_fast16_t workerThreadCount = 0;
-        uint_fast16_t epollThreadCount = 0;
 
         std::jthread metricsUpdaterThread;
         std::unique_ptr<ServerShard[]> serverShards;
@@ -84,17 +80,13 @@ class CacheServer {
         int server_fd;
         int epoll_fd;
 
-        int_fast8_t processCommand(const Command& command, KeyValueStore &keyValueStore);
-        int_fast8_t processQuery(const Query& query, KeyValueStore &keyValueStore);
-
-        void workerLoop(ServerShard& shard, std::stop_token stopToken);
-        void epollLoop(int epoll_fd, std::stop_token stopToken);
-        void loadBalancer(int client_fd);
+        void workerLoop(int epoll_fd, std::stop_token stopToken);
+        void distributeConnection(int client_fd);
+        int acceptConnection();
         void closeConnection(int client_fd);
         void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
-        std::pair<uint_fast16_t, uint_fast16_t> splitWorkerThreads(uint_fast16_t workerThreads);
     public:
-        CacheServer(int port, std::atomic<bool>& cToken);
+        CacheServer(int port, uint_fast16_t threadCount, std::atomic<bool>& cToken);
         ~CacheServer();
         int Start(std::queue<CacheServerMetrics>& channel);
         void Stop();

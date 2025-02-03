@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <iostream>
 
-int getIntFromEnv(const char * env_var_name, bool isRequired)  {
+int getIntFromEnv(const char * env_var_name, bool isRequired, int defaultVal = 0)  {
     const char* env_var = std::getenv(env_var_name);
     if (env_var != nullptr) {
         return atoi(env_var);
@@ -13,7 +13,7 @@ int getIntFromEnv(const char * env_var_name, bool isRequired)  {
         std::cerr << "Environment variable " << env_var_name << " not found." << std::endl;
         exit(1);
     }
-    return 0;
+    return defaultVal;
 }
 
 const char* getStrFromEnv(const char* env_var_name, bool isRequired)  {
