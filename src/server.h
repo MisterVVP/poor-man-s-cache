@@ -11,6 +11,9 @@
 #include <queue>
 #include <shared_mutex>
 #include <mutex>
+#include <unordered_map>
+#include <unordered_set>
+#include <semaphore>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -30,6 +33,10 @@ struct CacheServerMetrics {
     uint_fast64_t serverNumErrors = 0;
     uint_fast32_t serverNumActiveConnections = 0;
     uint_fast64_t serverNumRequests = 0;
+
+    CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests):
+        serverNumErrors(numErrors), serverNumActiveConnections(numConnections), serverNumRequests(numRequests) {
+    }
 };
 
 struct Command {
@@ -55,16 +62,35 @@ struct ServerShard {
     int_fast8_t processQuery(const Query& query);
 };
 
+struct ClientAddr {
+    sockaddr_in client_address;
+    socklen_t client_len = sizeof(client_address);
+    int client_fd;
+
+    bool operator==(const ClientAddr &other) const {
+        return client_address.sin_port == other.client_address.sin_port &&
+               client_address.sin_addr.s_addr == other.client_address.sin_addr.s_addr;
+    }
+};
+namespace std {
+
+template <>
+    struct hash<::ClientAddr> {
+        size_t operator()(::ClientAddr a) const {
+            return a.client_address.sin_port ^ a.client_address.sin_addr.s_addr;
+        }
+    };    
+}
+
 class CacheServer {
-    
     private:
-        static constexpr uint_fast16_t METRICS_UPDATE_FREQUENCY_SEC = 5;
+        static constexpr std::chrono::seconds METRICS_UPDATE_FREQUENCY_SEC = std::chrono::seconds(4);
+        static constexpr std::chrono::seconds CONN_THROTTLE_DELAY_SEC = std::chrono::seconds(3);
         static constexpr uint_fast16_t CONN_QUEUE_LIMIT = 65535;
-        static constexpr uint_fast16_t ACTIVE_CONN_LIMIT = 65000;
-        std::shared_mutex epollMutex;
+        static constexpr uint_fast16_t ACTIVE_CONN_LIMIT = 7000;
         std::mutex shardMutex;
-        std::mutex metricsMutex;
-        std::atomic<uint_fast32_t> activeConnections = 0;
+        std::binary_semaphore connSemaphore{0};
+        std::binary_semaphore metricsSemaphore{0};
         std::atomic<uint_fast64_t> numErrors = 0;
         std::atomic<uint_fast64_t> numRequests = 0;
         std::atomic<bool>& cancellationToken;
@@ -72,6 +98,9 @@ class CacheServer {
         std::vector<std::jthread> workerThreads;
         std::atomic<uint_fast16_t> nextThread = 0;
         uint_fast16_t workerThreadCount = 0;
+
+        std::unordered_set<ClientAddr> activeConnections;
+        std::atomic<uint_fast32_t> activeConnectionsCounter = 0;
 
         std::jthread metricsUpdaterThread;
         std::unique_ptr<ServerShard[]> serverShards;
@@ -82,7 +111,6 @@ class CacheServer {
 
         void workerLoop(int epoll_fd, std::stop_token stopToken);
         void distributeConnection(int client_fd);
-        int acceptConnection();
         void closeConnection(int client_fd);
         void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
     public:

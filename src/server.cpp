@@ -3,46 +3,39 @@
 int_fast8_t ServerShard::processCommand(const Command &command)
 {
     const char* response = nullptr;
-    int_fast8_t result = 0;
+    int_fast8_t err = 0;
     if (command.commandCode == 1) {
         auto setRes = keyValueStore.set(command.key, command.value, command.hash);
-        if (setRes) {
-            result ^= 1;
-            response = "OK";
-        } else {
-            response = "ERROR: Internal error";
-        }
+        response = setRes ? "OK" : "ERROR: Internal error";
     } else {
+        err = 1;
         response = "ERROR: Invalid command code";
     }
 
     send(command.client_fd, response, strlen(response), 0);
-    return result;
+    return err;
 }
 
 int_fast8_t ServerShard::processQuery(const Query &query)
 {
     const char* response = nullptr;
-    int_fast8_t result = 0;
+    int_fast8_t err = 0;
     if (query.queryCode == 1) {
         const char* value = keyValueStore.get(query.key, query.hash);
-        if (value) {
-            response = value;
-            result ^= 1;
-        } else {
-            response =  "(nil)";
-        }
+        response = value ? value : "(nil)";
     } else {
+        err = 1;
         response = "ERROR: Invalid query code";        
     }
 
     send(query.client_fd, response, strlen(response), 0);
-    return result;
+    return err;
 }
 
 CacheServer::CacheServer(int port, uint_fast16_t threadCount, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
-    server_fd(-1), isRunning(false), activeConnections(0), numRequests(0), workerThreadCount(threadCount)
+    server_fd(-1), isRunning(false), activeConnectionsCounter(0), numRequests(0), workerThreadCount(threadCount)
 {
+    activeConnections.reserve(ACTIVE_CONN_LIMIT);
 }
 
 CacheServer::~CacheServer() {
@@ -156,22 +149,18 @@ void CacheServer::workerLoop(int epoll_fd, std::stop_token stopToken)
     }
 }
 
-int CacheServer::acceptConnection()
-{
-    std::shared_lock<std::shared_mutex> lock(epollMutex);
-    //std::lock_guard<std::mutex> lock(epollMutex);
-    sockaddr_in client_address;
-    socklen_t client_len = sizeof(client_address);
-    auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
-    ++numRequests;
-    return client_fd;
-}
-
 void CacheServer::closeConnection(int client_fd)
 {
-    shutdown(client_fd, SHUT_RDWR);
-    close(client_fd);
-    --activeConnections;
+    auto sdRes = shutdown(client_fd, SHUT_RDWR);
+    if (sdRes == -1) {
+        perror("Error when closing client_fd");
+    }
+    auto closeRes = close(client_fd);
+    if (closeRes == -1) {
+        perror("Error when closing client_fd");
+    } else {
+        --activeConnectionsCounter;
+    }
 }
 
 void CacheServer::distributeConnection(int client_fd) {
@@ -180,7 +169,6 @@ void CacheServer::distributeConnection(int client_fd) {
     epoll_event event{};
     event.events = EPOLLIN | EPOLLET;
     event.data.fd = client_fd;
-    ++activeConnections;
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
         perror("Failed to add client_fd to epoll");
         closeConnection(client_fd);
@@ -190,11 +178,8 @@ void CacheServer::distributeConnection(int client_fd) {
 void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
 {
     while (!stopToken.stop_requested()) {
-        {
-            std::lock_guard<std::mutex> lock(metricsMutex);
-            channel.push(CacheServerMetrics{ numErrors, activeConnections, numRequests });
-        }
-        std::this_thread::sleep_for(std::chrono::seconds(METRICS_UPDATE_FREQUENCY_SEC));
+        metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
+        channel.push(CacheServerMetrics(numErrors, activeConnectionsCounter, numRequests));
     }
 }
 
@@ -238,6 +223,9 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         } else {
             workerThreadCount = std::thread::hardware_concurrency() / 4;
         }
+    } else if (workerThreadCount > std::thread::hardware_concurrency()) {
+        std::cout << "workerThreadCount is higher than supported by machine hardware, using max available number: " << std::thread::hardware_concurrency() << std::endl;
+        workerThreadCount = std::thread::hardware_concurrency();
     }
 
     std::cout << "Initializing " << workerThreadCount << " epoll instances and server shards" << std::endl;
@@ -264,12 +252,21 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     std::cout << "Server started on port " << port << ", " << workerThreadCount << " worker threads are ready" << std::endl;
 
     while (!cancellationToken) {        
-        auto client_fd = acceptConnection();
+        ClientAddr clientAddr;
+        if (activeConnections.size() >= ACTIVE_CONN_LIMIT) {
+            connSemaphore.try_acquire_for(CONN_THROTTLE_DELAY_SEC);
+            activeConnections.clear();
+        }
+        auto client_fd = accept(server_fd, (struct sockaddr*)&clientAddr.client_address, &clientAddr.client_len);
         if (client_fd >= 0) {
+            clientAddr.client_fd = client_fd;
+            activeConnections.insert(clientAddr);
+            ++activeConnectionsCounter;
+            ++numRequests;
             distributeConnection(client_fd);
         } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("Failed to accept connection");
-        }     
+        }
     }
 
     std::cout << "Shutting down gracefully..." << std::endl;
