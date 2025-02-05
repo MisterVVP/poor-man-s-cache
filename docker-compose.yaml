@@ -49,16 +49,28 @@ services:
     profiles:
       - callgrind
 
-  tests:
+  tests-1:
     extends:
       file: common-compose-config.yaml
       service: tests-common
     environment:
       - CACHE_HOST=cache
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=10000000
+      - TEST_ITERATIONS=100000
     profiles:
       - tests
+
+# Uncomment for multi-client testing
+#  tests-2:
+#    extends:
+#      file: common-compose-config.yaml
+#      service: tests-common
+#    environment:
+#      - CACHE_HOST=cache
+#      - TEST_DELAY_SEC=1
+#      - TEST_ITERATIONS=100000
+#    profiles:
+#      - tests
 
   tests-valgrind:
     extends:

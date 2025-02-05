@@ -5,7 +5,7 @@ services:
         - net.ipv4.tcp_wmem=4096 65536 524288
         - net.core.somaxconn=65535
         - net.ipv4.tcp_tw_reuse=1
-        - net.ipv4.ip_local_port_range=1200    65000
+        - net.ipv4.ip_local_port_range=1024 65535
         - net.ipv4.tcp_fin_timeout=1
     ulimits:
       nofile:
@@ -15,7 +15,7 @@ services:
       - SERVER_PORT=9001
       - METRICS_PORT=8080
       - METRICS_HOST=0.0.0.0
-      - WORKER_THREADS=12
+      - WORKER_THREADS=24
     ports:
       - "9001:9001"
       - "8080:8080"
