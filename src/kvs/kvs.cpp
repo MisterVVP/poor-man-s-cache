@@ -25,7 +25,7 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
         dictSettings.usePrimeNumbers = false;
         dictSettings.compressionEnabled = false;
         dictSettings.initialSize = FREQ_DICT_SIZE;
-        compressDictionary = new KeyValueStore(dictSettings);
+        compressDictionary = std::make_unique<KeyValueStore>(dictSettings);
     }
 #ifndef NDEBUG
     std::cout << "Table initialization finished!" << std::endl;
@@ -49,9 +49,6 @@ KeyValueStore::~KeyValueStore() {
               << emptyBuckets << " emptyEntries = " << emptyEntries << " tableSize = " << tableSize 
               << " numEntries = " << numEntries << " numResizes = " << numResizes << std::endl;
     cleanTable(table, tableSize);
-    if (compressionEnabled || compressDictionary) {        
-        delete compressDictionary;
-    }
 }
 
 void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
@@ -229,7 +226,7 @@ void KeyValueStore::rebuildCompressionDictionary() {
 
     for (size_t i = 0; i < frequencyCount; ++i) {
         if (frequencies[i].count > 1) {
-                compressDictionary->set(std::to_string(i).c_str(), frequencies[i].substring);
+            compressDictionary->set(std::to_string(i).c_str(), frequencies[i].substring);
         }
     }
 
@@ -258,6 +255,7 @@ void KeyValueStore::resize() {
         }
     }
 
+    #pragma omp parallel for schedule(dynamic)
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             if (table[i].entries[j].occupied) {

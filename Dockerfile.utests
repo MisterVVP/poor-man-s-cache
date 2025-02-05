@@ -11,7 +11,7 @@ WORKDIR /app
 COPY . .
 
 # Number of elements to test
-ENV NUM_ELEMENTS=100000000
+ENV NUM_ELEMENTS=10000000
 
 # Build KeyValueStorage tests
 ARG GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"

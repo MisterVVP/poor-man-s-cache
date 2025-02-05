@@ -7,6 +7,8 @@
 #include <cmath>
 #include <queue>
 #include <algorithm>
+#include <future>
+#include <atomic>
 #include "../primegen/primegen.h"
 #include "../hash/hash.h"
 
@@ -77,7 +79,7 @@ namespace kvs
                 size_t count;
             };
             bool compressionEnabled;
-            KeyValueStore* compressDictionary;
+            std::unique_ptr<KeyValueStore> compressDictionary;
             void rebuildCompressionDictionary();
             char* compress(const char* value);
             char* decompress(const char* compressedValue);
