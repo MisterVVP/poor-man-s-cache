@@ -40,8 +40,10 @@ docker compose --profile main down
 ### To debug memory issues
 > [!WARNING]
 > Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in docker-compose file under 'cache-valgrind' service configuration.
+
 > [!TIP]
 > Modify `BUILD_TYPE` build argument to switch between Debug (contains extra output to std and starts server much faster) and Release (optimized) builds
+
 > [!TIP]
 > Replace `valgrind` with helgrind to debug multithreading issues 
 
@@ -111,6 +113,7 @@ Check redis metrics at http://localhost:9121/metrics
 > [!NOTE]
 > There could be a way to configure Redis to work with the same amount of data, however I can not verify this without diving deep into Redis configuration, thus I am comparing against default redis configuration
 > It is possible that there automatic is DDoS protection integrated at Redis as well, though I do not think this is fair to enable such functionality by default.
+
 - Redis just stop processing requests normally at 10M or especially 100M operations. poor-man-s-cache works.
 - Redis stopped responding normally even for 10000 requests sent from 4 threads. Typical redis error is Response: Socket error: [Errno 99] Address not available. This might be related to some antiDDOS protection of Redis
 - Redis eats a small amount of memory, poor-man-s-cache eats plenty
