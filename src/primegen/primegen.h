@@ -12,7 +12,7 @@ constexpr uint_fast64_t SEGMENT_SIZE = 1000000;
 
 class Primegen {
     private:
-        const static uint_fast64_t maxLimit = DEFAULT_MAX_LIMIT;
+        inline const static uint_fast64_t maxLimit = DEFAULT_MAX_LIMIT;
         inline static std::queue<uint_fast64_t> sharedQueue;
         inline static bool isInitialized = false;
         static void initGenerator();
