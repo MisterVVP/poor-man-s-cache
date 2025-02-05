@@ -40,8 +40,8 @@ int_fast8_t ServerShard::processQuery(const Query &query)
     return err;
 }
 
-CacheServer::CacheServer(int port, uint_fast16_t epollCount, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
-    server_fd(-1), isRunning(false), activeConnectionsCounter(0), numRequests(0), epollInstancesCount(epollCount)
+CacheServer::CacheServer(int port, uint_fast16_t nShards, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
+    server_fd(-1), isRunning(false), activeConnectionsCounter(0), numRequests(0), numShards(nShards)
 {
 
 }
@@ -51,14 +51,41 @@ CacheServer::~CacheServer() {
     if (server_fd >= 0) {
         close(server_fd);
     }
-    for (int epoll_fd : epollInstances) {
-        if (epoll_fd >= 0) {
-            close(epoll_fd);
-        }
-    }
+    if (epoll_fd >= 0) {
+        close(epoll_fd);
+    }    
 }
 
-int_fast8_t CacheServer::handleRequest(int epoll_fd)
+Command CacheServer::createCommand(uint_fast16_t code, char *key, char *value, uint_fast64_t hash, int client_fd)
+{
+    Command cmd{1, nullptr, nullptr, hash, client_fd};
+
+    auto vSize = strlen(value) + 1;
+    cmd.value = new char[vSize];
+    memcpy(cmd.value, value, vSize);
+    cmd.value[vSize-1] = '\0';
+
+    auto kSize = strlen(key) + 1;
+    cmd.key = new char[kSize];
+    memcpy(cmd.key, key, kSize);
+    cmd.key[kSize-1] = '\0';
+
+    return cmd;
+}
+
+Query CacheServer::createQuery(uint_fast16_t code, char *key, uint_fast64_t hash, int client_fd)
+{
+    Query query{code, nullptr, hash, client_fd};
+
+    auto kSize = strlen(key) + 1;
+    query.key = new char[kSize];
+    memcpy(query.key, key, kSize);
+    query.key[kSize-1] = '\0';
+
+    return query;
+}
+
+int_fast8_t CacheServer::handleRequest()
 {
 #ifndef NDEBUG
     auto start = std::chrono::high_resolution_clock::now();
@@ -112,21 +139,12 @@ int_fast8_t CacheServer::handleRequest(int epoll_fd)
                 }
                 char* key = strtok_r(nullptr, " ", &com_saveptr);
                 if (key) {                        
-                    auto hash = hashFunc(key);
-                    auto kSize = strlen(key) + 1;
-                    auto shardId = hash % epollInstancesCount;
+                    auto hash = hashFunc(key);                    
+                    auto shardId = hash % numShards;
 
-                    std::lock_guard<std::mutex> lock(shardMutex);
                     auto& shard = serverShards[shardId];
                     if (strcmp(command, "GET") == 0) {
-
-                        Query query{1, nullptr, hash, client_fd};
-
-                        query.key = new char[kSize];
-                        memcpy(query.key, key, kSize);
-                        query.key[kSize-1] = '\0';
-
-
+                        auto query = createQuery(1, key, hash, client_fd);
                         result += shard.processQuery(query);
 #ifndef NDEBUG
                         std::cout << "read " << query.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
@@ -136,17 +154,7 @@ int_fast8_t CacheServer::handleRequest(int epoll_fd)
                     } else if (strcmp(command, "SET") == 0) {
                         char* value = strtok_r(nullptr, " ", &com_saveptr);
                         if (value) {
-                            Command cmd{1, nullptr, nullptr, hash, client_fd};
-
-                            auto vSize = strlen(value) + 1;
-                            cmd.value = new char[vSize];
-                            memcpy(cmd.value, value, vSize);
-                            cmd.value[vSize-1] = '\0';
-
-                            cmd.key = new char[kSize];
-                            memcpy(cmd.key, key, kSize);
-                            cmd.key[kSize-1] = '\0';
-
+                            auto cmd = createCommand(1, key, value, hash, client_fd);
                             result += shard.processCommand(cmd);
 #ifndef NDEBUG
                             std::cout << "wrote " << cmd.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
@@ -259,27 +267,9 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         return 1;
     }
 
-    if (!epollInstancesCount) {
-        std::cout << "epollInstancesCount is not defined, calculating automatically..." << std::endl;
-        if (std::thread::hardware_concurrency() <= 4) {
-            epollInstancesCount = 1;
-        } else {
-            epollInstancesCount = std::thread::hardware_concurrency() / 4;
-        }
-    } else if (epollInstancesCount > std::thread::hardware_concurrency()) {
-        std::cout << "epollInstancesCount is higher than supported by machine hardware, using max available number: " << std::thread::hardware_concurrency() << std::endl;
-        epollInstancesCount = std::thread::hardware_concurrency();
-    }
-
-    std::cout << "Initializing " << epollInstancesCount << " epoll instances and server shards" << std::endl;
-    serverShards = std::make_unique<ServerShard[]>(epollInstancesCount);
-    for (int i = 0; i < epollInstancesCount; ++i) {
-        int epoll_fd = epoll_create1(0);
-        if (epoll_fd == -1) {
-            perror("Failed to create epoll instance");
-            return 1;
-        }
-        epollInstances.push_back(epoll_fd);
+    std::cout << "Initializing " << numShards << " server shards..." << std::endl;
+    serverShards = std::make_unique<ServerShard[]>(numShards);
+    for (int i = 0; i < numShards; ++i) {
         serverShards[i].shardId = i;
     }
 
@@ -288,37 +278,32 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         metricsUpdater(channel, stopToken);
     });
 
-    std::cout << "Server started on port " << port << ", " << epollInstancesCount << " epoll instances are ready" << std::endl;
+    epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        perror("Failed to create epoll instance");
+        return 1;
+    }
+    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
 
     while (!cancellationToken) {
-        std::future<int_fast8_t> futures[epollInstancesCount];
-        for (auto i = 0; i < epollInstancesCount; ++i) {
-            sockaddr_in client_address;
-            socklen_t client_len = sizeof(client_address);
-            auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
-            if (client_fd >= 0) {
-                ++activeConnectionsCounter;
-                ++numRequests;
-                setNonBlocking(client_fd);
-                auto epoll_fd = epollInstances[i];
-                epoll_event event{};
-                event.events = EPOLLIN | EPOLLET;
-                event.data.fd = client_fd;
-                if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-                    perror("Failed to add client_fd to epoll");
-                    closeConnection(client_fd);
-                } else {
-                    futures[i] = std::async(&CacheServer::handleRequest, this, epoll_fd);
-                }
-            } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                perror("Failed to accept connection");
+        sockaddr_in client_address;
+        socklen_t client_len = sizeof(client_address);
+        auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
+        if (client_fd >= 0) {
+            ++activeConnectionsCounter;
+            ++numRequests;
+            setNonBlocking(client_fd);
+            epoll_event event{};
+            event.events = EPOLLIN | EPOLLET;
+            event.data.fd = client_fd;
+            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+                perror("Failed to add client_fd to epoll");
+                closeConnection(client_fd);
+            } else {
+                numErrors += handleRequest();
             }
-        }
-        for (auto i = 0; i < epollInstancesCount; ++i) {
-            if (!futures[i].valid()) {
-                continue;
-            }
-            numErrors += futures[i].get();
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            perror("Failed to accept connection");
         }
     }
 

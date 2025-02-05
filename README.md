@@ -14,6 +14,9 @@ Another pet project to practice.
 - Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. prometheus metrics)
 
 ## Quick start
+> [!TIP]
+> Use `NUM_SHARDS` environment variable (for local setup it's defined in common-compose-config.yaml) to control a number of shards for server.
+> High number of shards involves a small memory overhead, however it may boost server performance and help to avoid collisions for large storage.
 
 Run cache and tests
 ```
@@ -115,6 +118,7 @@ Check redis metrics at http://localhost:9121/metrics
 
 
 ## TODO
+- Allow to pass more configuration options via environment variables
 - Check if we can reduce memory usage during decompression as well
 - Think about buffer size for incoming connections, at least make it configurable and add logic to read the data in chunks. Right now server won't work well if amount of data inside TCP request is bigger than our allocated buffer
 - Continue improving collision resolution (endless task, tbh...)

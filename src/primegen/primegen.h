@@ -11,13 +11,14 @@ constexpr uint_fast64_t DEFAULT_MAX_LIMIT = 1000000000; // 1 billion is reasonab
 constexpr uint_fast64_t SEGMENT_SIZE = 1000000;
 
 class Primegen {
-private:
-    std::queue<uint_fast64_t> primeQueue;
-    uint_fast64_t maxLimit;
+    private:
+        const static uint_fast64_t maxLimit = DEFAULT_MAX_LIMIT;
+        inline static std::queue<uint_fast64_t> sharedQueue;
+        inline static bool isInitialized = false;
+        static void initGenerator();
 
-    void generatePrimeQueue();
-
-public:
-    Primegen(uint_fast64_t maxLimit = DEFAULT_MAX_LIMIT);
-    uint_fast64_t PopNext();
+        std::queue<uint_fast64_t> primeQueue;
+    public:
+        Primegen();
+        uint_fast64_t PopNext();
 };
