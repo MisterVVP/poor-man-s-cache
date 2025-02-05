@@ -15,6 +15,6 @@ ENV NUM_ELEMENTS=100000000
 
 # Build KeyValueStorage tests
 ARG GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"
-RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ MurmurHash3.cpp hash.cpp primegen/primegen.cpp kvs/kvs.cpp kvs/kvs_test.cpp -lgtest -lgtest_main -o kvs_test
+RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp primegen/primegen.cpp kvs/kvs.cpp kvs/kvs_test.cpp -lgtest -lgtest_main -o kvs_test
 
 ENTRYPOINT [ "/app/src/kvs_test" ]

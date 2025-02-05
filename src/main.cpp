@@ -3,7 +3,7 @@
 #include <signal.h>
 #include "metrics/metrics.h"
 #include "env.h"
-#include "server.h"
+#include "server/server.h"
 
 
 int main() {

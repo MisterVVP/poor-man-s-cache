@@ -1,5 +1,5 @@
 #include "metrics.h"
-#include "../server.h"
+#include "../server/server.h"
 
 using namespace metrics;
 

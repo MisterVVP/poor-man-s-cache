@@ -17,8 +17,8 @@
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include "kvs/kvs.h"
-#include "hash.h"
+#include "../kvs/kvs.h"
+#include "../hash/hash.h"
 #include "sockutils.h"
 
 using namespace kvs;

@@ -8,7 +8,7 @@
 #include <queue>
 #include <algorithm>
 #include "../primegen/primegen.h"
-#include "../hash.h"
+#include "../hash/hash.h"
 
 #ifndef NDEBUG
 #include <chrono>
