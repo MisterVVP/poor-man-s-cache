@@ -128,7 +128,11 @@ Check redis metrics at http://localhost:9121/metrics
 - Review compression algorithm (also endless task, potential way to improve could be heuristical logic to determine optimal compression algo + storing a number of algos as a strategy pattern)
 - Refactor how tests are executed and organised
 - Support key expiration, support more operations
-- Check out https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
-- Refactoring of kvs.cpp, maybe extract hash function into separate header to reuse it as external function in multiple places... 
+- Check out https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face. 
 - Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
 
+## Good articles and guidelines
+- https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
+- https://idea.popcount.org/2017-02-20-epoll-is-fundamentally-broken-12/
+- https://copyconstruct.medium.com/the-method-to-epolls-madness-d9d2d6378642
+- https://eklitzke.org/blocking-io-nonblocking-io-and-epoll
