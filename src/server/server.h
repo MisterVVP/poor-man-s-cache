@@ -29,7 +29,7 @@ namespace server {
 
     #define EPOLL_WAIT_TIMEOUT -1
     #define MAX_EVENTS 1024
-    #define READ_BUFFER_SIZE 8096
+    #define READ_BUFFER_SIZE 1024
 
     struct CacheServerMetrics {
         uint_fast64_t serverNumErrors = 0;
@@ -72,6 +72,18 @@ namespace server {
 
     class CacheServer : NonCopyable {
         private:
+            struct RequestPart {
+                size_t size;
+                char* part;
+                size_t location;
+
+                RequestPart(char* pval, size_t psize, size_t ploc) {
+                    part = pval;
+                    size = psize;
+                    location = ploc;
+                }
+            };
+
             static constexpr std::chrono::seconds METRICS_UPDATE_FREQUENCY_SEC = std::chrono::seconds(4);
             static constexpr uint_fast16_t CONN_QUEUE_LIMIT = 2048; // depends on tcp_max_syn_backlog, ignored when tcp_syncookies = 1
 

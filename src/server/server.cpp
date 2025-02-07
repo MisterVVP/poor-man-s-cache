@@ -107,7 +107,7 @@ int_fast8_t CacheServer::handleRequest()
     for (auto i = 0; i < event_count; ++i) {
         auto client_fd = events[i].data.fd;
         if (events[i].events & EPOLLIN) {
-            char* request = nullptr;
+            std::vector<RequestPart> requestParts{};
             size_t request_size = 0;
             char buffer[READ_BUFFER_SIZE] = {0};
             for (;;) {
@@ -120,22 +120,22 @@ int_fast8_t CacheServer::handleRequest()
                         closeConnection(client_fd);
                         return 1;
                     }
-                } else if (bytes_read == 0) { // client closed connection
+                } else if (bytes_read == 0) {
                     closeConnection(client_fd);
                     return 1;
                 } else {
-                    char* new_request = new char[request_size + bytes_read + 1];
-                    if (request) {
-                        memcpy(new_request, request, request_size);
-                        trashcan.AddGarbage(request);
-                    }
-                    memcpy(new_request + request_size, buffer, bytes_read);
+                    char* partVal = new char[bytes_read];
+                    memcpy(partVal, buffer, bytes_read);
+                    requestParts.emplace_back(partVal, bytes_read, request_size);                    
                     request_size += bytes_read;
-                    new_request[request_size] = '\0';
-                    request = new_request;
+                    trashcan.AddGarbage(partVal);
                 }
             }
-
+            auto request = new char[request_size + 1];
+            for (auto i = 0; i < requestParts.size(); ++i) {    
+                memcpy(request + requestParts[i].location, requestParts[i].part, requestParts[i].size);
+            }
+            request[request_size] = '\0';
             if (request) {
                 char* com_saveptr = nullptr;
                 char* command = strtok_r(request, " ", &com_saveptr);
@@ -149,33 +149,26 @@ int_fast8_t CacheServer::handleRequest()
                 }
                 char* key = strtok_r(nullptr, " ", &com_saveptr);
                 if (key) {                        
-                    auto hash = hashFunc(key);                    
+                    auto hash = hashFunc(key);
                     auto shardId = hash % numShards;
 
                     auto& shard = serverShards[shardId];
                     if (strcmp(command, "GET") == 0) {
                         auto query = createQuery(1, key, hash, client_fd);
                         result += shard.processQuery(query);
-#ifndef NDEBUG
-                        std::cout << "read " << query.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
-#endif
                         closeConnection(client_fd);
                         trashcan.AddGarbage(query.key);
                     } else if (strcmp(command, "SET") == 0) {
-                        char* value = strtok_r(nullptr, " ", &com_saveptr);
-                        if (value) {
-                            auto cmd = createCommand(1, key, value, hash, client_fd);
+                        if (com_saveptr) {
+                            auto cmd = createCommand(1, key, com_saveptr, hash, client_fd);
                             result += shard.processCommand(cmd);
-#ifndef NDEBUG
-                            std::cout << "wrote " << cmd.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
-#endif
                             closeConnection(client_fd);
                             trashcan.AddGarbage(cmd.key);
                             trashcan.AddGarbage(cmd.value);
                         } else {
                             const char* response = "ERROR: Invalid SET command format";
 #ifndef NDEBUG
-                            std::cerr << response << " command:" << command << std::endl;
+                            std::cerr << response << ", command:" << command << std::endl;
 #endif
                             send(client_fd, response, strlen(response), 0);
                             ++result;

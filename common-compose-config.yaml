@@ -16,7 +16,7 @@ services:
       - METRICS_PORT=8080
       - METRICS_HOST=0.0.0.0
       - NUM_SHARDS=128
-      - TRASH_EMPTY_FREQUENCY=1000000
+      - TRASH_EMPTY_FREQUENCY=10000
     ports:
       - "9001:9001"
       - "8080:8080"
@@ -28,3 +28,4 @@ services:
     environment:
       - CACHE_PORT=9001
       - CACHE_TYPE=custom
+      - TEST_DATA_FOLDER=./data

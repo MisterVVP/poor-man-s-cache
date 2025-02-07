@@ -114,9 +114,9 @@ Check redis metrics at http://localhost:9121/metrics
 > There could be a way to configure Redis to work with the same amount of data, however I can not verify this without diving deep into Redis configuration, thus I am comparing against default redis configuration
 > It is possible that there automatic is DDoS protection integrated at Redis as well, though I do not think this is fair to enable such functionality by default.
 
-- Redis just stop processing requests normally at 10M or especially 100M operations. poor-man-s-cache works.
-- Redis stopped responding normally even for 10000 requests sent from 4 threads. Typical redis error is Response: Socket error: [Errno 99] Address not available. This might be related to some antiDDOS protection of Redis
-- Redis eats a small amount of memory, poor-man-s-cache eats plenty
+- Redis just stops processing requests normally at 10M, and especially at 100M operations. poor-man's-cache works.
+- Redis stopped responding normally even for 10,000 requests sent from 4 threads. A typical Redis error is: "Response: Socket error: [Errno 99] Address not available." This might be related to some anti-DDoS protection in Redis.
+- Redis uses a small amount of memory, while poor-man's-cache consumes significantly more.
 
 
 
@@ -130,6 +130,10 @@ Check redis metrics at http://localhost:9121/metrics
 - Support key expiration, support more operations
 - Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
 - Try to replace const char* and dynamic memory with std::string and compare performance
+- There is an opportunity to try out Robot Framework for testing & writing test cases ( I've never used that tool). OR just use [Cucumber for golang aka godog](https://github.com/cucumber/godog) tests, which I know.
+- Write more documentation and describe communication protocol.
+- Try out scaled multi-instance setup (this may require writing custom load balancer or reverse proxy or using existing solutions like nginx/envoy/e.t.c.).
+- Check why valgrind always shows tiny memory leak from prometheus-cpp lib (`116 bytes in 1 blocks are still reachable in loss record 1 of 1`)
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
