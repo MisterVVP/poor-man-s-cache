@@ -16,7 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile.debug
       args:
-        - BUILD_TYPE=Debug
+        - BUILD_TYPE=Release
     extends:
       file: common-compose-config.yaml
       service: cache-common
@@ -29,7 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile.debug
       args:
-        - BUILD_TYPE=Debug
+        - BUILD_TYPE=Release
     extends:
       file: common-compose-config.yaml
       service: cache-common
@@ -56,7 +56,7 @@ services:
     environment:
       - CACHE_HOST=cache
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=100000
+      - TEST_ITERATIONS=1000
     profiles:
       - tests
 

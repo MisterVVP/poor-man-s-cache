@@ -13,6 +13,7 @@ class Trashcan : NonCopyable {
         static constexpr uint_fast64_t DEFAULT_INITIAL_CAPACITY = 10000;
         uint_fast64_t capacity = DEFAULT_INITIAL_CAPACITY;
         std::vector<const T*> garbage;
+        bool isEmpty = true;
     public:
         Trashcan(uint_fast64_t capacity = DEFAULT_INITIAL_CAPACITY);
         ~Trashcan();
@@ -35,29 +36,36 @@ Trashcan<T>::~Trashcan()
 template <typename T>
 void Trashcan<T>::Empty()
 {
+    if(!isEmpty) {
 #ifndef NDEBUG
-    std::cout << "Collecting garbage..." << std::endl;
-    uint_fast64_t trashCount = 0;
+        std::cout << "Collecting garbage..." << std::endl;
+        uint_fast64_t trashCount = 0;
 #endif
-    for (auto i = 0; i < garbage.size(); i++)
-    {
-        if (garbage[i] != nullptr) {
-            delete[] garbage[i];
-            garbage[i] = nullptr;
+        for (auto i = 0; i < garbage.size(); i++)
+        {
+            if (garbage[i] != nullptr) {
+                delete[] garbage[i];
+                garbage[i] = nullptr;
 #ifndef NDEBUG
-            ++trashCount;
+                ++trashCount;
 #endif
+            }
         }
-    }
 #ifndef NDEBUG
-    std::cout << "Deleted " << trashCount << " pointers" << std::endl;
+        std::cout << "Deleted " << trashCount << " pointers" << std::endl;
 #endif
+        isEmpty = true;
+    }
 }
 
 template <typename T>
 void Trashcan<T>::AddGarbage(const T* trash)
 {
     if (trash == nullptr) return;
+
+    if (isEmpty) {
+        isEmpty = false;
+    }
 
     for (auto i = 0; i < garbage.size(); i++)
     {

@@ -129,6 +129,7 @@ Check redis metrics at http://localhost:9121/metrics
 - Refactor how tests are executed and organised
 - Support key expiration, support more operations
 - Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
+- Try to replace const char* and dynamic memory with std::string and compare performance
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
