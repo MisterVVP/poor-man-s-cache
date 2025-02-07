@@ -6,134 +6,127 @@ Another pet project to practice.
 ## Goals and philosophy
 
 ### Goals
-- Build alternative to Redis cache from scratch. Requirements are limited to simple distributed keyvalue storage for string data.
+- Build an alternative to Redis cache from scratch. Requirements are limited to a simple distributed key-value storage for string data.
 
 ### Philosophy (or means to achieve goals)
-- Focus on performance, not readability or some 'patterns' and ideoms. Prefer plain C-like code, when necessary.
-- Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string should be avoided for highload, std::unordered_map is complete no-no)
-- Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. prometheus metrics)
+- Focus on performance, not readability or some 'patterns' and idioms. Prefer plain C-like code when necessary.
+- Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string should be avoided for high load, std::unordered_map is a complete no-no).
+- Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. Prometheus metrics).
 
 ## Quick start
 > [!TIP]
-> Use `NUM_SHARDS` environment variable (for local setup it's defined in common-compose-config.yaml) to control a number of shards for server.
-> High number of shards involves a small memory overhead, however it may boost server performance and help to avoid collisions for large storage.
+> Use `NUM_SHARDS` environment variable (for local setup it's defined in common-compose-config.yaml) to control the number of shards for the server.
+> A high number of shards involves a small memory overhead, however, it may boost server performance and help to avoid collisions for large storage.
 
 Run cache and tests
 ```
 docker compose --profile main --profile tests build
 docker compose --profile main up --detach
 ```
-Wait a few moments for server to start. Check server container logs for `TCP server is ready to process incoming connections`
+Wait a few moments for the server to start. Check server container logs for `TCP server is ready to process incoming connections`.
 
-After server has started run test script
+After the server has started, run the test script:
 ```
 docker compose --profile tests up
 ```
 
-You can check prometheus metrics while tests are running by opening http://localhost:8080/metrics
+You can check Prometheus metrics while tests are running by opening http://localhost:8080/metrics
 
-Don't forget to shut detached container down by issuing
-
+Don't forget to shut the detached container down by issuing:
 ```
 docker compose --profile main down
 ```
+
 ### To debug memory issues
 > [!WARNING]
-> Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in docker-compose file under 'cache-valgrind' service configuration.
+> Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in the docker-compose file under the 'cache-valgrind' service configuration.
 
 > [!TIP]
-> Modify `BUILD_TYPE` build argument to switch between Debug (contains extra output to std and starts server much faster) and Release (optimized) builds
+> Modify the `BUILD_TYPE` build argument to switch between Debug (contains extra output to std and starts server much faster) and Release (optimized) builds.
 
 > [!TIP]
-> Replace `valgrind` with helgrind to debug multithreading issues 
+> Replace `valgrind` with `helgrind` to debug multithreading issues.
 
 To run cache and tests:
 ```
 docker compose --profile valgrind --profile tests-valgrind build
 docker compose --profile valgrind up --detach
 ```
-Wait a few moments for server to start (valgrind mode does not require long initialisation time). Check server container logs for `TCP server is ready to process incoming connections`
+Wait a few moments for the server to start (Valgrind mode does not require long initialization time). Check server container logs for `TCP server is ready to process incoming connections`.
 
-After server has started run test script
+After the server has started, run the test script:
 ```
 docker compose --profile tests-valgrind up
 ```
 Check Valgrind output in container std during and after execution.
 
-
-### To run callgrind profiler 
+### To run Callgrind profiler
 
 To run cache and tests:
 ```
 docker compose --profile callgrind --profile tests-callgrind build
 docker compose --profile callgrind up --detach
 ```
-Wait a few minutes for server to start (callgrind slows down startup). Check server container logs for `TCP server is ready to process incoming connections`
+Wait a few minutes for the server to start (Callgrind slows down startup). Check server container logs for `TCP server is ready to process incoming connections`.
 
-After server has started run test script
+After the server has started, run the test script:
 ```
 docker compose --profile tests-callgrind up
 ```
 > [!TIP]
-> `ps aux` can help to find server process id inside cache-callgrind container
+> `ps aux` can help to find the server process ID inside the cache-callgrind container.
 
-- exec into cache-callgrind container shell
-- send termination signal to cache server process (`kill -s SIGTERM <server process id>`, e.g. `kill -s SIGTERM 7`)
-- check Callgrind output in container stdout after execution.
-- execute `callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.<server process id>` (e.g. `callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.7` )
+- Exec into the cache-callgrind container shell.
+- Send a termination signal to the cache server process (`kill -s SIGTERM <server process id>`, e.g. `kill -s SIGTERM 7`).
+- Check Callgrind output in container stdout after execution.
+- Execute `callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.<server process id>` (e.g. `callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.7`).
 
 > [!TIP]
-> Results of callgrind_annotate command are hard to read without GUI. This repository does not provide any GUI example, but it's recommended to use (kcachegrind)[https://kcachegrind.github.io/html/Home.html]
-> callgrind.out file can be found in /callgrind directory inside docker container
-
-
+> Results of the `callgrind_annotate` command are hard to read without a GUI. This repository does not provide any GUI example, but it's recommended to use [kcachegrind](https://kcachegrind.github.io/html/Home.html).
+> The `callgrind.out` file can be found in the `/callgrind` directory inside the Docker container.
 
 ### To run only unit tests
 > [!TIP]
-> Use --build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG" to disable debugging helpers in code
-
+> Use `--build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"` to disable debugging helpers in code.
 ```
 docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++26 -O3" . -t cache-tests:latest
 docker run cache-tests:latest
 ```
 
 ### Various helpful shell commands
-`sysctl -a` - check that all required sysctl options were overwritten successfully in docker
-`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - check what's going on with sockets, useful during execution of python test script, example in sockmon.bash
+`sysctl -a` - Check that all required sysctl options were overwritten successfully in Docker.
+`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `sockmon.bash`).
 
-
-### To check how redis works with the same task
+### To check how Redis works with the same task
 ```
 docker compose --profile redis build
 docker compose --profile redis up
 ```
-Check redis metrics at http://localhost:9121/metrics
+Check Redis metrics at http://localhost:9121/metrics
 
 #### Results
 > [!NOTE]
-> There could be a way to configure Redis to work with the same amount of data, however I can not verify this without diving deep into Redis configuration, thus I am comparing against default redis configuration
-> It is possible that there automatic is DDoS protection integrated at Redis as well, though I do not think this is fair to enable such functionality by default.
+> There could be a way to configure Redis to work with the same amount of data, however, I cannot verify this without diving deep into Redis configuration. Thus, I am comparing against the default Redis configuration.
+> It is possible that there is automatic DDoS protection integrated into Redis as well, though I do not think it is fair to enable such functionality by default.
 
 - Redis just stops processing requests normally at 10M, and especially at 100M operations. poor-man's-cache works.
 - Redis stopped responding normally even for 10,000 requests sent from 4 threads. A typical Redis error is: "Response: Socket error: [Errno 99] Address not available." This might be related to some anti-DDoS protection in Redis.
 - Redis uses a small amount of memory, while poor-man's-cache consumes significantly more.
 
-
-
 ## TODO
-- Allow to pass more configuration options via environment variables
-- Check if we can reduce memory usage during decompression as well
-- Integration between main server and metrics server can be improved
-- Continue improving collision resolution (endless task, tbh...)
-- Review compression algorithm (also endless task, potential way to improve could be heuristical logic to determine optimal compression algo + storing a number of algos as a strategy pattern)
-- Refactor how tests are executed and organised
-- Support key expiration, support more operations
-- Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
-- Try to replace const char* and dynamic memory with std::string and compare performance
-- There is an opportunity to try out Robot Framework for testing & writing test cases ( I've never used that tool). OR just use [Cucumber for golang aka godog](https://github.com/cucumber/godog) tests, which I know.
-- Write more documentation and describe communication protocol.
-- Try out scaled multi-instance setup (this may require writing custom load balancer or reverse proxy or using existing solutions like nginx/envoy/e.t.c.).
-- Check why valgrind always shows tiny memory leak from prometheus-cpp lib (`116 bytes in 1 blocks are still reachable in loss record 1 of 1`)
+- Allow passing more configuration options via environment variables.
+- Check if we can reduce memory usage during decompression as well.
+- Integration between the main server and the metrics server can be improved.
+- Continue improving collision resolution (endless task, tbh...).
+- Review the compression algorithm (also an endless task, a potential way to improve could be heuristic logic to determine the optimal compression algorithm + storing multiple algorithms as a strategy pattern).
+- Refactor how tests are executed and organized.
+- Support key expiration, support more operations.
+- Check if there are better ways of avoiding double hash calculation in the server and KVS (right now we just provide extra public methods in `kvs.cpp` which accept hash as an argument).
+- Try replacing `const char*` and dynamic memory with `std::string` and compare performance.
+- There is an opportunity to try out Robot Framework for testing & writing test cases (I've never used that tool). OR just use [Cucumber for Golang aka Godog](https://github.com/cucumber/godog) tests, which I know.
+- Write more documentation and describe the communication protocol.
+- Try out a scaled multi-instance setup (this may require writing a custom load balancer or reverse proxy or using existing solutions like Nginx/Envoy/etc.).
+- Check why Valgrind always shows a tiny memory leak from the Prometheus-cpp lib (`116 bytes in 1 block are still reachable in loss record 1 of 1`).
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
