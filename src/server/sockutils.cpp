@@ -1,6 +1,6 @@
 #include "sockutils.h"
 
-int setNonBlocking(int fd) {
+int setNonBlocking(int fd) noexcept {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
     perror("Failed to get flags for socket");

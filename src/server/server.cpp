@@ -1,5 +1,7 @@
 #include "server.h"
 
+using namespace server;
+
 int_fast8_t ServerShard::processCommand(const Command &command)
 {
     const char* response = nullptr;
@@ -40,8 +42,8 @@ int_fast8_t ServerShard::processQuery(const Query &query)
     return err;
 }
 
-CacheServer::CacheServer(int port, uint_fast16_t nShards, std::atomic<bool>& cToken): port(port), cancellationToken(cToken), numErrors(0),
-    server_fd(-1), isRunning(false), activeConnectionsCounter(0), numRequests(0), numShards(nShards)
+CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings): port(settings.port), numErrors(0), cancellationToken(cToken),
+    server_fd(-1), isRunning(false), activeConnectionsCounter(0), numRequests(0), numShards(settings.numShards), trashEmptyFrequency(settings.trashEmptyFrequency)
 {
 
 }
@@ -56,7 +58,7 @@ CacheServer::~CacheServer() {
     }    
 }
 
-Command CacheServer::createCommand(uint_fast16_t code, char *key, char *value, uint_fast64_t hash, int client_fd)
+Command CacheServer::createCommand(uint_fast16_t code, char *key, char *value, uint_fast64_t hash, int client_fd) const
 {
     Command cmd{1, nullptr, nullptr, hash, client_fd};
 
@@ -73,7 +75,7 @@ Command CacheServer::createCommand(uint_fast16_t code, char *key, char *value, u
     return cmd;
 }
 
-Query CacheServer::createQuery(uint_fast16_t code, char *key, uint_fast64_t hash, int client_fd)
+Query CacheServer::createQuery(uint_fast16_t code, char *key, uint_fast64_t hash, int client_fd) const
 {
     Query query{code, nullptr, hash, client_fd};
 
@@ -105,35 +107,43 @@ int_fast8_t CacheServer::handleRequest()
     for (auto i = 0; i < event_count; ++i) {
         auto client_fd = events[i].data.fd;
         if (events[i].events & EPOLLIN) {
+            char* request = nullptr;
+            size_t request_size = 0;
             char buffer[READ_BUFFER_SIZE] = {0};
-            /* TODO: continue implementation below to read messages over READ_BUFFER_SIZE bytes in chunks 
             for (;;) {
                 auto bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
                 if (bytes_read == -1) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        printf("finished reading data from client\n");
                         break;
                     } else {
                         perror("Failed to read client request buffer");
                         closeConnection(client_fd);
                         return 1;
                     }
-                } else if (bytes_read == 0) {
-                    // TODO finish processing, close connection
-                    break;
+                } else if (bytes_read == 0) { // client closed connection
+                    closeConnection(client_fd);
+                    return 1;
                 } else {
-                    // TODO process chunk
+                    char* new_request = new char[request_size + bytes_read + 1];
+                    if (request) {
+                        memcpy(new_request, request, request_size);
+                        trashcan.AddGarbage(request);
+                    }
+                    memcpy(new_request + request_size, buffer, bytes_read);
+                    request_size += bytes_read;
+                    new_request[request_size] = '\0';
+                    request = new_request;
                 }
-            } */
-            auto bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-            if (bytes_read > 0) {
-                buffer[bytes_read] = '\0';
+            }
+
+            if (request) {
                 char* com_saveptr = nullptr;
-                char* command = strtok_r(buffer, " ", &com_saveptr);
+                char* command = strtok_r(request, " ", &com_saveptr);
                 if (command == NULL) {
                     const char* response = "ERROR: Unable to parse command";
                     send(client_fd, response, strlen(response), 0);
                     closeConnection(client_fd);
+                    trashcan.AddGarbage(request);
                     ++result;
                     continue;
                 }
@@ -150,7 +160,7 @@ int_fast8_t CacheServer::handleRequest()
                         std::cout << "read " << query.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
 #endif
                         closeConnection(client_fd);
-                        delete[] query.key;
+                        trashcan.AddGarbage(query.key);
                     } else if (strcmp(command, "SET") == 0) {
                         char* value = strtok_r(nullptr, " ", &com_saveptr);
                         if (value) {
@@ -160,27 +170,28 @@ int_fast8_t CacheServer::handleRequest()
                             std::cout << "wrote " << cmd.key << " epoll_fd = " << epoll_fd << " shardId = " << shardId << std::endl;
 #endif
                             closeConnection(client_fd);
-                            delete[] cmd.key;
-                            delete[] cmd.value;
+                            trashcan.AddGarbage(cmd.key);
+                            trashcan.AddGarbage(cmd.value);
                         } else {
                             const char* response = "ERROR: Invalid SET command format";
-                            #ifndef NDEBUG
+#ifndef NDEBUG
                             std::cerr << response << " command:" << command << std::endl;
-                            #endif
+#endif
                             send(client_fd, response, strlen(response), 0);
                             ++result;
                             closeConnection(client_fd);
                         }
                     }
-                } else { // TODO: support more commands here
+                } else {
                     const char* response = "ERROR: Unknown command";
-                    #ifndef NDEBUG
+#ifndef NDEBUG
                     std::cerr << response << ":" << command << std::endl;
-                    #endif
+#endif
                     ++result;
                     send(client_fd, response, strlen(response), 0);
                     closeConnection(client_fd);
                 }
+                trashcan.AddGarbage(request);
             } else {
                 perror("Failed to read client request buffer");
                 closeConnection(client_fd);
@@ -305,6 +316,9 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("Failed to accept connection");
         }
+        if (numRequests % trashEmptyFrequency) {
+            trashcan.Empty();
+        }
     }
 
     std::cout << "Shutting down gracefully..." << std::endl;
@@ -313,7 +327,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     return 0;    
 }
 
-void CacheServer::Stop()
+void CacheServer::Stop() noexcept
 {
     if(isRunning) {
         isRunning = false;

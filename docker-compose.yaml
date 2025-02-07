@@ -2,7 +2,7 @@ services:
   cache:
     build:
       context: .
-      dockerfile: Dockerfile.debug # replace with Dockerfile to remove debugging tools
+      dockerfile: Dockerfile # replace with Dockerfile to remove debugging tools
       args:
         - BUILD_TYPE=Release
     extends:

@@ -2,9 +2,10 @@
 #include <iostream>
 #include <signal.h>
 #include "metrics/metrics.h"
-#include "env.h"
 #include "server/server.h"
+#include "env.hpp"
 
+using namespace server;
 
 int main() {
     std::stop_source sSource;
@@ -31,15 +32,18 @@ int main() {
 
     std::queue<CacheServerMetrics> serverChannel;
 
-    auto metrics_host = getStrFromEnv("METRICS_HOST", true);
-    auto metrics_port = getIntFromEnv("METRICS_PORT", true);
+    auto metrics_host = getFromEnv<const char*>("METRICS_HOST", true);
+    auto metrics_port = getFromEnv<int>("METRICS_PORT", true);
     auto metrics_url = std::format("{}:{}", metrics_host, metrics_port);
-    metrics::MetricsServer metricsServer(metrics_url);
+    metrics::MetricsServer metricsServer { metrics_url };
 
 
-    auto server_port = getIntFromEnv("SERVER_PORT", true);
-    auto numShards = getIntFromEnv("NUM_SHARDS", false, 24);
-    CacheServer cacheServer(server_port, numShards, cancellationToken);
+    auto server_port = getFromEnv<int>("SERVER_PORT", true);
+    auto numShards = getFromEnv<uint_fast16_t>("NUM_SHARDS", false, 24);
+    auto trashEmpyFrequency = getFromEnv<uint_fast16_t>("TRASH_EMPTY_FREQUENCY", false, 100);
+    ServerSettings serverSettings { server_port, numShards, trashEmpyFrequency };
+
+    CacheServer cacheServer { cancellationToken, serverSettings };
 
 
     auto metricsUpdaterThread = std::jthread(

@@ -4,12 +4,12 @@
 #include <cstdlib>
 #include <unistd.h>
 #include "kvs.h"
-#include "../env.h"
+#include "../env.hpp"
 
 using namespace kvs;
 
 // Number of elements to test
-const size_t NUM_ELEMENTS = getIntFromEnv("NUM_ELEMENTS", true);
+const size_t NUM_ELEMENTS = getFromEnv<int>("NUM_ELEMENTS", true);
 
 // Helper function to generate keys
 char* generateKey(int_fast64_t index) {

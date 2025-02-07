@@ -16,6 +16,7 @@ services:
       - METRICS_PORT=8080
       - METRICS_HOST=0.0.0.0
       - NUM_SHARDS=128
+      - TRASH_EMPTY_FREQUENCY=1000
     ports:
       - "9001:9001"
       - "8080:8080"

@@ -9,7 +9,8 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
       numResizes(0),
       isResizing(0),
       compressionEnabled(settings.compressionEnabled),
-      usePrimeNumbers(settings.usePrimeNumbers) {
+      usePrimeNumbers(settings.usePrimeNumbers),
+      enableTrashcan(settings.enableTrashcan) {
 #ifndef NDEBUG
     std::cout << "Table initialization started! initialSize = " << tableSize << " usePrimeNumbers = " << usePrimeNumbers << " compressionEnabled = " << compressionEnabled << std::endl;
 #endif
@@ -21,12 +22,19 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
     }
 
     if (compressionEnabled) {
+        enableTrashcan = true; // enable trashcan to avoid memory leaks during decompression
         KeyValueStoreSettings dictSettings;
         dictSettings.usePrimeNumbers = false;
         dictSettings.compressionEnabled = false;
+        dictSettings.enableTrashcan = false;
         dictSettings.initialSize = FREQ_DICT_SIZE;
         compressDictionary = std::make_unique<KeyValueStore>(dictSettings);
     }
+
+    if (enableTrashcan) {
+        trashcan = std::make_unique<Trashcan<char>>();
+    }
+
 #ifndef NDEBUG
     std::cout << "Table initialization finished!" << std::endl;
 #endif
@@ -45,9 +53,11 @@ KeyValueStore::~KeyValueStore() {
             }
         }
     }
+#ifndef NDEBUG
     std::cout << "Key value storage is being destroyed! numCollisions = " << numCollisions << " emptyBuckets = "
               << emptyBuckets << " emptyEntries = " << emptyEntries << " tableSize = " << tableSize 
               << " numEntries = " << numEntries << " numResizes = " << numResizes << std::endl;
+#endif
     cleanTable(table, tableSize);
 }
 
@@ -74,7 +84,7 @@ inline uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, u
 }
 
 // Performs value compression and allocates new value in memory
-char* KeyValueStore::compress(const char* value) {
+char* KeyValueStore::compress(const char* value) const {
     // Does not make sense to compress nullptr or nothing
     if (!value || value[0] == '\0') {
         return nullptr;
@@ -131,7 +141,7 @@ char* KeyValueStore::compress(const char* value) {
 }
 
 // Performs value decompression and allocates new value in memory
-char* KeyValueStore::decompress(const char* compressedValue) {
+char* KeyValueStore::decompress(const char* compressedValue) const{
     if (!compressedValue || compressedValue == nullptr || compressedValue[0] == '\0') {
         return nullptr; // Handle empty values
     }
@@ -241,12 +251,7 @@ void KeyValueStore::resize() {
     auto start = std::chrono::high_resolution_clock::now();
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
-    uint_fast64_t newTableSize;
-    if (usePrimeNumbers) {
-        newTableSize = primegen.PopNext();
-    } else {
-        newTableSize =  tableSize * 2;
-    }
+    uint_fast64_t newTableSize = usePrimeNumbers ? primegen.PopNext() : tableSize * 2;
 
     auto *newTable = new Bucket[newTableSize];
     for (uint_fast64_t i = 0; i < newTableSize; ++i) {
@@ -389,7 +394,14 @@ const char *kvs::KeyValueStore::get(const char *key, uint_fast64_t hash)
         idx = calcIndex(hash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0) {
-                return compressionEnabled ? decompress(table[idx].entries[i].value) : table[idx].entries[i].value;
+                if (compressionEnabled) {
+                    auto retVal = decompress(table[idx].entries[i].value);
+                    if (enableTrashcan) {
+                        trashcan->AddGarbage(retVal);
+                    }
+                    return retVal;
+                }
+                return table[idx].entries[i].value;
             }
         }
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);

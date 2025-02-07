@@ -11,6 +11,8 @@
 #include <atomic>
 #include "../primegen/primegen.h"
 #include "../hash/hash.h"
+#include "../trashcan/trashcan.hpp"
+#include "../non_copyable.h"
 
 #ifndef NDEBUG
 #include <chrono>
@@ -27,23 +29,11 @@
 
 namespace kvs
 {
-
-    // Rule of 5 is nice, but no, thanks.
-    struct NonCopyable
-    {
-        NonCopyable() = default;
-
-        NonCopyable(const NonCopyable&) = delete;
-        NonCopyable(NonCopyable&&) = delete;
-
-        NonCopyable& operator=(const NonCopyable&) = delete;
-        NonCopyable& operator=(NonCopyable&&) = delete;
-    };
-
     struct KeyValueStoreSettings {
         uint_fast64_t initialSize = 2053;
         bool compressionEnabled = true;
         bool usePrimeNumbers = true;
+        bool enableTrashcan = true;
     };
 
     class KeyValueStore : NonCopyable {
@@ -70,34 +60,29 @@ namespace kvs
             void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
             uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
             
-            bool usePrimeNumbers;
+            bool usePrimeNumbers = true;
             Primegen primegen;
 
+            bool enableTrashcan = true;
+            std::unique_ptr<Trashcan<char>> trashcan;
 
             struct SubstringFrequency {
                 const char* substring;
                 size_t count;
             };
-            bool compressionEnabled;
+
+            bool compressionEnabled = true;
             std::unique_ptr<KeyValueStore> compressDictionary;
             void rebuildCompressionDictionary();
-            char* compress(const char* value);
-            char* decompress(const char* compressedValue);
+            char* compress(const char* value) const;
+            char* decompress(const char* compressedValue) const;
 
         public:
             KeyValueStore(KeyValueStoreSettings settings = KeyValueStoreSettings{});
             ~KeyValueStore();
 
-            uint_fast64_t getTableSize() const {
-                return tableSize;
-            }
-
-            uint_fast64_t getNumEntries() const {
+            uint_fast64_t getNumEntries() const noexcept {
                 return numEntries;
-            }
-
-            uint_fast32_t getNumResizes() const {
-                return numResizes;
             }
 
             bool set(const char *key, const char *value);

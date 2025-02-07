@@ -11,6 +11,7 @@
 namespace metrics
 {
     using namespace prometheus;
+    using namespace server;
 
     class MetricsServer {
         private:

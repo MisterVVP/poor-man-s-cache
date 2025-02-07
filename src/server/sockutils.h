@@ -3,4 +3,4 @@
 #include <stdio.h>
 #include <sys/socket.h>
 
-int setNonBlocking(int fd);
+int setNonBlocking(int fd) noexcept;

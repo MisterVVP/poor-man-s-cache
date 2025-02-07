@@ -123,12 +123,11 @@ Check redis metrics at http://localhost:9121/metrics
 ## TODO
 - Allow to pass more configuration options via environment variables
 - Check if we can reduce memory usage during decompression as well
-- Think about buffer size for incoming connections, at least make it configurable and add logic to read the data in chunks. Right now server won't work well if amount of data inside TCP request is bigger than our allocated buffer
+- Integration between main server and metrics server can be improved
 - Continue improving collision resolution (endless task, tbh...)
 - Review compression algorithm (also endless task, potential way to improve could be heuristical logic to determine optimal compression algo + storing a number of algos as a strategy pattern)
 - Refactor how tests are executed and organised
 - Support key expiration, support more operations
-- Check out https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face. 
 - Check if there are more neat ways of avoiding double hash calculation in server and kvs (right now we just provide extra public methods in kvs.cpp which accepts hash as an argument )
 
 ## Good articles and guidelines
