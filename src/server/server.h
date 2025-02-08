@@ -28,8 +28,8 @@ namespace server {
     using namespace kvs;
 
     #define EPOLL_WAIT_TIMEOUT -1
-    #define MAX_EVENTS 1024
-    #define READ_BUFFER_SIZE 1024
+    #define MAX_EVENTS 2048
+    #define READ_BUFFER_SIZE 2048
 
     struct CacheServerMetrics {
         uint_fast64_t serverNumErrors = 0;
@@ -85,6 +85,7 @@ namespace server {
             };
 
             static constexpr std::chrono::seconds METRICS_UPDATE_FREQUENCY_SEC = std::chrono::seconds(4);
+            static constexpr uint16_t READ_NUM_RETRY_ON_INT = 3;
             static constexpr uint_fast16_t CONN_QUEUE_LIMIT = 2048; // depends on tcp_max_syn_backlog, ignored when tcp_syncookies = 1
 
             std::binary_semaphore metricsSemaphore{0};
@@ -101,6 +102,7 @@ namespace server {
             int port = 9001;
             int server_fd;
             int epoll_fd;
+            epoll_event epoll_events[MAX_EVENTS];
             Trashcan<char> trashcan;
 
             Command createCommand(uint_fast16_t code, char* key, char* value, uint_fast64_t hash, int client_fd) const;

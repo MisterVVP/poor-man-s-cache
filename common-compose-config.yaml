@@ -1,8 +1,8 @@
 services:
   cache-common:
     sysctls:
-        - net.ipv4.tcp_rmem=4096 87380 524288
-        - net.ipv4.tcp_wmem=4096 65536 524288
+        - net.ipv4.tcp_rmem=16384 1048576 536870912
+        - net.ipv4.tcp_wmem=16384 1048576 536870912
         - net.core.somaxconn=65535
         - net.ipv4.tcp_tw_reuse=1
         - net.ipv4.ip_local_port_range=1024 65535
@@ -25,6 +25,9 @@ services:
     build:
       context: tests
       dockerfile: Dockerfile
+    sysctls:
+        - net.ipv4.tcp_rmem=16384 1048576 536870912
+        - net.ipv4.tcp_wmem=16384 1048576 536870912
     environment:
       - CACHE_PORT=9001
       - CACHE_TYPE=custom

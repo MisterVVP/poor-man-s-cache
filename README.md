@@ -127,6 +127,7 @@ Check Redis metrics at http://localhost:9121/metrics
 - Write more documentation and describe the communication protocol.
 - Try out a scaled multi-instance setup (this may require writing a custom load balancer or reverse proxy or using existing solutions like Nginx/Envoy/etc.).
 - Check why Valgrind always shows a tiny memory leak from the Prometheus-cpp lib (`116 bytes in 1 block are still reachable in loss record 1 of 1`).
+- Read http://www.kegel.com/c10k.html
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face

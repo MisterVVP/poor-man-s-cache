@@ -27,21 +27,33 @@ def calc_thread_pool_size():
 
     return min(thread_pool_size, cpu_count())
 
-def send_command_to_custom_cache(command, bufSize):
-    """Send a command to the custom TCP server and return the response."""
+def send_command_to_custom_cache(command:str, bufSize:int):
+    """Send a command to the custom TCP server and return the full response."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((host, port))
             s.sendall(command.encode('utf-8'))
-            response = s.recv(bufSize).decode('utf-8')
-            return response.strip()
+            
+            if command.startswith("SET"):
+                response = s.recv(bufSize).decode('utf-8')
+                return response.strip()
+            else:
+                response_chunks = []
+                while True:
+                    chunk = s.recv(bufSize)
+                    if not chunk:
+                        break
+                    response_chunks.append(chunk)
+                
+                return b''.join(response_chunks).decode('utf-8').strip()
+    
     except socket.error as e:
         return f"Socket error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
-def send_command_to_redis(command, bufSize):
-    """Send a command to the Redis server and return the response."""
+def send_command_to_redis(command:str, bufSize:int):
+    """Send a command to the Redis server and return the full response."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((host, port))
@@ -52,22 +64,39 @@ def send_command_to_redis(command, bufSize):
                     return f"Auth failed: {auth_response}"
 
             s.sendall((command + "\r\n").encode('utf-8'))
-            response = s.recv(bufSize).decode('utf-8')
-            if response.startswith("$"):
-                return response.split("\r\n", 1)[-1].strip()
-            elif response.startswith("+") or response.startswith("-"):
-                return response[1:].strip()
-            return response.strip()
+
+            # Read response in chunks
+            response_chunks = []
+            while True:
+                chunk = s.recv(bufSize)
+                if not chunk:
+                    break
+                response_chunks.append(chunk)
+            
+            full_response = b''.join(response_chunks).decode('utf-8').strip()
+            
+            if full_response.startswith("$"):
+                return full_response.split("\r\n", 1)[-1].strip()
+            elif full_response.startswith("+") or full_response.startswith("-"):
+                return full_response[1:].strip()
+            return full_response
+
     except socket.error as e:
         return f"Socket error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
-def send_command(command, bufSize = 1024):
+def send_command(command:str, bufSize = 1024):
     """Abstracted method to send commands to the appropriate cache."""
+    bufferSize = bufSize
+    if command.startswith("SET"):
+        bufferSize = 128
+    elif command.startswith("GET"):
+        bufferSize = 8096
+
     if cache_type == 'redis':
-        return send_command_to_redis(command, bufSize)
-    return send_command_to_custom_cache(command, bufSize)
+        return send_command_to_redis(command, bufferSize)
+    return send_command_to_custom_cache(command, bufferSize)
 
 def preload_json_files():
     """Reads all JSON files from './data' and loads them into the cache."""
@@ -85,9 +114,10 @@ def preload_json_files():
             with open(file_path, "r", encoding="utf-8") as f:
                 json_content = f.read()
             key = file_name.rsplit('.', maxsplit=1)[0]
-            bufferSize = len(json_content)
-            print(f"Sending {bufferSize} bytes of data for key={key}")
-            response = send_command(f'SET {key} {json_content}', bufferSize)
+            requestSize = len(json_content)
+            print(f"Sending {requestSize} bytes of data for key={key}")
+            isBigData = requestSize > 1000000
+            response = send_command(f'SET {key} {json_content}')
             if response != "OK":
                 print(f"Failed to store {key} in cache. Response: {response}\n")
                 exit(1)
@@ -97,13 +127,16 @@ def preload_json_files():
             # server requires a bit more time to store large values
             time.sleep(delay_sec)
 
-            response = send_command(f"GET {key}", bufferSize)
+            response = send_command(f"GET {key}")
             if response != f"{json_content}":
                 print(f"Retrying request: GET {key}\n")
                 time.sleep(delay_sec / 2)
-                response = send_command(f"GET {key}", bufferSize)
-                if response != f"{json_content}":
-                    print(f"Failed to retrieve {key} from cache. Response: {response}\n")
+                response = send_command(f"GET {key}")
+                if isBigData and len(response) != requestSize: # temporary test for very big files, TODO: refactor later
+                    print(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}\n")
+                    exit(1)
+                elif response != f"{json_content}":
+                    print(f"Failed to retrieve {key} from cache! Response: {response}\n")
                     exit(1)
 
             print(f"Successfully retrieved {key} from cache.\n")

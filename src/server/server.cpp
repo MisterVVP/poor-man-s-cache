@@ -14,7 +14,7 @@ int_fast8_t ServerShard::processCommand(const Command &command)
         response = "ERROR: Invalid command code";
     }
 
-    auto res = send(command.client_fd, response, strlen(response), MSG_DONTWAIT);
+    auto res = send(command.client_fd, response, strlen(response), 0);
     if (res == -1) {
         perror("Error when sending data back to client");
         err = 1;
@@ -34,7 +34,7 @@ int_fast8_t ServerShard::processQuery(const Query &query)
         response = "ERROR: Invalid query code";        
     }
 
-    auto res = send(query.client_fd, response, strlen(response), MSG_DONTWAIT);
+    auto res = send(query.client_fd, response, strlen(response), 0);
     if (res == -1) {
         perror("Error when sending data back to client");
         err = 1;
@@ -94,10 +94,9 @@ int_fast8_t CacheServer::handleRequest()
     std::cout << "handleRequest() started! epoll_fd = " << epoll_fd << std::endl;
 #endif
     int_fast8_t result = 0;
-    epoll_event events[MAX_EVENTS];
     int event_count;
     do {
-        event_count = epoll_wait(epoll_fd, events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
+        event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
         if (event_count == -1 && errno != EINTR) {
             perror("epoll_wait failed");
             return 1;
@@ -105,17 +104,29 @@ int_fast8_t CacheServer::handleRequest()
     } while (event_count < 0 && errno == EINTR);
 
     for (auto i = 0; i < event_count; ++i) {
-        auto client_fd = events[i].data.fd;
-        if (events[i].events & EPOLLIN) {
+        auto client_fd = epoll_events[i].data.fd;
+        if ((epoll_events[i].events & EPOLLERR) || (epoll_events[i].events & EPOLLHUP)) {
+            perror("Failed to process client request - epoll error");
+            closeConnection(client_fd);
+            continue;
+        }
+        if (epoll_events[i].events & EPOLLIN) {
             std::vector<RequestPart> requestParts{};
             size_t request_size = 0;
-            char buffer[READ_BUFFER_SIZE] = {0};
+            char buffer[READ_BUFFER_SIZE];
+            buffer[0] = 0;
+            uint16_t readErrorsCounter = 0;
             for (;;) {
                 auto bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
                 if (bytes_read == -1) {
+                    readErrorsCounter++;
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
                         break;
                     } else {
+                        if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
+                            perror("Failed to read client request buffer: interruption signal received. Retrying...");
+                            continue;
+                        }
                         perror("Failed to read client request buffer");
                         closeConnection(client_fd);
                         return 1;
@@ -137,6 +148,9 @@ int_fast8_t CacheServer::handleRequest()
             }
             request[request_size] = '\0';
             if (request) {
+#ifndef NDEBUG
+                std::cout << "request_size = " << request_size << ", requestParts.size() = " << requestParts.size() << std::endl;
+#endif
                 char* com_saveptr = nullptr;
                 char* command = strtok_r(request, " ", &com_saveptr);
                 if (command == NULL) {
@@ -151,7 +165,6 @@ int_fast8_t CacheServer::handleRequest()
                 if (key) {                        
                     auto hash = hashFunc(key);
                     auto shardId = hash % numShards;
-
                     auto& shard = serverShards[shardId];
                     if (strcmp(command, "GET") == 0) {
                         auto query = createQuery(1, key, hash, client_fd);
@@ -247,6 +260,15 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     int qlen = 5;
     if (setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
         perror("Failed to set SO_REUSEPORT for server socket");
+        return 1;
+    }
+    int sock_buffer_size = 512 * 1024 * 1024;  // 512MB buffer
+    if (setsockopt(server_fd, SOL_SOCKET, SO_RCVBUF, &sock_buffer_size, sizeof(sock_buffer_size)) == -1) {
+        perror("Failed to set SO_RCVBUF for server socket");
+        return 1;
+    }
+    if (setsockopt(server_fd, SOL_SOCKET, SO_SNDBUF, &sock_buffer_size, sizeof(sock_buffer_size)) == -1) {
+        perror("Failed to set SO_SNDBUF for server socket");
         return 1;
     }
     if (setNonBlocking(server_fd) == -1) {
