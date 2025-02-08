@@ -29,7 +29,8 @@ namespace server {
 
     #define EPOLL_WAIT_TIMEOUT -1
     #define MAX_EVENTS 2048
-    #define READ_BUFFER_SIZE 2048
+    #define READ_BUFFER_SIZE 1024
+    #define MSG_SEPARATOR 0x1F
 
     struct CacheServerMetrics {
         uint_fast64_t serverNumErrors = 0;
@@ -108,7 +109,8 @@ namespace server {
             Command createCommand(uint_fast16_t code, char* key, char* value, uint_fast64_t hash, int client_fd) const;
             Query createQuery(uint_fast16_t code, char* key, uint_fast64_t hash, int client_fd) const;
             int_fast8_t handleRequest();
-            void closeConnection(int client_fd);
+            void closeConnection(int client_fd, bool fullShutdown = false);
+            void shutdownConnection(int client_fd, int how = SHUT_RDWR);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});

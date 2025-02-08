@@ -13,7 +13,6 @@ int_fast8_t ServerShard::processCommand(const Command &command)
         err = 1;
         response = "ERROR: Invalid command code";
     }
-
     auto res = send(command.client_fd, response, strlen(response), 0);
     if (res == -1) {
         perror("Error when sending data back to client");
@@ -107,7 +106,7 @@ int_fast8_t CacheServer::handleRequest()
         auto client_fd = epoll_events[i].data.fd;
         if ((epoll_events[i].events & EPOLLERR) || (epoll_events[i].events & EPOLLHUP)) {
             perror("Failed to process client request - epoll error");
-            closeConnection(client_fd);
+            closeConnection(client_fd, true);
             continue;
         }
         if (epoll_events[i].events & EPOLLIN) {
@@ -128,11 +127,11 @@ int_fast8_t CacheServer::handleRequest()
                             continue;
                         }
                         perror("Failed to read client request buffer");
-                        closeConnection(client_fd);
+                        closeConnection(client_fd, true);
                         return 1;
                     }
                 } else if (bytes_read == 0) {
-                    closeConnection(client_fd);
+                    closeConnection(client_fd, true);
                     return 1;
                 } else {
                     char* partVal = new char[bytes_read];
@@ -148,34 +147,42 @@ int_fast8_t CacheServer::handleRequest()
             }
             request[request_size] = '\0';
             if (request) {
-#ifndef NDEBUG
-                std::cout << "request_size = " << request_size << ", requestParts.size() = " << requestParts.size() << std::endl;
-#endif
                 char* com_saveptr = nullptr;
                 char* command = strtok_r(request, " ", &com_saveptr);
                 if (command == NULL) {
                     const char* response = "ERROR: Unable to parse command";
                     send(client_fd, response, strlen(response), 0);
-                    closeConnection(client_fd);
+                    closeConnection(client_fd, true);
                     trashcan.AddGarbage(request);
                     ++result;
                     continue;
                 }
                 char* key = strtok_r(nullptr, " ", &com_saveptr);
-                if (key) {                        
+#ifndef NDEBUG
+                std::cout<< "request key = " << key << ", request_size = " << request_size << ", requestParts.size() = " << requestParts.size() << std::endl;
+#endif
+                if (key) {
                     auto hash = hashFunc(key);
                     auto shardId = hash % numShards;
                     auto& shard = serverShards[shardId];
                     if (strcmp(command, "GET") == 0) {
                         auto query = createQuery(1, key, hash, client_fd);
+
+                        shutdownConnection(client_fd, SHUT_RD);
                         result += shard.processQuery(query);
+                        shutdownConnection(client_fd, SHUT_WR);
                         closeConnection(client_fd);
+
                         trashcan.AddGarbage(query.key);
                     } else if (strcmp(command, "SET") == 0) {
                         if (com_saveptr) {
                             auto cmd = createCommand(1, key, com_saveptr, hash, client_fd);
+
+                            shutdownConnection(client_fd, SHUT_RD);
                             result += shard.processCommand(cmd);
+                            shutdownConnection(client_fd, SHUT_WR);
                             closeConnection(client_fd);
+
                             trashcan.AddGarbage(cmd.key);
                             trashcan.AddGarbage(cmd.value);
                         } else {
@@ -185,7 +192,7 @@ int_fast8_t CacheServer::handleRequest()
 #endif
                             send(client_fd, response, strlen(response), 0);
                             ++result;
-                            closeConnection(client_fd);
+                            closeConnection(client_fd, true);
                         }
                     }
                 } else {
@@ -195,12 +202,12 @@ int_fast8_t CacheServer::handleRequest()
 #endif
                     ++result;
                     send(client_fd, response, strlen(response), 0);
-                    closeConnection(client_fd);
+                    closeConnection(client_fd, true);
                 }
                 trashcan.AddGarbage(request);
             } else {
                 perror("Failed to read client request buffer");
-                closeConnection(client_fd);
+                closeConnection(client_fd, true);
                 ++result;
             }
         }
@@ -213,17 +220,24 @@ int_fast8_t CacheServer::handleRequest()
     return result;
 }
 
-void CacheServer::closeConnection(int client_fd)
-{
-    auto sdRes = shutdown(client_fd, SHUT_RDWR);
-    if (sdRes == -1) {
-        perror("Error when shutting down client_fd");
+void CacheServer::closeConnection(int client_fd, bool fullShutdown)
+{    
+    if (fullShutdown) {
+        shutdownConnection(client_fd, SHUT_RDWR);
     }
     auto closeRes = close(client_fd);
     if (closeRes == -1) {
         perror("Error when closing client_fd");
     } else {
         --activeConnectionsCounter;
+    }
+}
+
+void server::CacheServer::shutdownConnection(int client_fd, int how)
+{
+    auto sdRes = shutdown(client_fd, how);
+    if (sdRes == -1) {
+        perror("Error when shutting down client_fd");
     }
 }
 
@@ -263,16 +277,12 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         return 1;
     }
     int sock_buffer_size = 512 * 1024 * 1024;  // 512MB buffer
-    if (setsockopt(server_fd, SOL_SOCKET, SO_RCVBUF, &sock_buffer_size, sizeof(sock_buffer_size)) == -1) {
-        perror("Failed to set SO_RCVBUF for server socket");
-        return 1;
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_SNDBUF, &sock_buffer_size, sizeof(sock_buffer_size)) == -1) {
-        perror("Failed to set SO_SNDBUF for server socket");
+    if (setSocketBuffers(server_fd, sock_buffer_size, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
+        std::cerr << "Failed to set socket buffer options for server socket" << std::endl;
         return 1;
     }
     if (setNonBlocking(server_fd) == -1) {
-        std::cout << "Failed to set O_NONBLOCK for server socket" << std::endl;
+        std::cerr << "Failed to set O_NONBLOCK for server socket" << std::endl;
         return 1;
     }
 
@@ -319,12 +329,13 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
             ++activeConnectionsCounter;
             ++numRequests;
             setNonBlocking(client_fd);
+            setSocketBuffers(client_fd, sock_buffer_size, SOCK_BUF_OPTS::SOCK_BUF_ALL);
             epoll_event event{};
             event.events = EPOLLIN | EPOLLET;
             event.data.fd = client_fd;
             if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
                 perror("Failed to add client_fd to epoll");
-                closeConnection(client_fd);
+                closeConnection(client_fd, true);
             } else {
                 numErrors += handleRequest();
             }

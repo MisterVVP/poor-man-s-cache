@@ -1,3 +1,4 @@
+import errno
 import socket
 import time
 import os
@@ -27,32 +28,56 @@ def calc_thread_pool_size():
 
     return min(thread_pool_size, cpu_count())
 
-def send_command_to_custom_cache(command:str, bufSize:int):
+def send_command_to_custom_cache(command:str, bufSize:int, sockCloseDelaySec):
     """Send a command to the custom TCP server and return the full response."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((host, port))
             s.sendall(command.encode('utf-8'))
-            
+
             if command.startswith("SET"):
                 response = s.recv(bufSize).decode('utf-8')
+                if (sockCloseDelaySec > 0):
+                    print(f"sleeping for {sockCloseDelaySec} seconds")
+                    time.sleep(sockCloseDelaySec)
                 return response.strip()
             else:
-                response_chunks = []
+                s.settimeout(2)
+                response = bytearray()
                 while True:
-                    chunk = s.recv(bufSize)
-                    if not chunk:
-                        break
-                    response_chunks.append(chunk)
-                
-                return b''.join(response_chunks).decode('utf-8').strip()
+                    try:
+                        chunk = s.recv(bufSize)
+                    except socket.timeout as e:
+                        err = e.args[0]
+                        if err == 'timed out':
+                            time.sleep(1)
+                            #print("recv timed out, retry later")
+                            continue
+                        else:
+                            print(e)
+                            exit(1)
+                    except socket.error as e:
+                        print(e)
+                        exit(1)
+                    else:
+                        if len(chunk) == 0:
+                            #print("orderly shutdown on server end")
+                            break
+                        else:
+                            response.extend(chunk)
+
+            if (sockCloseDelaySec > 0):
+                print(f"sleeping for {sockCloseDelaySec} seconds")
+                time.sleep(sockCloseDelaySec)
+
+            return response.decode('utf-8').strip()
     
     except socket.error as e:
         return f"Socket error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
-def send_command_to_redis(command:str, bufSize:int):
+def send_command_to_redis(command:str, bufSize:int, sockCloseDelaySec):
     """Send a command to the Redis server and return the full response."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -65,28 +90,53 @@ def send_command_to_redis(command:str, bufSize:int):
 
             s.sendall((command + "\r\n").encode('utf-8'))
 
-            # Read response in chunks
-            response_chunks = []
-            while True:
-                chunk = s.recv(bufSize)
-                if not chunk:
-                    break
-                response_chunks.append(chunk)
-            
-            full_response = b''.join(response_chunks).decode('utf-8').strip()
-            
-            if full_response.startswith("$"):
-                return full_response.split("\r\n", 1)[-1].strip()
-            elif full_response.startswith("+") or full_response.startswith("-"):
-                return full_response[1:].strip()
-            return full_response
+            if command.startswith("SET"):
+                response = s.recv(bufSize).decode('utf-8')
+                if (sockCloseDelaySec > 0):
+                    print(f"sleeping for {sockCloseDelaySec} seconds")
+                    time.sleep(sockCloseDelaySec)
+                return response.strip()
+            else:
+                s.settimeout(2)
+                response = bytearray()
+                while True:
+                    try:
+                        chunk = s.recv(bufSize)
+                    except socket.timeout as e:
+                        err = e.args[0]
+                        if err == 'timed out':
+                            time.sleep(1)
+                            #print("recv timed out, retry later")
+                            continue
+                        else:
+                            print(e)
+                            exit(1)
+                    except socket.error as e:
+                        print(e)
+                        exit(1)
+                    else:
+                        if len(chunk) == 0:
+                            #print("orderly shutdown on server end")
+                            break
+                        else:
+                            response.extend(chunk)
+
+            if (sockCloseDelaySec > 0):
+                print(f"sleeping for {sockCloseDelaySec} seconds")
+                time.sleep(sockCloseDelaySec)
+
+            if response.startswith("$"):
+                return response.split("\r\n", 1)[-1].strip()
+            elif response.startswith("+") or response.startswith("-"):
+                return response[1:].strip()
+            return response
 
     except socket.error as e:
         return f"Socket error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
-def send_command(command:str, bufSize = 1024):
+def send_command(command:str, bufSize = 1024, sockCloseDelaySec = 0):
     """Abstracted method to send commands to the appropriate cache."""
     bufferSize = bufSize
     if command.startswith("SET"):
@@ -95,8 +145,8 @@ def send_command(command:str, bufSize = 1024):
         bufferSize = 8096
 
     if cache_type == 'redis':
-        return send_command_to_redis(command, bufferSize)
-    return send_command_to_custom_cache(command, bufferSize)
+        return send_command_to_redis(command, bufferSize, sockCloseDelaySec)
+    return send_command_to_custom_cache(command, bufferSize, sockCloseDelaySec)
 
 def preload_json_files():
     """Reads all JSON files from './data' and loads them into the cache."""
@@ -117,7 +167,13 @@ def preload_json_files():
             requestSize = len(json_content)
             print(f"Sending {requestSize} bytes of data for key={key}")
             isBigData = requestSize > 1000000
-            response = send_command(f'SET {key} {json_content}')
+            connCloseDelay = 0
+            if (isBigData):
+                connCloseDelay = requestSize/500000
+            elif (requestSize > 8192):
+                connCloseDelay = 1
+
+            response = send_command(f'SET {key} {json_content}', sockCloseDelaySec=connCloseDelay)
             if response != "OK":
                 print(f"Failed to store {key} in cache. Response: {response}\n")
                 exit(1)
@@ -127,17 +183,20 @@ def preload_json_files():
             # server requires a bit more time to store large values
             time.sleep(delay_sec)
 
-            response = send_command(f"GET {key}")
+            response = send_command(f"GET {key}", sockCloseDelaySec=connCloseDelay)
+
             if response != f"{json_content}":
                 print(f"Retrying request: GET {key}\n")
                 time.sleep(delay_sec / 2)
-                response = send_command(f"GET {key}")
-                if isBigData and len(response) != requestSize: # temporary test for very big files, TODO: refactor later
-                    print(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}\n")
-                    exit(1)
-                elif response != f"{json_content}":
-                    print(f"Failed to retrieve {key} from cache! Response: {response}\n")
-                    exit(1)
+                response = send_command(f'GET {key}', sockCloseDelaySec=connCloseDelay)
+                if isBigData:
+                    if len(response) != requestSize: # temporary test for very big files, TODO: refactor later
+                        print(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}\n")
+                        exit(1)
+                else:
+                    if response != f"{json_content}":
+                        print(f"Failed to retrieve {key} from cache! Response: {response}\n")
+                        exit(1)
 
             print(f"Successfully retrieved {key} from cache.\n")
 
