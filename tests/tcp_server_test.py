@@ -3,6 +3,8 @@ import logging
 import sys
 import time
 import os
+import redis
+
 from multiprocessing import Pool, cpu_count
 
 # configure logger
@@ -22,6 +24,12 @@ iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
 cache_type = os.environ.get('CACHE_TYPE', 'custom')  # "custom" or "redis"
 redis_password = os.environ.get('REDIS_PASSWORD', None)  # Only for Redis
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
+
+redis_client = None
+
+if cache_type == 'redis':
+    # Create a single Redis client globally
+    redis_client = redis.StrictRedis(host=host, port=port, password=redis_password, decode_responses=True)
 
 def calc_thread_pool_size():
     thread_pool_size = 2
@@ -81,59 +89,34 @@ def send_command_to_custom_cache(command: str, bufSize: int):
         return f"Error: {e}"
 
 
-def send_command_to_redis(command:str, bufSize:int):
-    """Send a command to the Redis server and return the full response."""
+def send_command_to_redis(command: str):
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((host, port))
-            if redis_password:
-                s.sendall(f"AUTH {redis_password}\r\n".encode('utf-8'))
-                auth_response = s.recv(bufSize).decode('utf-8').strip()
-                if not auth_response.startswith("+OK"):
-                    return f"Auth failed: {auth_response}"
+        parts = command.split(" ", 2)
+        cmd = parts[0].upper()
 
-            s.sendall((command + "\r\n").encode('utf-8'))
+        if cmd == "SET" and len(parts) == 3:
+            key, value = parts[1], parts[2]
+            response = redis_client.set(key, value)
+            return "+OK" if response else "ERROR"
+        elif cmd == "GET" and len(parts) == 2:
+            key = parts[1]
+            response = redis_client.get(key)
+            return response if response else "nil"
+        else:
+            return redis_client.execute_command(*command.split())
 
-            if command.startswith("SET"):
-                response = s.recv(bufSize).decode('utf-8')
-                return response.strip()
-            else:  # Handling GET or other commands
-                s.settimeout(10)
-                response = bytearray()
-                while True:
-                    try:
-                        chunk = s.recv(bufSize)
-                        if not chunk:
-                            break  # Server closed connection
-
-                        response.extend(chunk)
-                    except socket.timeout as e:
-                        logger.error("Socket read timeout")
-                        exit(1)
-                    except socket.error as e:
-                        logger.error(e)
-                        exit(1)
-
-            if response.startswith("$"):
-                return response.split("\r\n", 1)[-1].strip()
-            elif response.startswith("+") or response.startswith("-"):
-                return response[1:].strip()
-            return response
-
-    except socket.error as e:
-        return f"Socket error: {e}"
+    except redis.RedisError as e:
+        return f"Redis error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
 def send_command(command:str, bufSize = 1024):
     """Abstracted method to send commands to the appropriate cache."""
     if cache_type == 'redis':
-        return send_command_to_redis(command, bufSize)
+        return send_command_to_redis(command)
     return send_command_to_custom_cache(command, bufSize)
 
 def preload_json_files():
-    """Reads all JSON files from './data' and loads them into the cache."""
-    
     if not os.path.exists(data_folder):
         logger.warning(f"Data folder '{data_folder}' does not exist. Skipping JSON preloading.")
         return
@@ -148,41 +131,39 @@ def preload_json_files():
                 json_content = f.read()
             key = file_name.rsplit('.', maxsplit=1)[0]
             requestSize = len(json_content)
-            logger.info(f"Sending {requestSize} bytes of data for key={key}")
             isBigData = requestSize > 1000000
-            readBufferSize = 1024
-            if (isBigData):
-                readBufferSize = 131072
+            readBufferSize = 131072 if isBigData else 1024
 
             response = send_command(f'SET {key} {json_content}')
-            if response != "OK":
-                logger.error(f"Failed to store {key} in cache. Response: {response}\n")
+            expectedResponse = "+OK" if cache_type == 'redis' else "OK"
+
+            if response != expectedResponse:
+                logger.error(f"Failed to store {key} in cache. Response: {response}")
                 exit(1)
-
-            logger.info(f"Successfully stored {key} in cache.\n")
-
-            # server requires a bit more time to store large values
+            
+            logger.info(f"Successfully stored {key} in cache.")
             time.sleep(delay_sec)
-
             response = send_command(f"GET {key}", bufSize=readBufferSize)
-
-            if response != f"{json_content}":
-                logger.info(f"Retrying request: GET {key}\n")
+            
+            if cache_type == 'redis':
+                response = response.lstrip("$").split("\r\n", 1)[-1].strip()
+            
+            if response != json_content:
+                logger.debug(f"Retrying request: GET {key}")
                 time.sleep(delay_sec / 2)
                 response = send_command(f'GET {key}', bufSize=readBufferSize)
                 if isBigData:
-                    if len(response) != requestSize: # temporary test for very big files, TODO: refactor later
-                        logger.error(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}\n")
+                    if len(response) != requestSize:
+                        logger.error(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}")
                         exit(1)
                 else:
-                    if response != f"{json_content}":
-                        logger.error(f"Failed to retrieve {key} from cache! Response: {response}\n")
+                    if response != json_content:
+                        logger.error(f"Failed to retrieve {key} from cache! Response: {response}")
                         exit(1)
-
-            logger.info(f"Successfully retrieved {key} from cache.\n")
-
+            
+            logger.info(f"Successfully retrieved {key} from cache.")
         except Exception as e:
-            logger.error(f"Error processing {file_name}: {e}\n")
+            logger.error(f"Error processing {file_name}: {e}")
             exit(1)
 
 def test_iteration(x):
@@ -191,7 +172,7 @@ def test_iteration(x):
     try:
         response = send_command(f"SET key{x} value{x}")
         if response != "OK":
-            logger.info(f"Retrying request: SET key{x} value{x}\n")
+            logger.debug(f"Retrying request: SET key{x} value{x}\n")
             time.sleep(delay_sec / 2)
             response = send_command(f"SET key{x} value{x}")
             if response != "OK":
@@ -199,7 +180,7 @@ def test_iteration(x):
 
         response = send_command(f"GET key{x}")
         if response != f"value{x}":
-            logger.info(f"Retrying request: GET key{x}\n")
+            logger.debug(f"Retrying request: GET key{x}\n")
             time.sleep(delay_sec / 2)
             response = send_command(f"GET key{x}")
             if response != f"value{x}":
@@ -208,7 +189,7 @@ def test_iteration(x):
         response = send_command("GET non_existent_key")
         expected_response = "" if cache_type == "redis" else "(nil)"
         if response != expected_response:
-            logger.info(f"Retrying request: GET non_existent_key\n")
+            logger.debug(f"Retrying request: GET non_existent_key\n")
             time.sleep(delay_sec / 2)
             response = send_command("GET non_existent_key")
             if response != expected_response:

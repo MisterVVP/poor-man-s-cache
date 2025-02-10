@@ -112,11 +112,11 @@ services:
       - "6379:6379"
     command: ["redis-server"]
     sysctls:
-        - net.ipv4.tcp_rmem=4096 87380 524288
-        - net.ipv4.tcp_wmem=4096 65536 524288
+        - net.ipv4.tcp_rmem=16384 4194304 536870912
+        - net.ipv4.tcp_wmem=16384 4194304 536870912
         - net.core.somaxconn=65535
         - net.ipv4.tcp_tw_reuse=1
-        - net.ipv4.ip_local_port_range=1200    65000
+        - net.ipv4.ip_local_port_range=1024 65535
         - net.ipv4.tcp_fin_timeout=1
     ulimits:
       nofile:
@@ -133,8 +133,8 @@ services:
       - CACHE_HOST=redis
       - CACHE_PORT=6379
       - CACHE_TYPE=redis
-      - TEST_DELAY_SEC=2
-      - TEST_ITERATIONS=10000000
+      - TEST_DELAY_SEC=1
+      - TEST_ITERATIONS=1000000
     profiles:
       - redis
     depends_on:

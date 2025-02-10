@@ -120,9 +120,12 @@ Check Redis metrics at http://localhost:9121/metrics
 > There could be a way to configure Redis to work with the same amount of data, however, I cannot verify this without diving deep into Redis configuration. Thus, I am comparing against the default Redis configuration.
 > It is possible that there is automatic DDoS protection integrated into Redis as well, though I do not think it is fair to enable such functionality by default.
 
-- Redis just stops processing requests normally at 10M, and especially at 100M operations. poor-man's-cache works.
-- Redis stopped responding normally even for 10,000 requests sent from 4 threads. A typical Redis error is: "Response: Socket error: [Errno 99] Address not available." This might be related to some anti-DDoS protection in Redis.
+- Redis just stops processing requests normally in multithreaded high troughput scenario, poor-man's-cache works.
+- Redis seems to have very low throughput
 - Redis uses a small amount of memory, while poor-man's-cache consumes significantly more.
+
+> [!NOTE]
+> Redis Pipelines could be something to try out when testing against Redis, but it won't be fair comparison until we implement batch processing within a single connection
 
 ## TODO
 - Allow passing more configuration options via environment variables.
