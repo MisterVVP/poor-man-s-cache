@@ -1,8 +1,18 @@
-import errno
 import socket
+import logging
+import sys
 import time
 import os
 from multiprocessing import Pool, cpu_count
+
+# configure logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 # Configuration from environment or defaults
 host = os.environ.get('CACHE_HOST', 'localhost')
@@ -28,56 +38,50 @@ def calc_thread_pool_size():
 
     return min(thread_pool_size, cpu_count())
 
-def send_command_to_custom_cache(command:str, bufSize:int, sockCloseDelaySec):
-    """Send a command to the custom TCP server and return the full response."""
+def send_command_to_custom_cache(command: str, bufSize: int):
+    """Send a command to the custom TCP server, ensuring a unit separator (0x1F) is sent at the end.
+       When executing a GET command, it will read until the MSG_SEPARATOR (0x1F) is found.
+    """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.connect((host, port))
+            command += "\x1F"
             s.sendall(command.encode('utf-8'))
 
             if command.startswith("SET"):
                 response = s.recv(bufSize).decode('utf-8')
-                if (sockCloseDelaySec > 0):
-                    print(f"sleeping for {sockCloseDelaySec} seconds")
-                    time.sleep(sockCloseDelaySec)
-                return response.strip()
-            else:
-                s.settimeout(2)
+                return response.strip().rstrip("\x1F")
+            else:  # Handling GET or other commands
+                s.settimeout(10)
                 response = bytearray()
                 while True:
                     try:
                         chunk = s.recv(bufSize)
-                    except socket.timeout as e:
-                        err = e.args[0]
-                        if err == 'timed out':
-                            time.sleep(1)
-                            #print("recv timed out, retry later")
-                            continue
-                        else:
-                            print(e)
-                            exit(1)
-                    except socket.error as e:
-                        print(e)
-                        exit(1)
-                    else:
-                        if len(chunk) == 0:
-                            #print("orderly shutdown on server end")
+                        if not chunk:
+                            break  # Server closed connection
+
+                        response.extend(chunk)
+
+                        # Check if MSG_SEPARATOR (0x1F) is in the received data
+                        if b'\x1F' in chunk:
                             break
-                        else:
-                            response.extend(chunk)
+                    except socket.timeout as e:
+                        logger.error("Socket read timeout")
+                        exit(1)
+                    except socket.error as e:
+                        logger.error(e)
+                        exit(1)
 
-            if (sockCloseDelaySec > 0):
-                print(f"sleeping for {sockCloseDelaySec} seconds")
-                time.sleep(sockCloseDelaySec)
+            # Remove MSG_SEPARATOR from the response before returning
+            return response.decode('utf-8').strip().rstrip("\x1F")
 
-            return response.decode('utf-8').strip()
-    
     except socket.error as e:
         return f"Socket error: {e}"
     except Exception as e:
         return f"Error: {e}"
 
-def send_command_to_redis(command:str, bufSize:int, sockCloseDelaySec):
+
+def send_command_to_redis(command:str, bufSize:int):
     """Send a command to the Redis server and return the full response."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -92,38 +96,23 @@ def send_command_to_redis(command:str, bufSize:int, sockCloseDelaySec):
 
             if command.startswith("SET"):
                 response = s.recv(bufSize).decode('utf-8')
-                if (sockCloseDelaySec > 0):
-                    print(f"sleeping for {sockCloseDelaySec} seconds")
-                    time.sleep(sockCloseDelaySec)
                 return response.strip()
-            else:
-                s.settimeout(2)
+            else:  # Handling GET or other commands
+                s.settimeout(10)
                 response = bytearray()
                 while True:
                     try:
                         chunk = s.recv(bufSize)
-                    except socket.timeout as e:
-                        err = e.args[0]
-                        if err == 'timed out':
-                            time.sleep(1)
-                            #print("recv timed out, retry later")
-                            continue
-                        else:
-                            print(e)
-                            exit(1)
-                    except socket.error as e:
-                        print(e)
-                        exit(1)
-                    else:
-                        if len(chunk) == 0:
-                            #print("orderly shutdown on server end")
-                            break
-                        else:
-                            response.extend(chunk)
+                        if not chunk:
+                            break  # Server closed connection
 
-            if (sockCloseDelaySec > 0):
-                print(f"sleeping for {sockCloseDelaySec} seconds")
-                time.sleep(sockCloseDelaySec)
+                        response.extend(chunk)
+                    except socket.timeout as e:
+                        logger.error("Socket read timeout")
+                        exit(1)
+                    except socket.error as e:
+                        logger.error(e)
+                        exit(1)
 
             if response.startswith("$"):
                 return response.split("\r\n", 1)[-1].strip()
@@ -136,23 +125,17 @@ def send_command_to_redis(command:str, bufSize:int, sockCloseDelaySec):
     except Exception as e:
         return f"Error: {e}"
 
-def send_command(command:str, bufSize = 1024, sockCloseDelaySec = 0):
+def send_command(command:str, bufSize = 1024):
     """Abstracted method to send commands to the appropriate cache."""
-    bufferSize = bufSize
-    if command.startswith("SET"):
-        bufferSize = 128
-    elif command.startswith("GET"):
-        bufferSize = 8096
-
     if cache_type == 'redis':
-        return send_command_to_redis(command, bufferSize, sockCloseDelaySec)
-    return send_command_to_custom_cache(command, bufferSize, sockCloseDelaySec)
+        return send_command_to_redis(command, bufSize)
+    return send_command_to_custom_cache(command, bufSize)
 
 def preload_json_files():
     """Reads all JSON files from './data' and loads them into the cache."""
     
     if not os.path.exists(data_folder):
-        print(f"Data folder '{data_folder}' does not exist. Skipping JSON preloading.")
+        logger.warning(f"Data folder '{data_folder}' does not exist. Skipping JSON preloading.")
         return
     
     json_files = [f for f in os.listdir(data_folder) if f.endswith(".json")]
@@ -165,43 +148,41 @@ def preload_json_files():
                 json_content = f.read()
             key = file_name.rsplit('.', maxsplit=1)[0]
             requestSize = len(json_content)
-            print(f"Sending {requestSize} bytes of data for key={key}")
+            logger.info(f"Sending {requestSize} bytes of data for key={key}")
             isBigData = requestSize > 1000000
-            connCloseDelay = 0
+            readBufferSize = 1024
             if (isBigData):
-                connCloseDelay = requestSize/500000
-            elif (requestSize > 8192):
-                connCloseDelay = 1
+                readBufferSize = 131072
 
-            response = send_command(f'SET {key} {json_content}', sockCloseDelaySec=connCloseDelay)
+            response = send_command(f'SET {key} {json_content}')
             if response != "OK":
-                print(f"Failed to store {key} in cache. Response: {response}\n")
+                logger.error(f"Failed to store {key} in cache. Response: {response}\n")
                 exit(1)
 
-            print(f"Successfully stored {key} in cache.\n")
+            logger.info(f"Successfully stored {key} in cache.\n")
 
             # server requires a bit more time to store large values
             time.sleep(delay_sec)
 
-            response = send_command(f"GET {key}", sockCloseDelaySec=connCloseDelay)
+            response = send_command(f"GET {key}", bufSize=readBufferSize)
 
             if response != f"{json_content}":
-                print(f"Retrying request: GET {key}\n")
+                logger.info(f"Retrying request: GET {key}\n")
                 time.sleep(delay_sec / 2)
-                response = send_command(f'GET {key}', sockCloseDelaySec=connCloseDelay)
+                response = send_command(f'GET {key}', bufSize=readBufferSize)
                 if isBigData:
                     if len(response) != requestSize: # temporary test for very big files, TODO: refactor later
-                        print(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}\n")
+                        logger.error(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}\n")
                         exit(1)
                 else:
                     if response != f"{json_content}":
-                        print(f"Failed to retrieve {key} from cache! Response: {response}\n")
+                        logger.error(f"Failed to retrieve {key} from cache! Response: {response}\n")
                         exit(1)
 
-            print(f"Successfully retrieved {key} from cache.\n")
+            logger.info(f"Successfully retrieved {key} from cache.\n")
 
         except Exception as e:
-            print(f"Error processing {file_name}: {e}\n")
+            logger.error(f"Error processing {file_name}: {e}\n")
             exit(1)
 
 def test_iteration(x):
@@ -210,7 +191,7 @@ def test_iteration(x):
     try:
         response = send_command(f"SET key{x} value{x}")
         if response != "OK":
-            print(f"Retrying request: SET key{x} value{x}\n")
+            logger.info(f"Retrying request: SET key{x} value{x}\n")
             time.sleep(delay_sec / 2)
             response = send_command(f"SET key{x} value{x}")
             if response != "OK":
@@ -218,7 +199,7 @@ def test_iteration(x):
 
         response = send_command(f"GET key{x}")
         if response != f"value{x}":
-            print(f"Retrying request: GET key{x}\n")
+            logger.info(f"Retrying request: GET key{x}\n")
             time.sleep(delay_sec / 2)
             response = send_command(f"GET key{x}")
             if response != f"value{x}":
@@ -227,7 +208,7 @@ def test_iteration(x):
         response = send_command("GET non_existent_key")
         expected_response = "" if cache_type == "redis" else "(nil)"
         if response != expected_response:
-            print(f"Retrying request: GET non_existent_key\n")
+            logger.info(f"Retrying request: GET non_existent_key\n")
             time.sleep(delay_sec / 2)
             response = send_command("GET non_existent_key")
             if response != expected_response:
@@ -235,14 +216,14 @@ def test_iteration(x):
 
     except Exception as e:
         result = False
-        print(f"Error during test iteration {x}: {e}\n")
+        logger.error(f"Error during test iteration {x}: {e}\n")
 
     return result
 
 def run_load_tests():
     """Run load tests after JSON preloading."""
     thread_pool_size = calc_thread_pool_size()
-    print(f"Running load tests with {iterations_count} iterations and thread pool size {thread_pool_size}...\n")
+    logger.info(f"Running load tests with {iterations_count} iterations and thread pool size {thread_pool_size}...\n")
     
     failed_iterations = 0
     start = time.time()
@@ -255,7 +236,7 @@ def run_load_tests():
     num_requests = 3 * iterations_count
     rps = num_requests / test_time
 
-    print(f"Load test completed. Test time: {test_time:.2f} seconds. Average RPS: {rps:.2f}\n")
+    logger.info(f"Load test completed. Test time: {test_time:.2f} seconds. Average RPS: {rps:.2f}\n")
     
     if failed_iterations > 0:
         exit(1)
@@ -263,10 +244,10 @@ def run_load_tests():
         exit(0)
 
 if __name__ == "__main__":
-    print(f"Sending large JSON data from files ...\n")
+    logger.info(f"Sending large JSON data from files ...\n")
     preload_json_files()
 
-    print(f"Starting load tests in {delay_sec} seconds...\n")
+    logger.info(f"Starting load tests in {delay_sec} seconds...\n")
     time.sleep(delay_sec)
 
     run_load_tests()

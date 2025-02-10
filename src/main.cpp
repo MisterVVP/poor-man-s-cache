@@ -32,16 +32,18 @@ int main() {
 
     std::queue<CacheServerMetrics> serverChannel;
 
-    auto metrics_host = getFromEnv<const char*>("METRICS_HOST", true);
-    auto metrics_port = getFromEnv<int>("METRICS_PORT", true);
-    auto metrics_url = std::format("{}:{}", metrics_host, metrics_port);
-    metrics::MetricsServer metricsServer { metrics_url };
+    auto metricsHost = getFromEnv<const char*>("METRICS_HOST", true);
+    auto metricsPort = getFromEnv<int>("METRICS_PORT", true);
+    auto metricsUrl = std::format("{}:{}", metricsHost, metricsPort);
+    metrics::MetricsServer metricsServer { metricsUrl };
 
 
-    auto server_port = getFromEnv<int>("SERVER_PORT", true);
+    auto serverPort = getFromEnv<int>("SERVER_PORT", true);
     auto numShards = getFromEnv<uint_fast16_t>("NUM_SHARDS", false, 24);
     auto trashEmpyFrequency = getFromEnv<uint_fast16_t>("TRASH_EMPTY_FREQUENCY", false, 100);
-    ServerSettings serverSettings { server_port, numShards, trashEmpyFrequency };
+    auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
+
+    ServerSettings serverSettings { serverPort, numShards, trashEmpyFrequency, sockBufferSize };
 
     CacheServer cacheServer { cancellationToken, serverSettings };
 
@@ -57,7 +59,7 @@ int main() {
                     metricsServer.UpdateMetrics(serverMetrics);
                     serverChannel.pop();
                 }
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+                std::this_thread::sleep_for(std::chrono::seconds(2));
             }
             std::cout << "Exiting metrics updater thread..." << std::endl;
         }

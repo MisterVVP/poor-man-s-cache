@@ -12,6 +12,8 @@ Another pet project to practice.
 - Focus on performance, not readability or some 'patterns' and idioms. Prefer plain C-like code when necessary.
 - Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string should be avoided for high load, std::unordered_map is a complete no-no).
 - Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. Prometheus metrics).
+- Solution should support only Linux, preferrably alpine or similar distribution. No Windows or Mac OS support... ever.
+- Solution should be container and (hopefully) orchestrator friendly
 
 ## Quick start
 > [!TIP]
@@ -97,6 +99,15 @@ docker run cache-tests:latest
 `sysctl -a` - Check that all required sysctl options were overwritten successfully in Docker.
 `netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `sockmon.bash`).
 
+Netstat in a loop:
+```
+while :
+do
+    netstat -pan
+    sleep 1
+done
+```
+
 ### To check how Redis works with the same task
 ```
 docker compose --profile redis build
@@ -115,7 +126,9 @@ Check Redis metrics at http://localhost:9121/metrics
 
 ## TODO
 - Allow passing more configuration options via environment variables.
+- Work on error responses from cache server
 - Check if we can reduce memory usage during decompression as well.
+- Python code inside 'tests' folder deserves refactoring (low priority)
 - Integration between the main server and the metrics server can be improved.
 - Continue improving collision resolution (endless task, tbh...).
 - Review the compression algorithm (also an endless task, a potential way to improve could be heuristic logic to determine the optimal compression algorithm + storing multiple algorithms as a strategy pattern).
@@ -128,6 +141,10 @@ Check Redis metrics at http://localhost:9121/metrics
 - Try out a scaled multi-instance setup (this may require writing a custom load balancer or reverse proxy or using existing solutions like Nginx/Envoy/etc.).
 - Check why Valgrind always shows a tiny memory leak from the Prometheus-cpp lib (`116 bytes in 1 block are still reachable in loss record 1 of 1`).
 - Read http://www.kegel.com/c10k.html
+
+## Questions / Ideas
+- Store value size and increase memory usage? size_t will require extra 80 Mb per 10M records, however it'll eliminate many strelen() calls.
+
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face

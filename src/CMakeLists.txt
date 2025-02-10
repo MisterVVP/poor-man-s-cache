@@ -8,7 +8,7 @@ add_executable(
   primegen/primegen.cpp
   kvs/kvs.cpp
   metrics/metrics.cpp
-  trashcan/trashcan.hpp
+  utils/trashcan.hpp
 )
 
 if(PROMETHEUS_CPP_ENABLE_PUSH)

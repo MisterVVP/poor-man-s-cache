@@ -20,7 +20,7 @@
 #include "../kvs/kvs.h"
 #include "../hash/hash.h"
 #include "../non_copyable.h"
-#include "../trashcan/trashcan.hpp"
+#include "../utils/trashcan.hpp"
 #include "sockutils.h"
 
 namespace server {
@@ -29,7 +29,8 @@ namespace server {
 
     #define EPOLL_WAIT_TIMEOUT -1
     #define MAX_EVENTS 2048
-    #define READ_BUFFER_SIZE 1024
+    #define MAX_REQUEST_SIZE 536870912
+    #define READ_BUFFER_SIZE 8192
     #define MSG_SEPARATOR 0x1F
 
     struct CacheServerMetrics {
@@ -39,6 +40,17 @@ namespace server {
 
         CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests):
             serverNumErrors(numErrors), serverNumActiveConnections(numConnections), serverNumRequests(numRequests) {
+        }
+    };
+
+    class ConnManager {
+        private:
+            std::atomic<uint_fast32_t>& connCounter;
+        public:
+            void closeConnection(int client_fd);
+        
+        ConnManager(std::atomic<uint_fast32_t>& connCounter): connCounter(connCounter) {
+
         }
     };
 
@@ -57,18 +69,29 @@ namespace server {
         int client_fd;
     };
 
-    struct ServerShard {
-        int_fast16_t shardId;
-        KeyValueStore keyValueStore;
+    struct ServerShard: NonCopyable {
+        public:
+            int_fast16_t shardId;
+            KeyValueStore keyValueStore;
+            std::shared_ptr<ConnManager> connManager;
 
-        int_fast8_t processCommand(const Command& command);
-        int_fast8_t processQuery(const Query& query);
+            int_fast8_t processCommand(const Command& command);
+            int_fast8_t processQuery(const Query& query);
+
+        private:
+            static constexpr uint_fast32_t ASYNC_RESPONSE_SIZE_THRESHOLD = 1048576;
+            int_fast8_t sendResponse(int client_fd, const char* response, const size_t responseSize);
     };
 
     struct ServerSettings {
-        int port = 9001; // server port
-        uint_fast16_t numShards = 24; // number of server shards
-        uint_fast16_t trashEmptyFrequency = 100;// number of requests to process between trash cleanup
+        /// @brief Server port
+        int port = 9001;
+        /// @brief Number of server shards, increase for stability and performance, decrease to save server resources
+        uint_fast16_t numShards = 24;
+        /// @brief Empty dynamic memory on every {trashEmptyFrequency} request
+        uint_fast16_t trashEmptyFrequency = 100;
+        /// @brief Requested buffer size for server socket
+        int sockBuffer = 1048576;
     };
 
     class CacheServer : NonCopyable {
@@ -78,16 +101,20 @@ namespace server {
                 char* part;
                 size_t location;
 
-                RequestPart(char* pval, size_t psize, size_t ploc) {
-                    part = pval;
-                    size = psize;
-                    location = ploc;
-                }
+                RequestPart(char* part, size_t size, size_t location): part(part), size(size), location(location){}
             };
 
+            /// @brief Metrics update frequency, decrease for more up-to-date metrics, increase to save server resources
             static constexpr std::chrono::seconds METRICS_UPDATE_FREQUENCY_SEC = std::chrono::seconds(4);
-            static constexpr uint16_t READ_NUM_RETRY_ON_INT = 3;
-            static constexpr uint_fast16_t CONN_QUEUE_LIMIT = 2048; // depends on tcp_max_syn_backlog, ignored when tcp_syncookies = 1
+
+            /// @brief Number of retries on EINTR
+            static constexpr uint_fast16_t READ_NUM_RETRY_ON_INT = 3;
+
+            /// @brief Max attempts to read client data from socket, required to avoid endless loop
+            static constexpr uint_fast32_t READ_MAX_ATTEMPTS = (MAX_REQUEST_SIZE / READ_BUFFER_SIZE) * 2;
+
+            /// @brief Server socket backlog, depends on tcp_max_syn_backlog, ignored when tcp_syncookies = 1
+            static constexpr uint_fast16_t CONN_QUEUE_LIMIT = 2048; 
 
             std::binary_semaphore metricsSemaphore{0};
             std::atomic<uint_fast64_t> numErrors = 0;
@@ -96,26 +123,28 @@ namespace server {
             std::atomic<bool>& cancellationToken;
             std::atomic<bool> isRunning = false;
             std::jthread metricsUpdaterThread;
-
-            uint_fast16_t trashEmptyFrequency = 100;
-            uint_fast16_t numShards = 24;
+            ConnManager connManager;
+            
+            uint_fast16_t trashEmptyFrequency;
+            uint_fast16_t numShards;
             std::unique_ptr<ServerShard[]> serverShards;
-            int port = 9001;
+            int port;
             int server_fd;
             int epoll_fd;
+            int sockBuffer;
             epoll_event epoll_events[MAX_EVENTS];
             Trashcan<char> trashcan;
 
             Command createCommand(uint_fast16_t code, char* key, char* value, uint_fast64_t hash, int client_fd) const;
             Query createQuery(uint_fast16_t code, char* key, uint_fast64_t hash, int client_fd) const;
+
+            size_t readRequest(int client_fd, std::vector<RequestPart>& requestParts, bool shouldCloseConn = true);
             int_fast8_t handleRequest();
-            void closeConnection(int client_fd, bool fullShutdown = false);
-            void shutdownConnection(int client_fd, int how = SHUT_RDWR);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});
             ~CacheServer();
-            int Start( std::queue<CacheServerMetrics>& channel);
+            int Start(std::queue<CacheServerMetrics>& channel);
             void Stop() noexcept;
     };
 }

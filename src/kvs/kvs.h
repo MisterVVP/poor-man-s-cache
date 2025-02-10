@@ -11,7 +11,7 @@
 #include <atomic>
 #include "../primegen/primegen.h"
 #include "../hash/hash.h"
-#include "../trashcan/trashcan.hpp"
+#include "../utils/trashcan.hpp"
 #include "../non_copyable.h"
 
 #ifndef NDEBUG

@@ -2,6 +2,20 @@
 
 using namespace server;
 
+void server::ConnManager::closeConnection(int client_fd)
+{
+    auto sdRes = shutdown(client_fd, SHUT_RDWR);
+    if (sdRes == -1) {
+        perror("Error when shutting down client_fd");
+    }
+    auto closeRes = close(client_fd);
+    if (closeRes == -1) {
+        perror("Error when closing client_fd");
+    } else {
+        --connCounter;
+    }
+}
+
 int_fast8_t ServerShard::processCommand(const Command &command)
 {
     const char* response = nullptr;
@@ -18,31 +32,69 @@ int_fast8_t ServerShard::processCommand(const Command &command)
         perror("Error when sending data back to client");
         err = 1;
     }
+    connManager->closeConnection(command.client_fd);
     return err;
 }
 
 int_fast8_t ServerShard::processQuery(const Query &query)
 {
     const char* response = nullptr;
-    int_fast8_t err = 0;
+
     if (query.queryCode == 1) {
         const char* value = keyValueStore.get(query.key, query.hash);
         response = value ? value : "(nil)";
     } else {
-        err = 1;
-        response = "ERROR: Invalid query code";        
+        response = "ERROR: Invalid query code";
     }
 
-    auto res = send(query.client_fd, response, strlen(response), 0);
-    if (res == -1) {
-        perror("Error when sending data back to client");
-        err = 1;
+    const size_t responseSize = strlen(response) + 1;
+    char* responseWithSeparator = new char[responseSize];
+    memcpy(responseWithSeparator, response, responseSize - 1);
+    responseWithSeparator[responseSize - 1] = MSG_SEPARATOR;
+
+    // TODO: Think how to improve this criteria
+    if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
+        auto aq = std::async(std::launch::async, &ServerShard::sendResponse, this, query.client_fd, responseWithSeparator, responseSize);
+        std::cout << "Sending async response for query.client_fd = " << query.client_fd << ", query.key = " << query.key << std::endl;
+        // TODO: more things should be considered or implemented:
+        // 1. error counting for async responses
+        // 2. tracking mechanism for asynch responses
+        // 3. Insurance for memory deallocation and connection closing
+        return 0;
     }
-    return err;
+
+    return sendResponse(query.client_fd, responseWithSeparator, responseSize);
 }
 
-CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings): port(settings.port), numErrors(0), cancellationToken(cToken),
-    server_fd(-1), isRunning(false), activeConnectionsCounter(0), numRequests(0), numShards(settings.numShards), trashEmptyFrequency(settings.trashEmptyFrequency)
+int_fast8_t server::ServerShard::sendResponse(int client_fd, const char* response, const size_t responseSize)
+{
+    int_fast8_t errCount = 0;
+    size_t totalSent = 0;
+    while (totalSent < responseSize) {
+        ssize_t bytesSent = send(client_fd, response + totalSent, responseSize - totalSent, 0);
+
+        if (bytesSent == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::this_thread::yield();
+                continue;
+            } else {
+                perror("Error when sending data back to client");
+                errCount++;
+                break;
+            }
+        }
+
+        totalSent += bytesSent;
+    }
+
+    delete[] response;
+    connManager->closeConnection(client_fd);
+    return errCount;
+}
+
+CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings): port(settings.port), numErrors(0),
+    cancellationToken(cToken), sockBuffer(settings.sockBuffer), server_fd(-1), isRunning(false), activeConnectionsCounter(0),
+    numRequests(0), numShards(settings.numShards), trashEmptyFrequency(settings.trashEmptyFrequency), connManager(activeConnectionsCounter)
 {
 
 }
@@ -86,6 +138,53 @@ Query CacheServer::createQuery(uint_fast16_t code, char *key, uint_fast64_t hash
     return query;
 }
 
+size_t server::CacheServer::readRequest(int client_fd, std::vector<RequestPart> &requestParts, bool shouldCloseConn)
+{
+    size_t request_size = 0;
+    char buffer[READ_BUFFER_SIZE];
+    buffer[0] = 0;
+    uint16_t readErrorsCounter = 0;
+    bool receivedLastBlock = false;
+    uint_fast32_t read_attempts = 0;
+    while (!receivedLastBlock && read_attempts < READ_MAX_ATTEMPTS) {
+        auto bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+        if (bytes_read == -1) {
+            readErrorsCounter++;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+                //break;
+            } else {
+                if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
+                    perror("Failed to read client request buffer: interruption signal received. Retrying...");
+                    continue;
+                }
+                perror("Failed to read client request buffer");
+                if (shouldCloseConn) {
+                    connManager.closeConnection(client_fd);;
+                }
+                return request_size;
+            }
+        } else if (bytes_read == 0) {
+            if (shouldCloseConn) {
+                connManager.closeConnection(client_fd);;
+            }
+            return request_size;
+        } else {            
+            if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
+                receivedLastBlock = true;
+                --bytes_read;
+            }
+            char* partVal = new char[bytes_read];
+            memcpy(partVal, buffer, bytes_read);
+            requestParts.emplace_back(partVal, bytes_read, request_size);                    
+            request_size += bytes_read;
+            trashcan.AddGarbage(partVal);
+        }
+        ++read_attempts;
+    }
+    return request_size;
+}
+
 int_fast8_t CacheServer::handleRequest()
 {
 #ifndef NDEBUG
@@ -106,41 +205,12 @@ int_fast8_t CacheServer::handleRequest()
         auto client_fd = epoll_events[i].data.fd;
         if ((epoll_events[i].events & EPOLLERR) || (epoll_events[i].events & EPOLLHUP)) {
             perror("Failed to process client request - epoll error");
-            closeConnection(client_fd, true);
+            connManager.closeConnection(client_fd);;
             continue;
         }
         if (epoll_events[i].events & EPOLLIN) {
             std::vector<RequestPart> requestParts{};
-            size_t request_size = 0;
-            char buffer[READ_BUFFER_SIZE];
-            buffer[0] = 0;
-            uint16_t readErrorsCounter = 0;
-            for (;;) {
-                auto bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-                if (bytes_read == -1) {
-                    readErrorsCounter++;
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        break;
-                    } else {
-                        if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
-                            perror("Failed to read client request buffer: interruption signal received. Retrying...");
-                            continue;
-                        }
-                        perror("Failed to read client request buffer");
-                        closeConnection(client_fd, true);
-                        return 1;
-                    }
-                } else if (bytes_read == 0) {
-                    closeConnection(client_fd, true);
-                    return 1;
-                } else {
-                    char* partVal = new char[bytes_read];
-                    memcpy(partVal, buffer, bytes_read);
-                    requestParts.emplace_back(partVal, bytes_read, request_size);                    
-                    request_size += bytes_read;
-                    trashcan.AddGarbage(partVal);
-                }
-            }
+            auto request_size = readRequest(client_fd, requestParts);
             auto request = new char[request_size + 1];
             for (auto i = 0; i < requestParts.size(); ++i) {    
                 memcpy(request + requestParts[i].location, requestParts[i].part, requestParts[i].size);
@@ -152,7 +222,7 @@ int_fast8_t CacheServer::handleRequest()
                 if (command == NULL) {
                     const char* response = "ERROR: Unable to parse command";
                     send(client_fd, response, strlen(response), 0);
-                    closeConnection(client_fd, true);
+                    connManager.closeConnection(client_fd);;
                     trashcan.AddGarbage(request);
                     ++result;
                     continue;
@@ -167,21 +237,13 @@ int_fast8_t CacheServer::handleRequest()
                     auto& shard = serverShards[shardId];
                     if (strcmp(command, "GET") == 0) {
                         auto query = createQuery(1, key, hash, client_fd);
-
-                        shutdownConnection(client_fd, SHUT_RD);
                         result += shard.processQuery(query);
-                        shutdownConnection(client_fd, SHUT_WR);
-                        closeConnection(client_fd);
 
                         trashcan.AddGarbage(query.key);
                     } else if (strcmp(command, "SET") == 0) {
                         if (com_saveptr) {
                             auto cmd = createCommand(1, key, com_saveptr, hash, client_fd);
-
-                            shutdownConnection(client_fd, SHUT_RD);
                             result += shard.processCommand(cmd);
-                            shutdownConnection(client_fd, SHUT_WR);
-                            closeConnection(client_fd);
 
                             trashcan.AddGarbage(cmd.key);
                             trashcan.AddGarbage(cmd.value);
@@ -192,7 +254,7 @@ int_fast8_t CacheServer::handleRequest()
 #endif
                             send(client_fd, response, strlen(response), 0);
                             ++result;
-                            closeConnection(client_fd, true);
+                            connManager.closeConnection(client_fd);;
                         }
                     }
                 } else {
@@ -202,12 +264,12 @@ int_fast8_t CacheServer::handleRequest()
 #endif
                     ++result;
                     send(client_fd, response, strlen(response), 0);
-                    closeConnection(client_fd, true);
+                    connManager.closeConnection(client_fd);;
                 }
                 trashcan.AddGarbage(request);
             } else {
                 perror("Failed to read client request buffer");
-                closeConnection(client_fd, true);
+                connManager.closeConnection(client_fd);;
                 ++result;
             }
         }
@@ -218,27 +280,6 @@ int_fast8_t CacheServer::handleRequest()
     std::cout << "handleRequest() finished in " << duration.count() << " μs ! epoll_fd = " << epoll_fd << std::endl;
 #endif
     return result;
-}
-
-void CacheServer::closeConnection(int client_fd, bool fullShutdown)
-{    
-    if (fullShutdown) {
-        shutdownConnection(client_fd, SHUT_RDWR);
-    }
-    auto closeRes = close(client_fd);
-    if (closeRes == -1) {
-        perror("Error when closing client_fd");
-    } else {
-        --activeConnectionsCounter;
-    }
-}
-
-void server::CacheServer::shutdownConnection(int client_fd, int how)
-{
-    auto sdRes = shutdown(client_fd, how);
-    if (sdRes == -1) {
-        perror("Error when shutting down client_fd");
-    }
 }
 
 void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
@@ -276,8 +317,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         perror("Failed to set SO_REUSEPORT for server socket");
         return 1;
     }
-    int sock_buffer_size = 512 * 1024 * 1024;  // 512MB buffer
-    if (setSocketBuffers(server_fd, sock_buffer_size, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
+    if (setSocketBuffers(server_fd, sockBuffer, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
         std::cerr << "Failed to set socket buffer options for server socket" << std::endl;
         return 1;
     }
@@ -307,6 +347,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     serverShards = std::make_unique<ServerShard[]>(numShards);
     for (int i = 0; i < numShards; ++i) {
         serverShards[i].shardId = i;
+        serverShards[i].connManager = std::make_shared<ConnManager>(this->connManager);
     }
 
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
@@ -328,14 +369,13 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         if (client_fd >= 0) {
             ++activeConnectionsCounter;
             ++numRequests;
-            setNonBlocking(client_fd);
-            setSocketBuffers(client_fd, sock_buffer_size, SOCK_BUF_OPTS::SOCK_BUF_ALL);
+            setNonBlocking(client_fd);            
             epoll_event event{};
             event.events = EPOLLIN | EPOLLET;
             event.data.fd = client_fd;
             if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
                 perror("Failed to add client_fd to epoll");
-                closeConnection(client_fd, true);
+                connManager.closeConnection(client_fd);;
             } else {
                 numErrors += handleRequest();
             }

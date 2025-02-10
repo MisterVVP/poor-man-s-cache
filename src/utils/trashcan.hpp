@@ -7,6 +7,9 @@
 #include <iostream>
 #endif
 
+/// @brief Simple tool to assist with memory deallocation of arrays.
+/// Everything that was added to trashcan will be automatically cleaned up during destructor call or manually via Empty() method
+/// @tparam T type of pointer to store in trashcan
 template <typename T>
 class Trashcan : NonCopyable {
     private:
@@ -16,7 +19,9 @@ class Trashcan : NonCopyable {
         bool isEmpty = true;
     public:
         Trashcan(uint_fast64_t capacity = DEFAULT_INITIAL_CAPACITY);
+        /// @brief Deletes garbage
         ~Trashcan();
+        /// @brief Empty trash can from garbage
         void Empty();
         void AddGarbage(const T* trash);
 };
