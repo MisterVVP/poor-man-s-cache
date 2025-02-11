@@ -2,6 +2,8 @@ add_executable(
   ${PROJECT_NAME} 
   main.cpp
   server/server.cpp
+  server/shard.cpp
+  server/conn_manager.hpp
   server/sockutils.cpp
   hash/MurmurHash3.cpp
   hash/hash.cpp

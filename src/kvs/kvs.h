@@ -1,6 +1,9 @@
 #pragma once
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <string_view>
+#include <cstdio>
 #include <string.h>
 #include <charconv>
 #include <iostream>
@@ -74,7 +77,14 @@ namespace kvs
             bool compressionEnabled = true;
             std::unique_ptr<KeyValueStore> compressDictionary;
             void rebuildCompressionDictionary();
+
+            /// @brief Performs value compression and allocates new value memory
+            /// @param value Pointer to string to compress
+            /// @return Pointer to compressed string
             char* compress(const char* value) const;
+            /// @brief Performs value decompression and allocates new value in memory
+            /// @param compressedValue Pointer to compressed string
+            /// @return Pointer to decompressed string
             char* decompress(const char* compressedValue) const;
 
         public:

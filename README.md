@@ -129,6 +129,7 @@ Check Redis metrics at http://localhost:9121/metrics
 
 ## TODO
 - Allow passing more configuration options via environment variables.
+- Set up CI
 - Work on error responses from cache server
 - Check if we can reduce memory usage during decompression as well.
 - Python code inside 'tests' folder deserves refactoring (low priority)

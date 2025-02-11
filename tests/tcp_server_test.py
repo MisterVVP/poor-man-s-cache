@@ -55,30 +55,25 @@ def send_command_to_custom_cache(command: str, bufSize: int):
             s.connect((host, port))
             command += "\x1F"
             s.sendall(command.encode('utf-8'))
+            s.settimeout(30)
+            response = bytearray()
+            while True:
+                try:
+                    chunk = s.recv(bufSize)
+                    if not chunk:
+                        break  # Server closed connection
 
-            if command.startswith("SET"):
-                response = s.recv(bufSize).decode('utf-8')
-                return response.strip().rstrip("\x1F")
-            else:  # Handling GET or other commands
-                s.settimeout(10)
-                response = bytearray()
-                while True:
-                    try:
-                        chunk = s.recv(bufSize)
-                        if not chunk:
-                            break  # Server closed connection
+                    response.extend(chunk)
 
-                        response.extend(chunk)
-
-                        # Check if MSG_SEPARATOR (0x1F) is in the received data
-                        if b'\x1F' in chunk:
-                            break
-                    except socket.timeout as e:
-                        logger.error("Socket read timeout")
-                        exit(1)
-                    except socket.error as e:
-                        logger.error(e)
-                        exit(1)
+                    # Check if MSG_SEPARATOR (0x1F) is in the received data
+                    if b'\x1F' in chunk:
+                        break
+                except socket.timeout as e:
+                    logger.error("Socket read timeout")
+                    exit(1)
+                except socket.error as e:
+                    logger.error(e)
+                    exit(1)
 
             # Remove MSG_SEPARATOR from the response before returning
             return response.decode('utf-8').strip().rstrip("\x1F")

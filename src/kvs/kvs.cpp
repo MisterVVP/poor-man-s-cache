@@ -83,64 +83,61 @@ inline uint_fast64_t KeyValueStore::calcIndex(uint_fast64_t hash, int attempt, u
     return (hash + attempt * attempt) % tableSize;
 }
 
-// Performs value compression and allocates new value in memory
 char* KeyValueStore::compress(const char* value) const {
-    // Does not make sense to compress nullptr or nothing
     if (!value || value[0] == '\0') {
         return nullptr;
     }
-    const size_t valueLen = strlen(value);
 
-    // Does not make sense to compress small data
+    std::string_view valueView(value);
+    const size_t valueLen = valueView.size();
     if (valueLen < MIN_COMPRESSED_SIZE) {
         return nullptr;
     }
 
-    char* compressedResult = new char[valueLen + 1];
-    size_t compressedPos = 0;
+    std::string compressedResult;
+    compressedResult.reserve(valueLen);
+
+    auto cDictSize = compressDictionary->getNumEntries();
     size_t i = 0;
-
+    
     while (i < valueLen) {
-        int_fast8_t matchFound = 0;
+        bool matchFound = false;
 
-        // Check for matches in compressDictionary
-        for (size_t dictIndex = 0; dictIndex < compressDictionary->getNumEntries(); ++dictIndex) {
-            const char* dictEntry = compressDictionary->get(std::to_string(dictIndex).c_str());
-                if (dictEntry) {
-                    const size_t entryLen = strlen(dictEntry);
-                    if (strncmp(value + i, dictEntry, entryLen) == 0) {
-                        // Match found, add index with wrapper characters
-                        compressedResult[compressedPos++] = UNIT_SEPARATOR;
-                        compressedPos += sprintf(compressedResult + compressedPos, "%zu", dictIndex);
-                        compressedResult[compressedPos++] = UNIT_SEPARATOR;
-                        i += entryLen;
-                        matchFound ^= 1;
-                        break;
+        for (size_t dictIndex = 0; dictIndex < cDictSize; ++dictIndex) {
+            char cDictKey[16];
+            snprintf(cDictKey, sizeof(cDictKey), "%zu", dictIndex);
+
+            const char* dictEntry = compressDictionary->get(cDictKey);
+            if (dictEntry) {
+                std::string_view dictEntryView(dictEntry);
+                if (valueView.substr(i, dictEntryView.size()) == dictEntryView) {
+                    compressedResult += UNIT_SEPARATOR;
+                    compressedResult += std::to_string(dictIndex);
+                    compressedResult += UNIT_SEPARATOR;
+                    i += dictEntryView.size();
+                    matchFound = true;
+                    break;
                 }
             }
         }
 
         if (!matchFound) {
-            // No match found, copy current character
-            compressedResult[compressedPos++] = value[i++];
+            compressedResult += valueView[i++];
         }
     }
-    compressedResult[valueLen] = '\0';
 
-    if (compressedPos < valueLen) {
-        char* result = new char[compressedPos+1];
-        memcpy(result, compressedResult, compressedPos);
-        result[compressedPos] = '\0';
-        delete[] compressedResult;
+    auto compressedLen = compressedResult.size();
+    if (compressedLen < valueLen) {
+        auto rSize = compressedLen + 1;
+        char* result = new char[rSize];
+        memcpy(result, compressedResult.c_str(), rSize);
+        result[rSize-1] = '\0';
         return result;
-    } else {
-        delete[] compressedResult;        
-        return nullptr;
     }
 
+    return nullptr;
 }
 
-// Performs value decompression and allocates new value in memory
 char* KeyValueStore::decompress(const char* compressedValue) const{
     if (!compressedValue || compressedValue == nullptr || compressedValue[0] == '\0') {
         return nullptr; // Handle empty values
@@ -158,12 +155,12 @@ char* KeyValueStore::decompress(const char* compressedValue) const{
                 index = index * 10 + (compressedValue[i++] - '0');
             }
             ++i;
-                // Get the corresponding substring from compressDictionary
-                const char* dictEntry = compressDictionary->get(std::to_string(index).c_str());
-                if (dictEntry) {
-                    size_t entryLen = strlen(dictEntry);
-                    strncpy(decompressedResult + decompressedPos, dictEntry, entryLen);
-                    decompressedPos += entryLen;                
+            // Get the corresponding substring from compressDictionary
+            const char* dictEntry = compressDictionary->get(std::to_string(index).c_str());
+            if (dictEntry) {
+                size_t entryLen = strlen(dictEntry);
+                strncpy(decompressedResult + decompressedPos, dictEntry, entryLen);
+                decompressedPos += entryLen;                
             }
         } else {
             // Copy non-wrapper characters as-is
@@ -332,42 +329,40 @@ bool kvs::KeyValueStore::set(const char *key, const char *value, uint_fast64_t h
     do {
         idx = calcIndex(hash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
-            if (!table[idx].entries[i].occupied) {
-
-                table[idx].entries[i].key = new char[kSize];
-                memcpy(table[idx].entries[i].key, key, kSize);
+            auto& tableEntry = table[idx].entries[i];
+            if (!tableEntry.occupied) {
+                tableEntry.key = new char[kSize];
+                memcpy(tableEntry.key, key, kSize);
 
                 if (compressionEnabled) {
                     auto compressed = compress(value);
                     if (compressed) {
-                        table[idx].entries[i].value = compressed;
+                        tableEntry.value = compressed;
                     } else {
-                        table[idx].entries[i].value = new char[vSize];
-                        memcpy(table[idx].entries[i].value, value, vSize);
+                        tableEntry.value = new char[vSize];
+                        memcpy(tableEntry.value, value, vSize);
                     }
                 } else {
-                    table[idx].entries[i].value = new char[vSize];
-                    memcpy(table[idx].entries[i].value, value, vSize);
+                    tableEntry.value = new char[vSize];
+                    memcpy(tableEntry.value, value, vSize);
                 }
 
-                table[idx].entries[i].occupied ^= 1;
+                tableEntry.occupied ^= 1;
                 ++numEntries;
                 return true;
-            } else if (strcmp(table[idx].entries[i].key, key) == 0) {
-
-                delete[] table[idx].entries[i].value;
-
+            } else if (strcmp(tableEntry.key, key) == 0) {
+                delete[] tableEntry.value;
                 if (compressionEnabled) {
                     auto compressed = compress(value);
                     if (compressed) {
-                        table[idx].entries[i].value = compressed;
-                    } else {                        
-                        table[idx].entries[i].value = new char[vSize];
-                        memcpy(table[idx].entries[i].value, value, vSize);
+                        tableEntry.value = compressed;
+                    } else {
+                        tableEntry.value = new char[vSize];
+                        memcpy(tableEntry.value, value, vSize);
                     }
                 } else {
-                    table[idx].entries[i].value = new char[vSize];
-                    memcpy(table[idx].entries[i].value, value, vSize);
+                    tableEntry.value = new char[vSize];
+                    memcpy(tableEntry.value, value, vSize);
                 }
                 return true;
             }
@@ -393,15 +388,16 @@ const char *kvs::KeyValueStore::get(const char *key, uint_fast64_t hash)
     do {
         idx = calcIndex(hash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
-            if (table[idx].entries[i].occupied && strcmp(table[idx].entries[i].key, key) == 0) {
+            auto& tableEntry = table[idx].entries[i];
+            if (tableEntry.occupied && strcmp(tableEntry.key, key) == 0) {
                 if (compressionEnabled) {
-                    auto retVal = decompress(table[idx].entries[i].value);
+                    auto retVal = decompress(tableEntry.value);
                     if (enableTrashcan) {
                         trashcan->AddGarbage(retVal);
                     }
                     return retVal;
                 }
-                return table[idx].entries[i].value;
+                return tableEntry.value;
             }
         }
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);

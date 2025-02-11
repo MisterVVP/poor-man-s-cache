@@ -2,101 +2,74 @@
 
 using namespace server;
 
-void server::ConnManager::closeConnection(int client_fd)
+CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings):
+    numErrors(0), cancellationToken(cToken), isRunning(false), numRequests(0), numShards(settings.numShards),
+    trashEmptyFrequency(settings.trashEmptyFrequency), port(settings.port), connManager()
 {
-    auto sdRes = shutdown(client_fd, SHUT_RDWR);
-    if (sdRes == -1) {
-        perror("Error when shutting down client_fd");
-    }
-    auto closeRes = close(client_fd);
-    if (closeRes == -1) {
-        perror("Error when closing client_fd");
-    } else {
-        --connCounter;
-    }
-}
-
-int_fast8_t ServerShard::processCommand(const Command &command)
-{
-    const char* response = nullptr;
-    int_fast8_t err = 0;
-    if (command.commandCode == 1) {
-        auto setRes = keyValueStore.set(command.key, command.value, command.hash);
-        response = setRes ? "OK" : "ERROR: Internal error";
-    } else {
-        err = 1;
-        response = "ERROR: Invalid command code";
-    }
-    auto res = send(command.client_fd, response, strlen(response), 0);
-    if (res == -1) {
-        perror("Error when sending data back to client");
-        err = 1;
-    }
-    connManager->closeConnection(command.client_fd);
-    return err;
-}
-
-int_fast8_t ServerShard::processQuery(const Query &query)
-{
-    const char* response = nullptr;
-
-    if (query.queryCode == 1) {
-        const char* value = keyValueStore.get(query.key, query.hash);
-        response = value ? value : "(nil)";
-    } else {
-        response = "ERROR: Invalid query code";
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        throw std::system_error(errno, std::system_category(), "Socket creation failed");
     }
 
-    const size_t responseSize = strlen(response) + 1;
-    char* responseWithSeparator = new char[responseSize];
-    memcpy(responseWithSeparator, response, responseSize - 1);
-    responseWithSeparator[responseSize - 1] = MSG_SEPARATOR;
-
-    // TODO: Think how to improve this criteria
-    if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
-        auto aq = std::async(std::launch::async, &ServerShard::sendResponse, this, query.client_fd, responseWithSeparator, responseSize);
-        std::cout << "Sending async response for query.client_fd = " << query.client_fd << ", query.key = " << query.key << std::endl;
-        // TODO: more things should be considered or implemented:
-        // 1. error counting for async responses
-        // 2. tracking mechanism for asynch responses
-        // 3. Insurance for memory deallocation and connection closing
-        return 0;
+    int flag = 1;
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to set TCP_NODELAY for server socket");
+    }
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEADDR for server socket");
+    }
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof(flag)) == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
+    }
+    
+    int qlen = 5;
+    if (setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to set TCP_FASTOPEN for server socket");
     }
 
-    return sendResponse(query.client_fd, responseWithSeparator, responseSize);
-}
-
-int_fast8_t server::ServerShard::sendResponse(int client_fd, const char* response, const size_t responseSize)
-{
-    int_fast8_t errCount = 0;
-    size_t totalSent = 0;
-    while (totalSent < responseSize) {
-        ssize_t bytesSent = send(client_fd, response + totalSent, responseSize - totalSent, 0);
-
-        if (bytesSent == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                std::this_thread::yield();
-                continue;
-            } else {
-                perror("Error when sending data back to client");
-                errCount++;
-                break;
-            }
-        }
-
-        totalSent += bytesSent;
+    if (setSocketBuffers(server_fd, settings.sockBuffer, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
+        close(server_fd);
+        throw std::runtime_error("Failed to set socket buffer options for server socket");
     }
 
-    delete[] response;
-    connManager->closeConnection(client_fd);
-    return errCount;
-}
+    if (setNonBlocking(server_fd) == -1) {
+        close(server_fd);
+        throw std::runtime_error("Failed to set O_NONBLOCK for server socket");
+    }
 
-CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings): port(settings.port), numErrors(0),
-    cancellationToken(cToken), sockBuffer(settings.sockBuffer), server_fd(-1), isRunning(false), activeConnectionsCounter(0),
-    numRequests(0), numShards(settings.numShards), trashEmptyFrequency(settings.trashEmptyFrequency), connManager(activeConnectionsCounter)
-{
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
 
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Bind failed");
+    }
+
+    if (listen(server_fd, CONN_QUEUE_LIMIT) < 0) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Listen failed");
+    }
+
+    epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
+    }
+
+#ifndef NDEBUG
+    std::cout << "Initializing " << numShards << " server shards..." << std::endl;
+#endif
+
+    serverShards = std::make_unique<ServerShard[]>(numShards);
+    for (int i = 0; i < numShards; ++i) {
+        serverShards[i].shardId = i;
+    }
 }
 
 CacheServer::~CacheServer() {
@@ -106,7 +79,7 @@ CacheServer::~CacheServer() {
     }
     if (epoll_fd >= 0) {
         close(epoll_fd);
-    }    
+    }
 }
 
 Command CacheServer::createCommand(uint_fast16_t code, char *key, char *value, uint_fast64_t hash, int client_fd) const
@@ -138,7 +111,7 @@ Query CacheServer::createQuery(uint_fast16_t code, char *key, uint_fast64_t hash
     return query;
 }
 
-size_t server::CacheServer::readRequest(int client_fd, std::vector<RequestPart> &requestParts, bool shouldCloseConn)
+size_t server::CacheServer::readRequest(int client_fd, std::vector<RequestPart> &requestParts)
 {
     size_t request_size = 0;
     char buffer[READ_BUFFER_SIZE];
@@ -152,24 +125,19 @@ size_t server::CacheServer::readRequest(int client_fd, std::vector<RequestPart> 
             readErrorsCounter++;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
-                //break;
             } else {
                 if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
                     perror("Failed to read client request buffer: interruption signal received. Retrying...");
                     continue;
                 }
                 perror("Failed to read client request buffer");
-                if (shouldCloseConn) {
-                    connManager.closeConnection(client_fd);;
-                }
-                return request_size;
+                connManager.closeConnection(client_fd);                
+                break;
             }
         } else if (bytes_read == 0) {
-            if (shouldCloseConn) {
-                connManager.closeConnection(client_fd);;
-            }
-            return request_size;
-        } else {            
+            connManager.closeConnection(client_fd);            
+            break;
+        } else {
             if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
                 receivedLastBlock = true;
                 --bytes_read;
@@ -205,7 +173,7 @@ int_fast8_t CacheServer::handleRequest()
         auto client_fd = epoll_events[i].data.fd;
         if ((epoll_events[i].events & EPOLLERR) || (epoll_events[i].events & EPOLLHUP)) {
             perror("Failed to process client request - epoll error");
-            connManager.closeConnection(client_fd);;
+            connManager.closeConnection(client_fd);
             continue;
         }
         if (epoll_events[i].events & EPOLLIN) {
@@ -222,7 +190,7 @@ int_fast8_t CacheServer::handleRequest()
                 if (command == NULL) {
                     const char* response = "ERROR: Unable to parse command";
                     send(client_fd, response, strlen(response), 0);
-                    connManager.closeConnection(client_fd);;
+                    connManager.closeConnection(client_fd);
                     trashcan.AddGarbage(request);
                     ++result;
                     continue;
@@ -237,14 +205,27 @@ int_fast8_t CacheServer::handleRequest()
                     auto& shard = serverShards[shardId];
                     if (strcmp(command, "GET") == 0) {
                         auto query = createQuery(1, key, hash, client_fd);
-                        result += shard.processQuery(query);
+                        auto response = shard.processQuery(query);
+                        auto responseSize = strlen(response);
+                        // TODO: Think how to improve this criteria
+                        if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
+#ifndef NDEBUG
+                            std::cout << "Sending async response for query.client_fd = " << query.client_fd << ", query.key = " << query.key << std::endl;
+#endif
+                            auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);                                
+                            // TODO: more things should be considered or implemented:
+                            // 1. error counting for async responses
+                            // 2. tracking mechanism for asynch responses
+                        } else {
+                            result += sendResponse(query.client_fd, response, responseSize);
+                        }
 
                         trashcan.AddGarbage(query.key);
                     } else if (strcmp(command, "SET") == 0) {
                         if (com_saveptr) {
                             auto cmd = createCommand(1, key, com_saveptr, hash, client_fd);
-                            result += shard.processCommand(cmd);
-
+                            auto response = shard.processCommand(cmd);
+                            result += sendResponse(client_fd, response, strlen(response));
                             trashcan.AddGarbage(cmd.key);
                             trashcan.AddGarbage(cmd.value);
                         } else {
@@ -254,7 +235,7 @@ int_fast8_t CacheServer::handleRequest()
 #endif
                             send(client_fd, response, strlen(response), 0);
                             ++result;
-                            connManager.closeConnection(client_fd);;
+                            connManager.closeConnection(client_fd);
                         }
                     }
                 } else {
@@ -264,12 +245,12 @@ int_fast8_t CacheServer::handleRequest()
 #endif
                     ++result;
                     send(client_fd, response, strlen(response), 0);
-                    connManager.closeConnection(client_fd);;
+                    connManager.closeConnection(client_fd);
                 }
                 trashcan.AddGarbage(request);
             } else {
                 perror("Failed to read client request buffer");
-                connManager.closeConnection(client_fd);;
+                connManager.closeConnection(client_fd);
                 ++result;
             }
         }
@@ -282,92 +263,70 @@ int_fast8_t CacheServer::handleRequest()
     return result;
 }
 
+int_fast8_t server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
+{
+    int_fast8_t errCount = 0;
+    size_t totalSent = 0;
+    while (totalSent < responseSize) {
+        ssize_t bytesSent = send(client_fd, response + totalSent, responseSize - totalSent, 0);
+
+        if (bytesSent == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::this_thread::yield();
+                continue;
+            } else {
+                perror("Error when sending data back to client");
+                errCount++;
+                break;
+            }
+        }
+
+        totalSent += bytesSent;
+    }
+
+
+    // send final bytes (TODO: could be modified later when we extend protocol)
+    ssize_t bytesSent = 0;
+    do {
+        const char finalByte = MSG_SEPARATOR;
+        bytesSent = send(client_fd, &finalByte, 1, 0);
+
+        if (bytesSent == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            } else {
+                perror("Error when sending data back to client");
+                errCount++;
+                break;
+            }
+        }
+    } while (bytesSent < 0); // 0 = conn closed by client, -1 = syscall error
+
+    connManager.closeConnection(client_fd);
+    return errCount;
+}
+
 void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, activeConnectionsCounter, numRequests));
+        channel.push(CacheServerMetrics(numErrors, connManager.activeConnectionsCounter, numRequests));
     }
 }
 
 int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
     isRunning = true;
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        perror("Socket creation failed");
-        return 1;
-    }
-
-    int flag = 1;
-    if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (void*)&flag, sizeof(flag)) == -1) {
-        perror("Failed to set TCP_NODELAY for server socket");
-        return 1;
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
-        perror("Failed to set SO_REUSEADDR for server socket");
-        return 1;
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof(flag)) == -1) {
-        perror("Failed to set SO_REUSEPORT for server socket");
-        return 1;
-    }
-    int qlen = 5;
-    if (setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
-        perror("Failed to set SO_REUSEPORT for server socket");
-        return 1;
-    }
-    if (setSocketBuffers(server_fd, sockBuffer, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
-        std::cerr << "Failed to set socket buffer options for server socket" << std::endl;
-        return 1;
-    }
-    if (setNonBlocking(server_fd) == -1) {
-        std::cerr << "Failed to set O_NONBLOCK for server socket" << std::endl;
-        return 1;
-    }
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port);
-
-    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        std::cerr << "Bind failed" << std::endl;
-        close(server_fd);
-        return 1;
-    }
-
-    if (listen(server_fd, CONN_QUEUE_LIMIT) < 0) {
-        perror("Listen failed");
-        close(server_fd);
-        return 1;
-    }
-
-    std::cout << "Initializing " << numShards << " server shards..." << std::endl;
-    serverShards = std::make_unique<ServerShard[]>(numShards);
-    for (int i = 0; i < numShards; ++i) {
-        serverShards[i].shardId = i;
-        serverShards[i].connManager = std::make_shared<ConnManager>(this->connManager);
-    }
-
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
     {
         metricsUpdater(channel, stopToken);
     });
 
-    epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) {
-        perror("Failed to create epoll instance");
-        return 1;
-    }
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
 
     while (!cancellationToken) {
-        sockaddr_in client_address;
-        socklen_t client_len = sizeof(client_address);
-        auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
+        auto client_fd = connManager.acceptConnection(server_fd);
         if (client_fd >= 0) {
-            ++activeConnectionsCounter;
             ++numRequests;
             setNonBlocking(client_fd);            
             epoll_event event{};
@@ -375,7 +334,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
             event.data.fd = client_fd;
             if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
                 perror("Failed to add client_fd to epoll");
-                connManager.closeConnection(client_fd);;
+                connManager.closeConnection(client_fd);
             } else {
                 numErrors += handleRequest();
             }
