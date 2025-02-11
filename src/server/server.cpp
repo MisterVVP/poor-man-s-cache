@@ -65,10 +65,10 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
 #ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards..." << std::endl;
 #endif
-
-    serverShards = std::make_unique<ServerShard[]>(numShards);
+    serverShards.reserve(numShards);
+    KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true, true };
     for (int i = 0; i < numShards; ++i) {
-        serverShards[i].shardId = i;
+        serverShards.emplace_back(i, kvsSettings);
     }
 }
 

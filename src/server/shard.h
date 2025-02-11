@@ -25,10 +25,15 @@ namespace server {
         int client_fd;
     };
 
-    struct ServerShard: NonCopyable {
+    struct ServerShard {
         public:
             int_fast16_t shardId;
-            KeyValueStore keyValueStore;
+            std::unique_ptr<KeyValueStore> keyValueStore;
+            
+            ServerShard(int_fast16_t shardId, KeyValueStoreSettings kvsSettings): shardId(shardId)
+            {
+                keyValueStore = std::make_unique<KeyValueStore>(kvsSettings);
+            };
 
             const char* processCommand(const Command& command);
             const char* processQuery(const Query& query);

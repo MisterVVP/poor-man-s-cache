@@ -42,8 +42,9 @@ int main() {
     auto numShards = getFromEnv<uint_fast16_t>("NUM_SHARDS", false, 24);
     auto trashEmpyFrequency = getFromEnv<uint_fast16_t>("TRASH_EMPTY_FREQUENCY", false, 100);
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
+    auto enableCompression = getFromEnv<bool>("ENABLE_COMPRESSION", false, false);
 
-    ServerSettings serverSettings { serverPort, numShards, trashEmpyFrequency, sockBufferSize };
+    ServerSettings serverSettings { serverPort, numShards, trashEmpyFrequency, sockBufferSize, enableCompression };
 
     CacheServer cacheServer { cancellationToken, serverSettings };
 

@@ -128,6 +128,8 @@ Check Redis metrics at http://localhost:9121/metrics
 > Redis Pipelines could be something to try out when testing against Redis, but it won't be fair comparison until we implement batch processing within a single connection
 
 ## TODO
+> [!NOTE]
+> Data compression is quite inneficient so far and is disabled by default
 - Allow passing more configuration options via environment variables.
 - Set up CI
 - Work on error responses from cache server

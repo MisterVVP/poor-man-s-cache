@@ -48,6 +48,8 @@ namespace server {
         uint_fast16_t trashEmptyFrequency = 100;
         /// @brief Requested buffer size for server socket
         int sockBuffer = 1048576;
+        /// @brief Enable compression of stored values. Disable if RPS and processing speed is more important than memory consumption
+        bool enableCompression = false;
     };
 
     class CacheServer : NonCopyable {
@@ -70,7 +72,7 @@ namespace server {
             
             uint_fast16_t trashEmptyFrequency;
             uint_fast16_t numShards;
-            std::unique_ptr<ServerShard[]> serverShards;
+            std::vector<ServerShard> serverShards;
             int port;
             int server_fd;
             int epoll_fd;
