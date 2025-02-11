@@ -131,7 +131,7 @@ size_t server::CacheServer::readRequest(int client_fd, std::vector<RequestPart> 
                     continue;
                 }
                 perror("Failed to read client request buffer");
-                connManager.closeConnection(client_fd);                
+                connManager.closeConnection(client_fd);
                 break;
             }
         } else if (bytes_read == 0) {
@@ -265,10 +265,15 @@ int_fast8_t CacheServer::handleRequest()
 
 int_fast8_t server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
 {
+    const size_t responseWithSeparatorSize = responseSize + 1;
+    char* responseWithSeparator = new char[responseWithSeparatorSize];
+    memcpy(responseWithSeparator, response, responseSize);
+    responseWithSeparator[responseSize] = MSG_SEPARATOR;
+
     int_fast8_t errCount = 0;
     size_t totalSent = 0;
-    while (totalSent < responseSize) {
-        ssize_t bytesSent = send(client_fd, response + totalSent, responseSize - totalSent, 0);
+    while (totalSent < responseWithSeparatorSize) {
+        ssize_t bytesSent = send(client_fd, responseWithSeparator + totalSent, responseWithSeparatorSize - totalSent, 0);
 
         if (bytesSent == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -284,25 +289,8 @@ int_fast8_t server::CacheServer::sendResponse(int client_fd, const char* respons
         totalSent += bytesSent;
     }
 
-
-    // send final bytes (TODO: could be modified later when we extend protocol)
-    ssize_t bytesSent = 0;
-    do {
-        const char finalByte = MSG_SEPARATOR;
-        bytesSent = send(client_fd, &finalByte, 1, 0);
-
-        if (bytesSent == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
-            } else {
-                perror("Error when sending data back to client");
-                errCount++;
-                break;
-            }
-        }
-    } while (bytesSent < 0); // 0 = conn closed by client, -1 = syscall error
-
     connManager.closeConnection(client_fd);
+    delete[] responseWithSeparator;
     return errCount;
 }
 

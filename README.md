@@ -131,11 +131,11 @@ Check Redis metrics at http://localhost:9121/metrics
 - Allow passing more configuration options via environment variables.
 - Set up CI
 - Work on error responses from cache server
+- Review the compression algorithm (also an endless task, a potential way to improve could be heuristic logic to determine the optimal compression algorithm + storing multiple algorithms as a strategy pattern).
 - Check if we can reduce memory usage during decompression as well.
 - Python code inside 'tests' folder deserves refactoring (low priority)
 - Integration between the main server and the metrics server can be improved.
 - Continue improving collision resolution (endless task, tbh...).
-- Review the compression algorithm (also an endless task, a potential way to improve could be heuristic logic to determine the optimal compression algorithm + storing multiple algorithms as a strategy pattern).
 - Refactor how tests are executed and organized.
 - Support key expiration, support more operations.
 - Check if there are better ways of avoiding double hash calculation in the server and KVS (right now we just provide extra public methods in `kvs.cpp` which accept hash as an argument).
