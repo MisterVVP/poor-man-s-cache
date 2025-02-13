@@ -33,12 +33,10 @@ if cache_type == 'redis':
 
 def calc_thread_pool_size():
     thread_pool_size = 2
-    if iterations_count >= 100000000:
+    if iterations_count >= 10000000:
         thread_pool_size = 24
-    elif iterations_count >= 10000000:
-        thread_pool_size = 16
     elif iterations_count >= 1000000:
-        thread_pool_size = 12
+        thread_pool_size = 16
     elif iterations_count >= 100000:
         thread_pool_size = 8
     elif iterations_count >= 10000:

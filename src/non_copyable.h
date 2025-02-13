@@ -1,13 +1,19 @@
 #pragma once
 
-// Rule of 5 is nice, but no, thanks.
-struct NonCopyable
+struct NonCopyableOrMovable
 {
+    NonCopyableOrMovable() = default;
+
+    NonCopyableOrMovable(const NonCopyableOrMovable&) = delete;
+    NonCopyableOrMovable(NonCopyableOrMovable&&) = delete;
+
+    NonCopyableOrMovable& operator=(const NonCopyableOrMovable&) = delete;
+    NonCopyableOrMovable& operator=(NonCopyableOrMovable&&) = delete;
+};
+
+struct NonCopyable {
     NonCopyable() = default;
 
     NonCopyable(const NonCopyable&) = delete;
-    NonCopyable(NonCopyable&&) = delete;
-
     NonCopyable& operator=(const NonCopyable&) = delete;
-    NonCopyable& operator=(NonCopyable&&) = delete;
 };

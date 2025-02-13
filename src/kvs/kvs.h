@@ -39,7 +39,7 @@ namespace kvs
         bool enableTrashcan = true;
     };
 
-    class KeyValueStore : NonCopyable {
+    class KeyValueStore : NonCopyableOrMovable {
         private:
             struct Entry {
                 char* key;

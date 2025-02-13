@@ -130,8 +130,9 @@ Check Redis metrics at http://localhost:9121/metrics
 ## TODO
 > [!NOTE]
 > Data compression is quite inneficient so far and is disabled by default
-- Allow passing more configuration options via environment variables.
+
 - Set up CI
+- More corouties
 - Work on error responses from cache server
 - Review the compression algorithm (also an endless task, a potential way to improve could be heuristic logic to determine the optimal compression algorithm + storing multiple algorithms as a strategy pattern).
 - Check if we can reduce memory usage during decompression as well.
@@ -141,7 +142,6 @@ Check Redis metrics at http://localhost:9121/metrics
 - Refactor how tests are executed and organized.
 - Support key expiration, support more operations.
 - Check if there are better ways of avoiding double hash calculation in the server and KVS (right now we just provide extra public methods in `kvs.cpp` which accept hash as an argument).
-- Try replacing `const char*` and dynamic memory with `std::string` and compare performance.
 - There is an opportunity to try out Robot Framework for testing & writing test cases (I've never used that tool). OR just use [Cucumber for Golang aka Godog](https://github.com/cucumber/godog) tests, which I know.
 - Write more documentation and describe the communication protocol.
 - Try out a scaled multi-instance setup (this may require writing a custom load balancer or reverse proxy or using existing solutions like Nginx/Envoy/etc.).

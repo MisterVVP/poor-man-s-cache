@@ -126,7 +126,7 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
 
 CacheServer::task CacheServer::handleRequests()
 {
-    while (!cancellationToken) {
+    while (!cancellationToken) {      
         int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
         if (event_count == -1 && errno != EINTR) {
             perror("epoll_wait failed");
@@ -174,13 +174,13 @@ CacheServer::task CacheServer::handleRequests()
                         if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
                             auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);
                         } else {
-                            numErrors += sendResponse(query.client_fd, response, responseSize);
+                            sendResponse(query.client_fd, response, responseSize);
                         }
                     } else if (strcmp(command, "SET") == 0) {
                         if (com_saveptr) {
                             Command cmd {1, key, com_saveptr, hash, client_fd};
                             auto response = shard.processCommand(cmd);
-                            numErrors += sendResponse(client_fd, response, strlen(response));
+                            sendResponse(client_fd, response, strlen(response));
                             readResult.request.clear();
                         } else {
                             const char* response = "ERROR: Invalid SET command format";
@@ -204,14 +204,13 @@ CacheServer::task CacheServer::handleRequests()
     co_return;
 }
 
-int_fast8_t server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
+void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
 {
     const size_t responseWithSeparatorSize = responseSize + 1;
     auto responseWithSeparator = std::make_unique<char[]>(responseWithSeparatorSize);
     memcpy(responseWithSeparator.get(), response, responseSize);
     responseWithSeparator.get()[responseSize] = MSG_SEPARATOR;
 
-    int_fast8_t errCount = 0;
     size_t totalSent = 0;
     while (totalSent < responseWithSeparatorSize) {
         ssize_t bytesSent = send(client_fd, responseWithSeparator.get() + totalSent, responseWithSeparatorSize - totalSent, 0);
@@ -222,7 +221,7 @@ int_fast8_t server::CacheServer::sendResponse(int client_fd, const char* respons
                 continue;
             } else {
                 perror("Error when sending data back to client");
-                errCount++;
+                ++numErrors;
                 break;
             }
         }
@@ -232,7 +231,6 @@ int_fast8_t server::CacheServer::sendResponse(int client_fd, const char* respons
 
     connManager.closeConnection(client_fd);
     responseWithSeparator.reset();
-    return errCount;
 }
 
 void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
@@ -253,6 +251,8 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
 
+    auto requestsHandler = handleRequests();
+    
     while (!cancellationToken) {
         auto client_fd = connManager.acceptConnection(server_fd);
         if (client_fd >= 0) {
@@ -265,7 +265,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
                 perror("Failed to add client_fd to epoll");
                 connManager.closeConnection(client_fd);
             } else {
-                handleRequests();
+                requestsHandler.coroutine_handle.resume();
             }
         } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("Failed to accept connection");

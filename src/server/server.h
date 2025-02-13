@@ -56,28 +56,29 @@ namespace server {
         Success = 0,
     };
 
-    class CacheServer : NonCopyable {
+    class CacheServer : NonCopyableOrMovable {
         private:
-            struct task {
-                struct promise_type {
-                    task get_return_object() { return task{std::coroutine_handle<promise_type>::from_promise(*this)}; }
-                    std::suspend_never initial_suspend() { return {}; }
-                    std::suspend_always final_suspend() noexcept { return {}; }
-                    void return_void() {}
-                    void unhandled_exception() { std::terminate(); }
+            struct task : NonCopyable {
+                public:
+                    struct promise_type {
+                        task get_return_object() { return task{std::coroutine_handle<promise_type>::from_promise(*this)}; }
+                        std::suspend_always initial_suspend() { return {}; }
+                        std::suspend_always final_suspend() noexcept { return {}; }
+                        void return_void() {}
+                        void unhandled_exception() { std::terminate(); }
 
-                    ~promise_type() {}
-                };
+                        ~promise_type() {}
+                    };
 
-                std::coroutine_handle<promise_type> coro;
+                    std::coroutine_handle<promise_type> coroutine_handle;
 
-                task(std::coroutine_handle<promise_type> h) : coro(h) {}
+                    task(std::coroutine_handle<promise_type> h) : coroutine_handle(h) {}
 
-                ~task() {
-                    if (coro) {
-                        coro.destroy();
+                    ~task() {
+                        if (coroutine_handle) {
+                            coroutine_handle.destroy();
+                        }
                     }
-                }
             };
 
             auto switch_to_main() noexcept {
@@ -133,7 +134,7 @@ namespace server {
 
             ReadRequestResult readRequest(int client_fd);
             task handleRequests();
-            int_fast8_t sendResponse(int client_fd, const char* response, const size_t responseSize);
+            void sendResponse(int client_fd, const char* response, const size_t responseSize);
 
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:

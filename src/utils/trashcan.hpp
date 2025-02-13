@@ -11,7 +11,7 @@
 /// Everything that was added to trashcan will be automatically cleaned up during destructor call or manually via Empty() method
 /// @tparam T type of pointer to store in trashcan
 template <typename T>
-class Trashcan : NonCopyable {
+class Trashcan : NonCopyableOrMovable {
     private:
         static constexpr uint_fast64_t DEFAULT_INITIAL_CAPACITY = 10000;
         uint_fast64_t capacity = DEFAULT_INITIAL_CAPACITY;
