@@ -1,0 +1,30 @@
+on:
+  push:
+    branches:
+    - main
+    - release/*
+
+env:
+  DOCKER_IMAGE_NAME: my-image
+
+jobs:
+  docker_ci:
+    name: Docker CI
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Build docker images and run unit tests
+      run: docker compose --profile main --profile tests build
+
+    - name: Start cache server
+      run: docker compose --profile main up --detach
+      
+    - name: Run load and functional tests
+      run: docker compose --profile tests up
+      timeout-minutes: 45
+
+    - name: Shut everything down
+      run: docker compose --profile main down
