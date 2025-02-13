@@ -3,6 +3,8 @@
 When you got no money to buy enterprise tooling and no desire to contribute to open source - build your own thing.
 Another pet project to practice.
 
+![main](https://github.com/MisterVVP/poor-man-s-cache/actions/workflows/main.yml/badge.svg?branch=main)
+
 ## Goals and philosophy
 
 ### Goals
