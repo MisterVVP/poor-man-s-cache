@@ -16,8 +16,15 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Docker compose build
+    - name: Build docker images and run unit tests
       run: docker compose --profile main --profile tests build
 
-    - name: Docker compose up
-      run: docker compose --profile main --profile tests up
+    - name: Start cache server
+      run: docker compose --profile main up --detach
+      
+    - name: Run load and functional tests
+      run: docker compose --profile tests up
+      timeout-minutes: 45
+
+    - name: Shut everything down
+      run: docker compose --profile main down
