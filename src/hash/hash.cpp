@@ -4,7 +4,7 @@
 uint_fast64_t hashFunc(const char *key) {
     uint_fast64_t len = strlen(key);
     uint_fast64_t hash_otpt[2];
-    MurmurHash3_x64_128(key, len, 0, &hash_otpt); //TODO, generate seed once during runtime
+    MurmurHash3_x64_128(key, len, 0, &hash_otpt); //TODO, generate random seed once on runtime
     return hash_otpt[0];
 }
 

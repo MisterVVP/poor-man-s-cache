@@ -12,17 +12,21 @@ namespace server {
 
      struct Command {
         uint_fast16_t commandCode; // 0: Reserved, 1: SET
-        char* key = nullptr;
-        char* value = nullptr;
+        std::unique_ptr<char[]> key;
+        std::unique_ptr<char[]> value;
         uint_fast64_t hash;
         int client_fd;
+
+        Command(uint_fast16_t code, const char* arg_key, const char* arg_value, uint_fast64_t hash, int client_fd);
     };
 
     struct Query {
         uint_fast16_t queryCode;  // 0: Reserved, 1: GET
-        char* key = nullptr;
+        std::unique_ptr<char[]> key;
         uint_fast64_t hash;
         int client_fd;
+
+        Query(uint_fast16_t code, const char* arg_key, uint_fast64_t hash, int client_fd);
     };
 
     struct ServerShard {

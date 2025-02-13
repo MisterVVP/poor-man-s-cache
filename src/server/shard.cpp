@@ -6,7 +6,7 @@ const char* ServerShard::processCommand(const Command &command)
 {
     const char* response = nullptr;
     if (command.commandCode == 1) {
-        auto setRes = keyValueStore->set(command.key, command.value, command.hash);
+        auto setRes = keyValueStore->set(command.key.get(), command.value.get(), command.hash);
         response = setRes ? "OK" : "ERROR: Internal error";
     } else {
         response = "ERROR: Invalid command code";
@@ -20,11 +20,32 @@ const char* ServerShard::processQuery(const Query &query)
     const char* response = nullptr;
 
     if (query.queryCode == 1) {
-        auto value = keyValueStore->get(query.key, query.hash);
+        auto value = keyValueStore->get(query.key.get(), query.hash);
         response = value ? value : "(nil)";
     } else {
         response = "ERROR: Invalid query code";
     }
 
     return response;
+}
+
+server::Query::Query(uint_fast16_t code, const char *arg_key, uint_fast64_t hash, int client_fd): queryCode(code), hash(hash), client_fd(client_fd)
+{
+    auto kSize = strlen(arg_key) + 1;
+    key = std::make_unique<char[]>(kSize);
+    memcpy(key.get(), arg_key, kSize);
+    key.get()[kSize-1] = '\0';
+}
+
+server::Command::Command(uint_fast16_t code, const char *arg_key, const char *arg_value, uint_fast64_t hash, int client_fd): commandCode(code), hash(hash), client_fd(client_fd)
+{
+    auto vSize = strlen(arg_value) + 1;
+    value = std::make_unique<char[]>(vSize);
+    memcpy(value.get(), arg_value, vSize);
+    value.get()[vSize-1] = '\0';
+
+    auto kSize = strlen(arg_key) + 1;
+    key = std::make_unique<char[]>(kSize);
+    memcpy(key.get(), arg_key, kSize);
+    key.get()[kSize-1] = '\0';
 }

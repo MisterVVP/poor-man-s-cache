@@ -393,7 +393,7 @@ const char *kvs::KeyValueStore::get(const char *key, uint_fast64_t hash)
                 if (compressionEnabled) {
                     auto retVal = decompress(tableEntry.value);
                     if (enableTrashcan) {
-                        trashcan->AddGarbage(retVal);
+                        trashcan->AddGarbage(retVal); //TODO: this should be removed in favour of RAII! Refactor during compresison feature refactoring
                     }
                     return retVal;
                 }

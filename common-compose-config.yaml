@@ -16,7 +16,6 @@ services:
       - METRICS_PORT=8080
       - METRICS_HOST=0.0.0.0
       - NUM_SHARDS=128
-      - TRASH_EMPTY_FREQUENCY=10000
       - SOCK_BUF_SIZE=4194304 # request 4 mb socket buffer, depends on system tcp_rmem and tcp_wmem settings
       - ENABLE_COMPRESSION=false
     ports:

@@ -10,6 +10,7 @@
 #include <vector>
 #include <queue>
 #include <future>
+#include <coroutine>
 #include <semaphore>
 #include <fcntl.h>
 #include <unistd.h>
@@ -19,7 +20,6 @@
 #include <netinet/tcp.h>
 #include "../hash/hash.h"
 #include "../non_copyable.h"
-#include "../utils/trashcan.hpp"
 #include "sockutils.h"
 #include "conn_manager.hpp"
 #include "shard.h"
@@ -44,22 +44,76 @@ namespace server {
         int port = 9001;
         /// @brief Number of server shards, increase for stability and performance, decrease to save server resources
         uint_fast16_t numShards = 24;
-        /// @brief Empty dynamic memory on every {trashEmptyFrequency} request
-        uint_fast16_t trashEmptyFrequency = 100;
         /// @brief Requested buffer size for server socket
         int sockBuffer = 1048576;
         /// @brief Enable compression of stored values. Disable if RPS and processing speed is more important than memory consumption
         bool enableCompression = false;
     };
 
+    /// @brief Options for setSocketBuffers function flags
+    enum OperationResult {
+        Failure = -1,
+        Success = 0,
+    };
+
     class CacheServer : NonCopyable {
         private:
+            struct task {
+                struct promise_type {
+                    task get_return_object() { return task{std::coroutine_handle<promise_type>::from_promise(*this)}; }
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+                    void return_void() {}
+                    void unhandled_exception() { std::terminate(); }
+
+                    ~promise_type() {}
+                };
+
+                std::coroutine_handle<promise_type> coro;
+
+                task(std::coroutine_handle<promise_type> h) : coro(h) {}
+
+                ~task() {
+                    if (coro) {
+                        coro.destroy();
+                    }
+                }
+            };
+
+            auto switch_to_main() noexcept {
+                struct awaitable {
+                    bool await_ready() const noexcept { return false; }
+                    void await_suspend(std::coroutine_handle<> handle) noexcept {}
+                    void await_resume() const noexcept {}
+                };
+                return awaitable{};
+            };
+
             struct RequestPart {
                 size_t size;
                 char* part;
                 size_t location;
 
                 RequestPart(char* part, size_t size, size_t location): part(part), size(size), location(location){}
+            };
+
+            struct ReadRequestResult {
+                private:
+                    ReadRequestResult(OperationResult res) : operationResult(res){};
+
+                public:
+                    std::string request;
+                    OperationResult operationResult;
+
+                    ReadRequestResult(std::string request, OperationResult res) : request(request), operationResult(res){};
+
+                    static ReadRequestResult Success(std::string request) noexcept {
+                        return ReadRequestResult { request, OperationResult::Success };
+                    };
+
+                    static ReadRequestResult Failure() noexcept {
+                        return ReadRequestResult { OperationResult::Failure };
+                    };
             };
 
             std::binary_semaphore metricsSemaphore{0};
@@ -70,20 +124,15 @@ namespace server {
             std::jthread metricsUpdaterThread;
             ConnManager connManager;
             
-            uint_fast16_t trashEmptyFrequency;
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
             int port;
             int server_fd;
             int epoll_fd;
             epoll_event epoll_events[MAX_EVENTS];
-            Trashcan<char> trashcan;
 
-            Command createCommand(uint_fast16_t code, char* key, char* value, uint_fast64_t hash, int client_fd) const;
-            Query createQuery(uint_fast16_t code, char* key, uint_fast64_t hash, int client_fd) const;
-
-            size_t readRequest(int client_fd, std::vector<RequestPart>& requestParts);
-            int_fast8_t handleRequest();
+            ReadRequestResult readRequest(int client_fd);
+            task handleRequests();
             int_fast8_t sendResponse(int client_fd, const char* response, const size_t responseSize);
 
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
