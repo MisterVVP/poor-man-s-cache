@@ -147,6 +147,7 @@ Check Redis metrics at http://localhost:9121/metrics
 - Try out a scaled multi-instance setup (this may require writing a custom load balancer or reverse proxy or using existing solutions like Nginx/Envoy/etc.).
 - Check why Valgrind always shows a tiny memory leak from the Prometheus-cpp lib (`116 bytes in 1 block are still reachable in loss record 1 of 1`).
 - Read http://www.kegel.com/c10k.html
+- Continue reading https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/coroutines-c++20/
 
 ## Questions / Ideas
 - Store value size and increase memory usage? size_t will require extra 80 Mb per 10M records, however it'll eliminate many strelen() calls.
@@ -157,3 +158,4 @@ Check Redis metrics at http://localhost:9121/metrics
 - https://idea.popcount.org/2017-02-20-epoll-is-fundamentally-broken-12/
 - https://copyconstruct.medium.com/the-method-to-epolls-madness-d9d2d6378642
 - https://eklitzke.org/blocking-io-nonblocking-io-and-epoll
+- [Simon Tatham, 2023 - Writing custom C++20 coroutine systems] (https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/coroutines-c++20/).
