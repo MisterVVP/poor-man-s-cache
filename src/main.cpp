@@ -41,7 +41,7 @@ int main() {
     auto serverPort = getFromEnv<int>("SERVER_PORT", true);
     auto numShards = getFromEnv<uint_fast16_t>("NUM_SHARDS", false, 24);
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
-    auto enableCompression = getFromEnv<bool>("ENABLE_COMPRESSION", false, false);
+    auto enableCompression = getFromEnv<bool>("ENABLE_COMPRESSION", false, true);
 
     ServerSettings serverSettings { serverPort, numShards, sockBufferSize, enableCompression };
 

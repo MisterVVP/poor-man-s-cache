@@ -66,7 +66,7 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
     std::cout << "Initializing " << numShards << " server shards..." << std::endl;
 #endif
     serverShards.reserve(numShards);
-    KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true, true };
+    KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
     for (int i = 0; i < numShards; ++i) {
         serverShards.emplace_back(i, kvsSettings);
     }

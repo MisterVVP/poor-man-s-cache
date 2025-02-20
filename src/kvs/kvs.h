@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
-#include <string_view>
+#include <memory>
 #include <cstdio>
 #include <string.h>
 #include <charconv>
@@ -14,8 +14,8 @@
 #include <atomic>
 #include "../primegen/primegen.h"
 #include "../hash/hash.h"
-#include "../utils/trashcan.hpp"
 #include "../non_copyable.h"
+#include "../compressor/gzip_compressor.h"
 
 #ifndef NDEBUG
 #include <chrono>
@@ -23,12 +23,9 @@
 
 #define UNIT_SEPARATOR 0x1F
 #define BUCKET_SIZE 4
-#define MIN_COMPRESSED_SIZE 4
+#define MIN_SIZE_TO_COMPRESS 30
 #define MAX_READ_WRITE_ATTEMPTS 5
 #define RESIZE_THRESHOLD_PERCENTAGE 70
-#define FREQ_DICT_SIZE 512
-#define COMPRESSION_FREQUENCY 3
-
 
 namespace kvs
 {
@@ -36,7 +33,6 @@ namespace kvs
         uint_fast64_t initialSize = 2053;
         bool compressionEnabled = true;
         bool usePrimeNumbers = true;
-        bool enableTrashcan = true;
     };
 
     class KeyValueStore : NonCopyableOrMovable {
@@ -44,7 +40,10 @@ namespace kvs
             struct Entry {
                 char* key;
                 char* value;
-                int_fast8_t occupied;
+                /// @brief Size of value
+                size_t vSize;
+                bool occupied;
+                bool compressed;
             };
 
             struct Bucket {
@@ -58,7 +57,7 @@ namespace kvs
             uint_fast32_t numResizes;
 
 
-            int_fast8_t isResizing;
+            bool isResizing = false;
             void resize();
             void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
             uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
@@ -66,26 +65,12 @@ namespace kvs
             bool usePrimeNumbers = true;
             Primegen primegen;
 
-            bool enableTrashcan = true;
-            std::unique_ptr<Trashcan<char>> trashcan;
-
             struct SubstringFrequency {
                 const char* substring;
                 size_t count;
             };
 
             bool compressionEnabled = true;
-            std::unique_ptr<KeyValueStore> compressDictionary;
-            void rebuildCompressionDictionary();
-
-            /// @brief Performs value compression and allocates new value memory
-            /// @param value Pointer to string to compress
-            /// @return Pointer to compressed string
-            char* compress(const char* value) const;
-            /// @brief Performs value decompression and allocates new value in memory
-            /// @param compressedValue Pointer to compressed string
-            /// @return Pointer to decompressed string
-            char* decompress(const char* compressedValue) const;
 
         public:
             KeyValueStore(KeyValueStoreSettings settings = KeyValueStoreSettings{});
@@ -98,7 +83,7 @@ namespace kvs
             bool set(const char *key, const char *value);
             bool set(const char *key, const char *value, uint_fast64_t hash); // use friend functions?
 
-            const char *get(const char *key);
-            const char *get(const char *key, uint_fast64_t hash); // use friend functions?
+            const char* get(const char *key);
+            const char* get(const char *key, uint_fast64_t hash); // use friend functions?
     };
 }

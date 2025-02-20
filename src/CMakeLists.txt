@@ -10,7 +10,7 @@ add_executable(
   primegen/primegen.cpp
   kvs/kvs.cpp
   metrics/metrics.cpp
-  utils/trashcan.hpp
+  compressor/gzip_compressor.cpp
 )
 
 if(PROMETHEUS_CPP_ENABLE_PUSH)
@@ -20,3 +20,5 @@ endif()
 if(PROMETHEUS_CPP_ENABLE_PULL)
   target_link_libraries(${PROJECT_NAME} PRIVATE prometheus-cpp::pull)
 endif()
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)

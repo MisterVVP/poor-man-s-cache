@@ -1,20 +1,17 @@
 FROM alpine:latest AS build
-RUN apk update && apk upgrade && apk add git cmake build-base gtest-dev
-RUN git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp \
-    && git submodule init && git submodule update && mkdir _build && cd _build \
-    && cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF \
-    && cmake --build . --parallel 4 \
-    && ctest -V \
-    && cmake --install .
+RUN apk update && apk upgrade && apk add git cmake build-base gtest-dev zlib-dev bash
 
 WORKDIR /app
 COPY . .
 
 # Number of elements to test
-ENV NUM_ELEMENTS=10000000
+ENV NUM_ELEMENTS=10000
 
 # Build KeyValueStorage tests
 ARG GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"
-RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp primegen/primegen.cpp utils/trashcan.hpp kvs/kvs.cpp kvs/kvs_test.cpp -lgtest -lgtest_main -o kvs_test
+RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp primegen/primegen.cpp compressor/gzip_compressor.cpp kvs/kvs.cpp kvs/kvs_test.cpp -lz -lgtest -lgtest_main -o ../kvs_test
 
-ENTRYPOINT [ "/app/src/kvs_test" ]
+# Run compressor tests
+RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o ../test_gzip
+
+ENTRYPOINT [ "/app/run-all-tests.bash" ]

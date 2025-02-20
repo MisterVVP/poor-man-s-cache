@@ -15,19 +15,19 @@ namespace fs = std::filesystem;
 const size_t NUM_ELEMENTS = getFromEnv<int>("NUM_ELEMENTS", true);
 
 // Helper function to generate keys
-char* generateKey(int_fast64_t index) {
+auto generateKey(int_fast64_t index) {
     size_t numDigits = snprintf(nullptr, 0, "%zu", index);
     size_t keySize = 3 + numDigits + 1; // "key" + index + '\0'
-    char* key = new char[keySize];
+    auto key = new char[keySize];
     snprintf(key, keySize, "key%zu", index);
     return key;
 }
 
 // Helper function to generate values
-char* generateValue(int_fast64_t index) {
+auto generateValue(int_fast64_t index) {
     size_t numDigits = snprintf(nullptr, 0, "%zu", index);
     size_t valueSize = 5 + numDigits + 1; // "value" + index + '\0'
-    char* value = new char[valueSize];
+    auto value = new char[valueSize];
     snprintf(value, valueSize, "value%zu", index);
     return value;
 }
@@ -57,9 +57,9 @@ TEST(KeyValueStoreTest, LargeJSONFiles) {
             std::string originalContent((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             std::string key = entry.path().stem().string();
             
-            const char* retrievedValue = kvStore.get(key.c_str());
-            ASSERT_NE(retrievedValue, nullptr);
-            ASSERT_STREQ(retrievedValue, originalContent.c_str());
+            auto kvsValue = kvStore.get(key.c_str());
+            ASSERT_NE(kvsValue, nullptr);
+            ASSERT_STREQ(kvsValue, originalContent.c_str());
         }
     }
 }
@@ -68,19 +68,19 @@ TEST(KeyValueStoreTest, LargeJSONFiles) {
 TEST(KeyValueStoreTest, AddAndRetrieveElements) {
     KeyValueStore kvStore;
     for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
-        char* key = generateKey(i);
-        char* value = generateValue(i);
+        auto key = generateKey(i);
+        auto value = generateValue(i);
         ASSERT_TRUE(kvStore.set(key, value));
         delete[] key;
         delete[] value;
     }
     usleep(1000000);
     for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
-        char* key = generateKey(i);
-        char* value = generateValue(i);
-        const char* retrievedValue = kvStore.get(key);
-        ASSERT_NE(retrievedValue, nullptr);
-        ASSERT_STREQ(retrievedValue, value);
+        auto key = generateKey(i);
+        auto value = generateValue(i);
+        auto kvsValue = kvStore.get(key);
+        ASSERT_NE(kvsValue, nullptr);
+        ASSERT_STREQ(kvsValue, value);
         delete[] key;
         delete[] value;
     }
@@ -90,17 +90,17 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
 TEST(KeyValueStoreTest, OverwriteElements) {
     KeyValueStore kvStore;
     for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
-        char* key = generateKey(i);
-        char* value = generateValue(i);
+        auto key = generateKey(i);
+        auto value = generateValue(i);
         ASSERT_TRUE(kvStore.set(key, value));
         delete[] key;
         delete[] value;
     }
     for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
-        char* key = generateKey(i);
+        auto key = generateKey(i);
         size_t numDigits = snprintf(nullptr, 0, "%zu", i);
         size_t newValueSize = 9 + numDigits + 1; // "new_value" + index + '\0'
-        char* newValue = new char[newValueSize];
+        auto newValue = new char[newValueSize];
         snprintf(newValue, newValueSize, "new_value%zu", i);
         ASSERT_TRUE(kvStore.set(key, newValue));
         delete[] key;
@@ -108,14 +108,14 @@ TEST(KeyValueStoreTest, OverwriteElements) {
     }
     usleep(1000000);
     for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
-        char* key = generateKey(i);
+        auto key = generateKey(i);
         size_t numDigits = snprintf(nullptr, 0, "%zu", i);
         size_t expectedValueSize = 9 + numDigits + 1;
-        char* expectedValue = new char[expectedValueSize];
+        auto expectedValue = new char[expectedValueSize];
         snprintf(expectedValue, expectedValueSize, "new_value%zu", i);
-        const char* retrievedValue = kvStore.get(key);
-        ASSERT_NE(retrievedValue, nullptr);
-        ASSERT_STREQ(retrievedValue, expectedValue);
+        auto kvsValue = kvStore.get(key);
+        ASSERT_NE(kvsValue, nullptr);
+        ASSERT_STREQ(kvsValue, expectedValue);
         delete[] key;
         delete[] expectedValue;
     }

@@ -94,7 +94,7 @@ docker compose --profile tests-callgrind up
 > Use `--build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"` to disable debugging helpers in code.
 ```
 docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++26 -O3" . -t cache-tests:latest
-docker run cache-tests:latest
+docker run -it cache-tests:latest
 ```
 
 ### Various helpful shell commands
@@ -133,7 +133,8 @@ Check Redis metrics at http://localhost:9121/metrics
 > [!NOTE]
 > Data compression is quite inneficient so far and is disabled by default
 
-- Set up CI
+- Integrate valgrind checks into CI
+- Add docker image to releases and create helm chart
 - More corouties
 - Work on error responses from cache server
 - Review the compression algorithm (also an endless task, a potential way to improve could be heuristic logic to determine the optimal compression algorithm + storing multiple algorithms as a strategy pattern).
