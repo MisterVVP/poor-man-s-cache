@@ -4,7 +4,7 @@ using namespace server;
 
 CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings):
     numErrors(0), cancellationToken(cToken), isRunning(false), numRequests(0), numShards(settings.numShards),
-    port(settings.port), connManager()
+    port(settings.port), connManager(cToken)
 {
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -103,12 +103,10 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
                 continue;
             }
             perror("Failed to read client request buffer");
-            connManager.closeConnection(client_fd);
             return ReadRequestResult::Failure();
         } 
         
         if (bytes_read == 0) {
-            connManager.closeConnection(client_fd);
             return ReadRequestResult::Failure();
         }
 
@@ -124,84 +122,81 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
 }
 
 
-CacheServer::task CacheServer::handleRequests()
+HandleReqTask CacheServer::handleRequests()
 {
-    while (!cancellationToken) {      
-        int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
-        if (event_count == -1 && errno != EINTR) {
-            perror("epoll_wait failed");
-            ++numErrors;
+    uint_fast8_t numFailedEvents = 0;
+    int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
+    if (event_count == -1 && errno != EINTR) {
+        perror("epoll_wait failed");
+        co_return 1;
+    }
+
+    for (int i = 0; i < event_count; ++i) {
+        auto client_fd = epoll_events[i].data.fd;
+        if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
+            connManager.closeConnection(client_fd);
             continue;
         }
 
-        for (int i = 0; i < event_count; ++i) {
-            auto client_fd = epoll_events[i].data.fd;
-            if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
+        if (epoll_events[i].events & EPOLLIN) {
+            auto readResult = readRequest(client_fd);
+
+            if (readResult.operationResult == ReqReadOperationResult::Failure) {
                 connManager.closeConnection(client_fd);
+                ++numFailedEvents;
                 continue;
             }
 
-            if (epoll_events[i].events & EPOLLIN) {
-                auto readResult = readRequest(client_fd);
+            char* com_saveptr = nullptr;
+            char* command = strtok_r(readResult.request.data(), " ", &com_saveptr);
 
-                if (readResult.operationResult == OperationResult::Failure) {
-                    connManager.closeConnection(client_fd);
-                    ++numErrors;
-                    continue;
-                }
-
-                char* com_saveptr = nullptr;
-                char* command = strtok_r(readResult.request.data(), " ", &com_saveptr);
-
-                if (!command) {
-                    const char* response = "ERROR: Unable to parse command";
-                    send(client_fd, response, strlen(response), 0);
-                    connManager.closeConnection(client_fd);
+            if (!command) {
+                const char* response = "ERROR: Unable to parse command";
+                send(client_fd, response, strlen(response), 0);
+                connManager.closeConnection(client_fd);
+                readResult.request.clear();
+                ++numFailedEvents;
+                continue;
+            }
+            char* key = strtok_r(nullptr, " ", &com_saveptr);
+            if (key) {
+                auto hash = hashFunc(key);
+                auto shardId = hash % numShards;
+                auto& shard = serverShards[shardId];
+                if (strcmp(command, "GET") == 0) {
+                    Query query {1, key, hash, client_fd };
+                    auto response = shard.processQuery(query);
                     readResult.request.clear();
-                    ++numErrors;
-                    continue;
-                }
-                char* key = strtok_r(nullptr, " ", &com_saveptr);
-                if (key) {
-                    auto hash = hashFunc(key);
-                    auto shardId = hash % numShards;
-                    auto& shard = serverShards[shardId];
-                    if (strcmp(command, "GET") == 0) {
-                        Query query {1, key, hash, client_fd };
-                        auto response = shard.processQuery(query);
-                        readResult.request.clear();
-                        auto responseSize = strlen(response);
-                        if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
-                            auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);
-                        } else {
-                            sendResponse(query.client_fd, response, responseSize);
-                        }
-                    } else if (strcmp(command, "SET") == 0) {
-                        if (com_saveptr) {
-                            Command cmd {1, key, com_saveptr, hash, client_fd};
-                            auto response = shard.processCommand(cmd);
-                            sendResponse(client_fd, response, strlen(response));
-                            readResult.request.clear();
-                        } else {
-                            const char* response = "ERROR: Invalid SET command format";
-                            send(client_fd, response, strlen(response), 0);
-                            readResult.request.clear();
-                            connManager.closeConnection(client_fd);
-                            ++numErrors;
-                        }
+                    auto responseSize = strlen(response);
+                    if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
+                        auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);
+                    } else {
+                        sendResponse(query.client_fd, response, responseSize);
                     }
-                } else {
-                    const char* response = "ERROR: Unknown command";
-                    send(client_fd, response, strlen(response), 0);
-                    connManager.closeConnection(client_fd);
-                    readResult.request.clear();
-                    ++numErrors;
+                } else if (strcmp(command, "SET") == 0) {
+                    if (com_saveptr) {
+                        Command cmd {1, key, com_saveptr, hash, client_fd};
+                        auto response = shard.processCommand(cmd);
+                        sendResponse(client_fd, response, strlen(response));
+                        readResult.request.clear();
+                    } else {
+                        const char* response = "ERROR: Invalid SET command format";
+                        send(client_fd, response, strlen(response), 0);
+                        readResult.request.clear();
+                        connManager.closeConnection(client_fd);
+                        ++numFailedEvents;
+                    }
                 }
+            } else {
+                const char* response = "ERROR: Unknown command";
+                send(client_fd, response, strlen(response), 0);
+                connManager.closeConnection(client_fd);
+                readResult.request.clear();
+                ++numFailedEvents;
             }
         }
-        co_await switch_to_main();
     }
-    co_return;
+    co_return numFailedEvents;
 }
 
 void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
@@ -241,20 +236,11 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
     }
 }
 
-int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
+BigBossCoro server::CacheServer::handleBigProblems(AcceptConnTask& acCoro)
 {
-    isRunning = true;
-    metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
-    {
-        metricsUpdater(channel, stopToken);
-    });
-
-    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
-
-    auto requestsHandler = handleRequests();
-    
     while (!cancellationToken) {
-        auto client_fd = connManager.acceptConnection(server_fd);
+        auto hrCoro = handleRequests();
+        auto client_fd = acCoro.next_value();
         if (client_fd >= 0) {
             ++numRequests;
             setNonBlocking(client_fd);            
@@ -264,18 +250,38 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
             if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
                 perror("Failed to add client_fd to epoll");
                 connManager.closeConnection(client_fd);
+                co_yield OrchestratorResult::EpollCtlAddError;
             } else {
-                requestsHandler.coroutine_handle.resume();
+                co_await HandreReqAwaiter{hrCoro};
             }
         } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             perror("Failed to accept connection");
+            co_yield OrchestratorResult::AcceptConnError;
         }
+        numErrors += hrCoro.final_result();
+        co_yield OrchestratorResult::Success;
     }
+    co_return OrchestratorResult::Success;
+}
 
-    std::cout << "Shutting down gracefully..." << std::endl;
+int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
+{
+    isRunning = true;
+    metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
+    {
+        metricsUpdater(channel, stopToken);
+    });
+
+    auto acCoro = connManager.acceptConnections(server_fd);
+    auto bigBoss = handleBigProblems(acCoro);
+
+    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
+    while (!cancellationToken) {
+        auto res = bigBoss.next_value();
+    }
     Stop();
-    std::cout << "Server shut down successfully" << std::endl;
-    return 0;    
+    auto orchestratorResult = bigBoss.final_result();
+    return orchestratorResult;
 }
 
 void CacheServer::Stop() noexcept

@@ -50,46 +50,121 @@ namespace server {
         bool enableCompression = false;
     };
 
-    /// @brief Options for setSocketBuffers function flags
-    enum OperationResult {
-        Failure = -1,
+    /// @brief Orchestrator results
+    enum OrchestratorResult : int_fast8_t {
+        Interrupted = -3,
+        AcceptConnError = -2,
+        EpollCtlAddError = -1,
         Success = 0,
+    };
+
+    /// @brief Da biggest and da mainest coroutine in this program
+    class BigBossCoro : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;
+        private:
+            handle_type c_handle;
+            BigBossCoro(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    OrchestratorResult resultCode = OrchestratorResult::Success;
+                    
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+                    std::suspend_always yield_value(OrchestratorResult rCode) {
+                        resultCode = rCode;
+                        return {};
+                    }
+
+                    void unhandled_exception() {}
+                    void return_value(OrchestratorResult rCode) {
+                        resultCode = rCode;
+                    }
+
+                    BigBossCoro get_return_object() {
+                        auto handle = handle_type::from_promise(*this);
+                        return BigBossCoro{handle}; 
+                    }
+                    promise_type(): resultCode(OrchestratorResult::Interrupted){}
+                    ~promise_type() {}
+            };
+
+
+            OrchestratorResult next_value() {
+                auto &promise = c_handle.promise();
+                promise.resultCode = OrchestratorResult::Interrupted;
+                c_handle.resume();
+                return promise.resultCode;
+            };
+
+            OrchestratorResult final_result() {
+                return c_handle.promise().resultCode;
+            }
+
+            ~BigBossCoro() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            };
+    };
+
+    class HandleReqTask : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;
+        private:
+            handle_type c_handle;
+            HandleReqTask(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    uint_fast8_t numFailedEvents;
+                    HandleReqTask get_return_object() { return HandleReqTask{handle_type::from_promise(*this)}; }
+                    std::suspend_always initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+                    void unhandled_exception() {}
+                    void return_value(uint_fast8_t nFailedEvents) {
+                        numFailedEvents = nFailedEvents;
+                    }
+                    promise_type(): numFailedEvents(0) {}
+                    ~promise_type() {}
+            };
+
+            uint_fast8_t final_result() {
+                return c_handle.promise().numFailedEvents;
+            }
+
+            ~HandleReqTask() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            };
+            friend class HandreReqAwaiter;    
+    };
+
+    class HandreReqAwaiter {
+        private:
+            std::coroutine_handle<> handle;
+        public:
+            HandreReqAwaiter(HandleReqTask &hr) : handle(hr.c_handle) {}
+            bool await_ready() const noexcept { return false; }
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<>) {
+                return handle;
+            }
+            void await_resume() const noexcept {}
+    };
+
+    class NoopAwaiter {
+        public:
+            bool await_ready() const noexcept { return false; }
+            void await_suspend(std::coroutine_handle<> handle) noexcept {}
+            void await_resume() const noexcept {}
     };
 
     class CacheServer : NonCopyableOrMovable {
         private:
-            struct task : NonCopyable {
-                public:
-                    struct promise_type {
-                        task get_return_object() { return task{std::coroutine_handle<promise_type>::from_promise(*this)}; }
-                        std::suspend_always initial_suspend() { return {}; }
-                        std::suspend_always final_suspend() noexcept { return {}; }
-                        void return_void() {}
-                        void unhandled_exception() { std::terminate(); }
-
-                        ~promise_type() {}
-                    };
-
-                    std::coroutine_handle<promise_type> coroutine_handle;
-
-                    task(std::coroutine_handle<promise_type> h) : coroutine_handle(h) {}
-
-                    ~task() {
-                        if (coroutine_handle) {
-                            coroutine_handle.destroy();
-                        }
-                    }
-            };
-
-            auto switch_to_main() noexcept {
-                struct awaitable {
-                    bool await_ready() const noexcept { return false; }
-                    void await_suspend(std::coroutine_handle<> handle) noexcept {}
-                    void await_resume() const noexcept {}
-                };
-                return awaitable{};
-            };
-
             struct RequestPart {
                 size_t size;
                 char* part;
@@ -98,22 +173,28 @@ namespace server {
                 RequestPart(char* part, size_t size, size_t location): part(part), size(size), location(location){}
             };
 
+            /// @brief ReadRequest result codes
+            enum ReqReadOperationResult : int_fast8_t{
+                Failure = -1,
+                Success = 0,
+            };
+
             struct ReadRequestResult {
                 private:
-                    ReadRequestResult(OperationResult res) : operationResult(res){};
+                    ReadRequestResult(ReqReadOperationResult res) : operationResult(res){};
 
                 public:
                     std::string request;
-                    OperationResult operationResult;
+                    ReqReadOperationResult operationResult;
 
-                    ReadRequestResult(std::string request, OperationResult res) : request(request), operationResult(res){};
+                    ReadRequestResult(std::string request, ReqReadOperationResult res) : request(request), operationResult(res){};
 
                     static ReadRequestResult Success(std::string request) noexcept {
-                        return ReadRequestResult { request, OperationResult::Success };
+                        return ReadRequestResult { request, ReqReadOperationResult::Success };
                     };
 
                     static ReadRequestResult Failure() noexcept {
-                        return ReadRequestResult { OperationResult::Failure };
+                        return ReadRequestResult { ReqReadOperationResult::Failure };
                     };
             };
 
@@ -133,10 +214,10 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             ReadRequestResult readRequest(int client_fd);
-            task handleRequests();
+            HandleReqTask handleRequests();
             void sendResponse(int client_fd, const char* response, const size_t responseSize);
-
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
+            BigBossCoro handleBigProblems(AcceptConnTask& acCoro);
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});
             ~CacheServer();
