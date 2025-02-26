@@ -19,6 +19,8 @@ Another pet project to practice.
 
 ### Current progress
 - Server is able to handle 44000 requests per second on bare ubuntu (high end processor and half gbit internet). Next step is 100k+ requests per second
+- 24000 RPS inside docker on Windows (same hardware as ubuntu above)
+- 7000 RPS on poor github runner (likely within a container as well)
 
 ## Quick start
 > [!TIP]
