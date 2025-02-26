@@ -46,3 +46,6 @@ _deps
 CMakeUserPresets.json
 .vscode
 Research.md
+kvs_test
+test_gzip
+.venv

@@ -17,11 +17,15 @@ Another pet project to practice.
 - Solution should support only Linux, preferrably alpine or similar distribution. No Windows or Mac OS support... ever.
 - Solution should be container and (hopefully) orchestrator friendly
 
+### Current progress
+- Server is able to handle 44000 requests per second on bare ubuntu (high end processor and half gbit internet). Next step is 100k+ requests per second
+
 ## Quick start
 > [!TIP]
 > Use `NUM_SHARDS` environment variable (for local setup it's defined in common-compose-config.yaml) to control the number of shards for the server.
 > A high number of shards involves a small memory overhead, however, it may boost server performance and help to avoid collisions for large storage.
 
+### Docker
 Run cache and tests
 ```
 docker compose --profile main --profile tests build
@@ -40,6 +44,36 @@ Don't forget to shut the detached container down by issuing:
 ```
 docker compose --profile main down
 ```
+
+### Local Ubuntu with sudo access
+Open terminal in repository root and apply system configuration via
+```
+sudo bash ./local_server_setup.bash
+```
+
+Open second terminal somewhere on your hard drive and install required dependencies
+```
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git cmake build-essential libgtest-dev zlib1g-dev gcc-14 g++-14
+
+git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp && \
+git submodule init && git submodule update && \
+mkdir _build && cd _build && \
+cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF && \
+cmake --build . --parallel $(nproc) && \
+ctest -V && \
+sudo cmake --install .
+```
+
+Run unit tests:
+```
+cd ./src && \
+export NUM_ELEMENTS=10000 && \
+g++-14 -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp compressor/gzip_compressor.cpp kvs/*.cpp primegen/primegen.cpp -lz -lgtest -lgtest_main -o kvs_test && ./kvs_test && \
+g++-14 -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o test_gzip && ./test_gzip && \
+cd ..
+```
+
 
 ### To debug memory issues
 > [!WARNING]

@@ -19,7 +19,7 @@ logger.addHandler(handler)
 # Configuration from environment or defaults
 host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
-delay_sec = int(os.environ.get('TEST_DELAY_SEC', 90))
+delay_sec = int(os.environ.get('TEST_DELAY_SEC', 1))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
 cache_type = os.environ.get('CACHE_TYPE', 'custom')  # "custom" or "redis"
 redis_password = os.environ.get('REDIS_PASSWORD', None)  # Only for Redis

@@ -1,56 +1,14 @@
 #pragma once
 #include <cstdint>
 #include <atomic>
-#include <coroutine>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include "../non_copyable.h"
+#include "coroutines.h"
+#include "sockutils.h"
 
 namespace server {
-    class AcceptConnTask : NonCopyable {
-        public:
-            class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;
-        private:
-            handle_type c_handle;
-            AcceptConnTask(handle_type h) : c_handle(h) {}
-        public:
-            class promise_type {
-                public:
-                    int client_fd;
-                    
-                    std::suspend_always initial_suspend() { return {}; }
-                    std::suspend_always final_suspend() noexcept { return {}; }
-                    std::suspend_always yield_value(int fd) {
-                        client_fd = fd;
-                        return {};
-                    }
-                    void unhandled_exception() {}
-
-                    void return_void() {}
-
-                    AcceptConnTask get_return_object() {
-                        auto handle = handle_type::from_promise(*this);
-                        return AcceptConnTask{handle}; 
-                    }
-
-                    promise_type(): client_fd(-1){}
-                    ~promise_type() {}
-            };
-            int next_value() {
-                auto &promise = c_handle.promise();
-                promise.client_fd = -1;
-                c_handle.resume();
-                return promise.client_fd;
-            };
-            ~AcceptConnTask() {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-            };
-        friend class HandreReqAwaiter;
-    };
-
     class ConnManager {
         public:
             std::atomic<bool>& cancellationToken;
@@ -68,16 +26,45 @@ namespace server {
                 }
             };
 
-            AcceptConnTask acceptConnections(int server_fd) {
-                while(!cancellationToken) {
-                    sockaddr_in client_address;
-                    socklen_t client_len = sizeof(client_address);
+            AcceptConnTask acceptConnections(int server_fd) {    
+                co_yield EpollStatus::NotReady();
+                auto epoll_fd = epoll_create1(0);
+                if (epoll_fd == -1) {
+                    close(server_fd);
+                    throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
+                    co_return EpollStatus::Terminated();
+                }
+                sockaddr_in client_address;
+                socklen_t client_len = sizeof(client_address);
+                auto client_fd = -1;
+                do {
                     auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
                     if (client_fd >= 0) {
                         ++activeConnectionsCounter;
+                        setNonBlocking(client_fd);
+                        epoll_event event{};
+                        event.events = EPOLLIN | EPOLLET;
+                        event.data.fd = client_fd;
+                        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
+                            perror("Failed to add client_fd to epoll");
+                            closeConnection(client_fd);
+                        } else {
+                           co_yield EpollStatus::Processing(epoll_fd);
+                        }                    
+                    } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                        perror("Failed to accept connection");
                     }
-                    co_yield client_fd;
-                };
+                    co_yield EpollStatus::Running(epoll_fd);
+                } while (!cancellationToken);
+
+                if (epoll_fd >= 0) {
+                    close(epoll_fd);
+                }
+                if (cancellationToken) {
+                    co_return EpollStatus::Stopped();
+                } else {
+                    co_return EpollStatus::Terminated();
+                }            
             }
 
             ConnManager(std::atomic<bool>& cToken): cancellationToken(cToken), activeConnectionsCounter(0) {}

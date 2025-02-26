@@ -1,2 +1,5 @@
 build
 docker-compose.yaml
+out
+.vscode
+.github

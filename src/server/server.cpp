@@ -56,12 +56,6 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         throw std::system_error(errno, std::system_category(), "Listen failed");
     }
 
-    epoll_fd = epoll_create1(0);
-    if (epoll_fd == -1) {
-        close(server_fd);
-        throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
-    }
-
 #ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards..." << std::endl;
 #endif
@@ -76,9 +70,6 @@ CacheServer::~CacheServer() {
     Stop();
     if (server_fd >= 0) {
         close(server_fd);
-    }
-    if (epoll_fd >= 0) {
-        close(epoll_fd);
     }
     serverShards.clear();
 }
@@ -121,8 +112,7 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
     return ReadRequestResult::Success(request);
 }
 
-
-HandleReqTask CacheServer::handleRequests()
+HandleReqTask CacheServer::handleRequests(int epoll_fd)
 {
     uint_fast8_t numFailedEvents = 0;
     int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
@@ -130,7 +120,7 @@ HandleReqTask CacheServer::handleRequests()
         perror("epoll_wait failed");
         co_return 1;
     }
-
+    ++numRequests;
     for (int i = 0; i < event_count; ++i) {
         auto client_fd = epoll_events[i].data.fd;
         if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
@@ -202,8 +192,8 @@ HandleReqTask CacheServer::handleRequests()
 void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
 {
     const size_t responseWithSeparatorSize = responseSize + 1;
-    auto responseWithSeparator = std::make_unique<char[]>(responseWithSeparatorSize);
-    memcpy(responseWithSeparator.get(), response, responseSize);
+    auto responseWithSeparator = std::make_unique_for_overwrite<char[]>(responseWithSeparatorSize);
+    memcpy(responseWithSeparator.get(), response, responseWithSeparatorSize);
     responseWithSeparator.get()[responseSize] = MSG_SEPARATOR;
 
     size_t totalSent = 0;
@@ -236,33 +226,6 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
     }
 }
 
-BigBossCoro server::CacheServer::handleBigProblems(AcceptConnTask& acCoro)
-{
-    while (!cancellationToken) {
-        auto hrCoro = handleRequests();
-        auto client_fd = acCoro.next_value();
-        if (client_fd >= 0) {
-            ++numRequests;
-            setNonBlocking(client_fd);            
-            epoll_event event{};
-            event.events = EPOLLIN | EPOLLET;
-            event.data.fd = client_fd;
-            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) == -1) {
-                perror("Failed to add client_fd to epoll");
-                connManager.closeConnection(client_fd);
-                co_yield OrchestratorResult::EpollCtlAddError;
-            } else {
-                co_await HandreReqAwaiter{hrCoro};
-            }
-        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            perror("Failed to accept connection");
-            co_yield OrchestratorResult::AcceptConnError;
-        }
-        numErrors += hrCoro.final_result();
-        co_yield OrchestratorResult::Success;
-    }
-    co_return OrchestratorResult::Success;
-}
 
 int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
@@ -272,16 +235,34 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         metricsUpdater(channel, stopToken);
     });
 
-    auto acCoro = connManager.acceptConnections(server_fd);
-    auto bigBoss = handleBigProblems(acCoro);
-
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
-    while (!cancellationToken) {
-        auto res = bigBoss.next_value();
-    }
+
+    auto acCoro = connManager.acceptConnections(server_fd);
+
+    std::optional<EpollStatus> eStatus; // refactor if we decide to spawn multiple epolls and coroutines
+    do {
+        eStatus = acCoro.getStatus();
+
+        if (!eStatus.has_value()) {
+            continue;
+        }
+        auto sRef = *eStatus;
+
+        if (sRef.status == ServerStatus::Processing) {
+            auto hrCoro = handleRequests(sRef.epoll_fd);
+            continue;
+        }
+
+        if (sRef.status < 0 ) {
+            // we should not be here, in future this should not kill entire server and we'll have more coroutines to spawn or mechanism to recover
+            Stop(); 
+            return sRef.status;
+        }
+
+    } while(!cancellationToken);
+
     Stop();
-    auto orchestratorResult = bigBoss.final_result();
-    return orchestratorResult;
+    return (*eStatus).status;
 }
 
 void CacheServer::Stop() noexcept
