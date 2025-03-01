@@ -113,7 +113,7 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
 }
 
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
-{    
+{
     int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
     if (event_count == -1 && errno != EINTR) {
         perror("epoll_wait failed");
@@ -186,6 +186,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
             }
         }
     }
+    
     co_return;
 }
 
@@ -236,26 +237,25 @@ EventLoop CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     });
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
-    std::jthread out;
-    auto acCoro = connManager.acceptConnections(server_fd, out);
-    std::optional<EpollStatus> eStatus; // refactor if we decide to spawn multiple epolls and coroutines
 
+    auto acCoro = connManager.acceptConnections(server_fd);
+    std::optional<EpollStatus> eStatus; 
     do {
-        eStatus = acCoro.getStatus();
-
+        eStatus = co_await acCoro;
+        
         if (!eStatus.has_value()) {
             continue;
         }
-        auto sRef = *eStatus;
 
+        auto sRef = *eStatus;
+        
         if (sRef.status == ServerStatus::Processing) {
-            auto hrCoro = handleRequests(sRef.epoll_fd);
+            co_await handleRequests(sRef.epoll_fd);
             continue;
         }
 
         if (sRef.status < 0 ) {
             std::cerr << "Unexpected termination of the server!" << std::endl;
-            // we should not be here, in future this should not kill entire server and we'll have more coroutines to spawn or mechanism to recover
             Stop(); 
             co_return sRef.status;
         }

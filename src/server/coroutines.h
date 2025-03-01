@@ -35,17 +35,32 @@ namespace server {
             EpollStatus(ServerStatus status): epoll_fd(-1), status(status) {}
             EpollStatus();
     };
-
-    class AcceptConnTask;
-
+    struct HandleReqAwaiter;
     class HandleReqTask : NonCopyable {
         public:
             class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;
+            using handle_type = std::coroutine_handle<promise_type>;    
         private:
             handle_type c_handle;
             HandleReqTask(handle_type h) : c_handle(h) {};
         public:
+            auto operator co_await() {
+                struct HandleReqAwaiter {
+                    HandleReqTask& task;
+            
+                    bool await_ready() const noexcept {
+                        return task.c_handle.done();
+                    }
+            
+                    std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) noexcept {
+                        return task.c_handle;
+                    }
+            
+                    void await_resume() noexcept {}
+                };
+                return HandleReqAwaiter{*this};
+            }
+
             class promise_type {
                 public:
                     std::suspend_never initial_suspend() { return {}; }
@@ -82,9 +97,6 @@ namespace server {
                     c_handle.destroy();
                 }
             };
-
-            friend class AcceptConnTask;
-            friend class EventLoop;
     };
 
     class EventLoop : NonCopyable {
@@ -129,54 +141,66 @@ namespace server {
         public:
             class promise_type;
             using handle_type = std::coroutine_handle<promise_type>;
+        
+            class ConnAwaiter {
+            private:
+                promise_type *promise;
+            public:
+                ConnAwaiter(promise_type *p) : promise(p) {}
+                bool await_ready() { return false; }
+                std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
+                std::optional<EpollStatus> await_resume();
+            };
+        
         private:
             handle_type c_handle;
             AcceptConnTask(handle_type h) : c_handle(h) {}
+        
         public:
-            class promise_type {
-                public:
-                    std::optional<EpollStatus> eStatus;
-
-                    std::suspend_never initial_suspend() { return {}; }
-                    std::suspend_always final_suspend() noexcept { return {}; }
-
-                    void unhandled_exception() {}
-
-                    std::suspend_always yield_value(EpollStatus eStat) {
-                        eStatus = eStat;
-                        return {};
-                    }
-
-                    void return_value(EpollStatus eStat) {
-                        eStatus = eStat;
-                    }
-
-                    AcceptConnTask get_return_object() {
-                        auto handle = handle_type::from_promise(*this);
-                        return AcceptConnTask{handle}; 
-                    }
-
-                    promise_type(): eStatus(EpollStatus::NotReady()){}
-                    ~promise_type() {}
-            };
-
-            std::optional<EpollStatus> getStatus() {
-                auto &promise = c_handle.promise();
-                promise.eStatus = std::nullopt;
-                if (!c_handle.done()) {
-                    c_handle.resume();
-                }
-                return c_handle.promise().eStatus;
+            auto operator co_await() {
+                return ConnAwaiter{&c_handle.promise()};
             }
+        
+            class promise_type {
+            public:
+                std::optional<EpollStatus> eStatus;
+                std::coroutine_handle<> eventLoopHandle;
+
+                std::suspend_never initial_suspend() { return {}; }
+                std::suspend_always final_suspend() noexcept { return {}; }
+        
+                void unhandled_exception() {}
+        
+                std::suspend_always yield_value(EpollStatus eStat) {
+                    eStatus = eStat;
+                    return {};
+                }
+        
+                void return_value(EpollStatus eStat) {
+                    eStatus = eStat;
+                }
+        
+                AcceptConnTask get_return_object() {
+                    auto handle = handle_type::from_promise(*this);
+                    return AcceptConnTask{handle};
+                }
+        
+                promise_type() : eStatus(EpollStatus::NotReady()), eventLoopHandle(nullptr) {}
+                ~promise_type() {}
+        
+                ConnAwaiter await_transform(AcceptConnTask &ac) {
+                    auto &promise = ac.c_handle.promise();
+                    return ConnAwaiter{&promise};
+                }
+            };
 
             ~AcceptConnTask() {
                 if (c_handle) {
                     c_handle.destroy();
                 }
             };
-        friend class EventLoop;
     };
-
+        
 
     class ThreadSwitchAwaiter {
         private:
