@@ -35,7 +35,7 @@ namespace server {
             EpollStatus(ServerStatus status): epoll_fd(-1), status(status) {}
             EpollStatus();
     };
-    struct HandleReqAwaiter;
+
     class HandleReqTask : NonCopyable {
         public:
             class promise_type;
