@@ -137,7 +137,7 @@ namespace server {
                 public:
                     std::optional<EpollStatus> eStatus;
 
-                    std::suspend_always initial_suspend() { return {}; }
+                    std::suspend_never initial_suspend() { return {}; }
                     std::suspend_always final_suspend() noexcept { return {}; }
 
                     void unhandled_exception() {}

@@ -7,7 +7,6 @@
 #include "../non_copyable.h"
 #include "coroutines.h"
 #include "sockutils.h"
-
 namespace server {
     class ConnManager {
         public:
@@ -26,8 +25,7 @@ namespace server {
                 }
             };
 
-            AcceptConnTask acceptConnections(int server_fd, std::jthread& out) {
-                co_await ThreadSwitchAwaiter{&out};
+            AcceptConnTask acceptConnections(int server_fd, std::jthread& out) {   
                 co_yield EpollStatus::NotReady();
                 auto epoll_fd = epoll_create1(0);
                 if (epoll_fd == -1) {

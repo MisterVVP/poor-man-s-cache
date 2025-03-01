@@ -18,7 +18,7 @@ Another pet project to practice.
 - Solution should be container and (hopefully) orchestrator friendly
 
 ### Current progress
-- Server is able to handle 46000 requests per second on bare ubuntu (high end processor and half gbit internet). Next step is 100k+ requests per second
+- Server is able to handle 47000 requests per second on bare ubuntu (high end processor and half gbit internet). Next step is 100k+ requests per second
 - 24000 RPS inside docker on Windows (same hardware as ubuntu above)
 - 7000 RPS on poor github runner (likely within a container as well)
 
