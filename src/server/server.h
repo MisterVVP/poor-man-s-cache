@@ -110,7 +110,7 @@ namespace server {
             /// @brief Starts processing incoming requests
             /// @param channel metrics queue to report to
             /// @return operation result, 0 - success, other values - failure
-            int Start(std::queue<CacheServerMetrics>& channel);
+            EventLoop Start(std::queue<CacheServerMetrics>& channel);
 
             /// @brief Gracefully stops server, restart is not (yet) supported
             void Stop() noexcept;

@@ -26,7 +26,8 @@ namespace server {
                 }
             };
 
-            AcceptConnTask acceptConnections(int server_fd) {    
+            AcceptConnTask acceptConnections(int server_fd, std::jthread& out) {
+                co_await ThreadSwitchAwaiter{&out};
                 co_yield EpollStatus::NotReady();
                 auto epoll_fd = epoll_create1(0);
                 if (epoll_fd == -1) {
@@ -34,6 +35,7 @@ namespace server {
                     throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
                     co_return EpollStatus::Terminated();
                 }
+                co_yield EpollStatus::Running(epoll_fd);
                 sockaddr_in client_address;
                 socklen_t client_len = sizeof(client_address);
                 auto client_fd = -1;
@@ -50,11 +52,10 @@ namespace server {
                             closeConnection(client_fd);
                         } else {
                            co_yield EpollStatus::Processing(epoll_fd);
-                        }                    
+                        }
                     } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
                         perror("Failed to accept connection");
                     }
-                    co_yield EpollStatus::Running(epoll_fd);
                 } while (!cancellationToken);
 
                 if (epoll_fd >= 0) {

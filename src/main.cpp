@@ -67,7 +67,8 @@ int main() {
 
     sSource = metricsUpdaterThread.get_stop_source();
     sToken = metricsUpdaterThread.get_stop_token();
-    auto returnCode = cacheServer.Start(serverChannel);
+    auto eLoop = cacheServer.Start(serverChannel);
 
+    auto returnCode = eLoop.finalResult();
     return returnCode;
 }

@@ -3,6 +3,7 @@
 #include <future>
 #include <optional>
 #include <coroutine>
+#include <thread>
 #include "../non_copyable.h"
 
 namespace server {
@@ -35,8 +36,6 @@ namespace server {
             EpollStatus();
     };
 
-    class IncomingConnectionAwaiter;
-    class HandleEventAwaiter;
     class AcceptConnTask;
 
     class HandleReqTask : NonCopyable {
@@ -49,24 +48,33 @@ namespace server {
         public:
             class promise_type {
                 public:
-                    uint_fast8_t numFailedEvents;
-
                     std::suspend_never initial_suspend() { return {}; }
                     std::suspend_always final_suspend() noexcept { return {}; }
-                    IncomingConnectionAwaiter await_transform(const AcceptConnTask &acCoro);
 
                     void unhandled_exception() {}
-                    void return_value(uint_fast8_t nFailedEvents){
-                        numFailedEvents = nFailedEvents;
-                    }
+                    void return_void(){}
 
                     HandleReqTask get_return_object() { return HandleReqTask{handle_type::from_promise(*this)}; }
-                    promise_type(): numFailedEvents(0) {}
                     ~promise_type() {}
             };
 
-            uint_fast8_t getProcessingResult() {
-                return c_handle.promise().numFailedEvents;
+            HandleReqTask(HandleReqTask &&rhs) : c_handle(rhs.c_handle) {
+                rhs.c_handle = nullptr;
+            }
+
+            HandleReqTask &operator=(HandleReqTask &&rhs) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = rhs.c_handle;
+                rhs.c_handle = nullptr;
+                return *this;
+            }
+
+            void runToCompletion() {
+                if (!c_handle.done()) {
+                    c_handle.resume();
+                }
             }
 
             ~HandleReqTask() {
@@ -76,6 +84,45 @@ namespace server {
             };
 
             friend class AcceptConnTask;
+            friend class EventLoop;
+    };
+
+    class EventLoop : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;
+        private:
+            handle_type c_handle;
+            EventLoop(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    int resultCode;
+
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+
+                    void unhandled_exception() {}
+                    void return_value(int rCode) {
+                        resultCode = rCode;
+                    }
+
+                    EventLoop get_return_object() {
+                        auto handle = handle_type::from_promise(*this);
+                        return EventLoop{handle}; 
+                    }
+                    ~promise_type() {}
+            };
+
+            int finalResult() {
+                return c_handle.promise().resultCode;
+            }
+
+            ~EventLoop() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            };
     };
 
     class AcceptConnTask : NonCopyable {
@@ -92,7 +139,6 @@ namespace server {
 
                     std::suspend_always initial_suspend() { return {}; }
                     std::suspend_always final_suspend() noexcept { return {}; }
-                    HandleEventAwaiter await_transform(HandleReqTask &hr);
 
                     void unhandled_exception() {}
 
@@ -128,28 +174,17 @@ namespace server {
                     c_handle.destroy();
                 }
             };
-        friend class HandleReqTask;
+        friend class EventLoop;
     };
 
 
-    class IncomingConnectionAwaiter {
+    class ThreadSwitchAwaiter {
         private:
-            AcceptConnTask::promise_type *promise;
+            std::jthread* p_out;
         public:
-            IncomingConnectionAwaiter(AcceptConnTask::promise_type *promise);
-
-            bool await_ready() { return false; }
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<>);
-            void await_resume() const noexcept {}
-    };
-
-    class HandleEventAwaiter {
-        private:
-            HandleReqTask::promise_type *promise;
-        public:
-            HandleEventAwaiter(HandleReqTask::promise_type *promise);
+            ThreadSwitchAwaiter(std::jthread* out):p_out(out){};
             bool await_ready() const noexcept { return false; }
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<>);
+            void await_suspend(std::coroutine_handle<>);
             void await_resume() const noexcept {}
     };
 }

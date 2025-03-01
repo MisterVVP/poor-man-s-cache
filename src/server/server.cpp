@@ -113,14 +113,14 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
 }
 
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
-{
-    uint_fast8_t numFailedEvents = 0;
+{    
     int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
     if (event_count == -1 && errno != EINTR) {
         perror("epoll_wait failed");
-        co_return 1;
+        co_return;
     }
     ++numRequests;
+
     for (int i = 0; i < event_count; ++i) {
         auto client_fd = epoll_events[i].data.fd;
         if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
@@ -133,7 +133,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
 
             if (readResult.operationResult == ReqReadOperationResult::Failure) {
                 connManager.closeConnection(client_fd);
-                ++numFailedEvents;
+                ++numErrors;
                 continue;
             }
 
@@ -145,7 +145,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 send(client_fd, response, strlen(response), 0);
                 connManager.closeConnection(client_fd);
                 readResult.request.clear();
-                ++numFailedEvents;
+                ++numErrors;
                 continue;
             }
             char* key = strtok_r(nullptr, " ", &com_saveptr);
@@ -174,7 +174,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                         send(client_fd, response, strlen(response), 0);
                         readResult.request.clear();
                         connManager.closeConnection(client_fd);
-                        ++numFailedEvents;
+                        ++numErrors;
                     }
                 }
             } else {
@@ -182,11 +182,11 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 send(client_fd, response, strlen(response), 0);
                 connManager.closeConnection(client_fd);
                 readResult.request.clear();
-                ++numFailedEvents;
+                ++numErrors;
             }
         }
     }
-    co_return numFailedEvents;
+    co_return;
 }
 
 void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
@@ -227,7 +227,7 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 }
 
 
-int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
+EventLoop CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
     isRunning = true;
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
@@ -236,10 +236,10 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     });
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
-
-    auto acCoro = connManager.acceptConnections(server_fd);
-
+    std::jthread out;
+    auto acCoro = connManager.acceptConnections(server_fd, out);
     std::optional<EpollStatus> eStatus; // refactor if we decide to spawn multiple epolls and coroutines
+
     do {
         eStatus = acCoro.getStatus();
 
@@ -254,15 +254,16 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         }
 
         if (sRef.status < 0 ) {
+            std::cerr << "Unexpected termination of the server!" << std::endl;
             // we should not be here, in future this should not kill entire server and we'll have more coroutines to spawn or mechanism to recover
             Stop(); 
-            return sRef.status;
+            co_return sRef.status;
         }
 
     } while(!cancellationToken);
 
     Stop();
-    return (*eStatus).status;
+    co_return (*eStatus).status;
 }
 
 void CacheServer::Stop() noexcept
