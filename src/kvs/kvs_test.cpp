@@ -35,7 +35,7 @@ auto generateValue(int_fast64_t index) {
 // Test storing and retrieving large JSON files
 TEST(KeyValueStoreTest, LargeJSONFiles) {
     KeyValueStore kvStore;
-    std::string dataPath = "../tests/data";
+    std::string dataPath = "./tests/data";
 
     for (const auto& entry : fs::directory_iterator(dataPath)) {
         if (entry.path().extension() == ".json") {

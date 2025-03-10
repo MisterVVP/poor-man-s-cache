@@ -149,7 +149,7 @@ namespace server {
                 ConnAwaiter(promise_type *p) : promise(p) {}
                 bool await_ready() { return false; }
                 std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
-                std::optional<EpollStatus> await_resume();
+                EpollStatus await_resume();
             };
         
         private:
@@ -163,7 +163,7 @@ namespace server {
         
             class promise_type {
             public:
-                std::optional<EpollStatus> eStatus;
+                EpollStatus eStatus;
                 std::coroutine_handle<> eventLoopHandle;
 
                 std::suspend_never initial_suspend() { return {}; }

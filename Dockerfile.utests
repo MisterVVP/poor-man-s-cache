@@ -5,13 +5,7 @@ WORKDIR /app
 COPY . .
 
 # Number of elements to test
-ENV NUM_ELEMENTS=10000
-
-# Build KeyValueStorage tests
-ARG GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"
-RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp primegen/primegen.cpp compressor/gzip_compressor.cpp kvs/kvs.cpp kvs/kvs_test.cpp -lz -lgtest -lgtest_main -o ../kvs_test
-
-# Run compressor tests
-RUN cd /app/src && g++ $GPP_FLAGS -s -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o ../test_gzip
+ARG NUM_ELEMENTS=10000
+ENV NUM_ELEMENTS=$NUM_ELEMENTS
 
 ENTRYPOINT [ "/app/run-all-tests.bash" ]

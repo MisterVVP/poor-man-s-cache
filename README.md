@@ -17,10 +17,19 @@ Another pet project to practice.
 - Solution should support only Linux, preferrably alpine or similar distribution. No Windows or Mac OS support... ever.
 - Solution should be container and (hopefully) orchestrator friendly
 
-### Current progress
+## Current progress
+
+### Functional tests
 - Server is able to handle 47000 requests per second on bare ubuntu (high end processor and half gbit internet). Next step is 100k+ requests per second
 - 24000 RPS inside docker on Windows (same hardware as ubuntu above)
 - 7000 RPS on poor github runner (likely within a container as well)
+
+### Unit tests
+
+#### KeyValueStore
+- KeyValueStoreTest.LargeJSONFiles (1167 ms)
+- KeyValueStoreTest.AddAndRetrieveElements (22795 ms)
+- KeyValueStoreTest.OverwriteElements (45561 ms)
 
 ## Quick start
 > [!TIP]
@@ -71,8 +80,8 @@ Run unit tests:
 ```
 cd ./src && \
 export NUM_ELEMENTS=10000 && \
-g++-14 -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp compressor/gzip_compressor.cpp kvs/*.cpp primegen/primegen.cpp -lz -lgtest -lgtest_main -o kvs_test && ./kvs_test && \
-g++-14 -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o test_gzip && ./test_gzip && \
+g++-14 -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp compressor/gzip_compressor.cpp kvs/*.cpp primegen/primegen.cpp -lz -lgtest -lgtest_main -o kvs_test && ./kvs_test && \
+g++-14 -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o test_gzip && ./test_gzip && \
 cd ..
 ```
 
@@ -127,15 +136,17 @@ docker compose --profile tests-callgrind up
 
 ### To run only unit tests
 > [!TIP]
-> Use `--build-arg GPP_FLAGS="-m64 -std=c++26 -O3 -DNDEBUG"` to disable debugging helpers in code.
+> Use `--build-arg GPP_FLAGS="-m64 -std=c++23 -O3 -DNDEBUG"` to disable debugging helpers in code.
 ```
-docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++26 -O3" . -t cache-tests:latest
+docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++23 -O3" . -t cache-tests:latest
 docker run -it cache-tests:latest
 ```
 
 ### Various helpful shell commands
 `sysctl -a` - Check that all required sysctl options were overwritten successfully in Docker.
 `netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `sockmon.bash`).
+`echo -ne "SET key1 value1\x1F" | nc localhost 9001` - Send a single SET request to cache server (nice for quick testing)
+`echo -ne "GET key1\x1F" | nc localhost 9001` - Send a single GET request to cache server (nice for quick testing)
 
 Netstat in a loop:
 ```

@@ -239,31 +239,25 @@ EventLoop CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
 
     auto acCoro = connManager.acceptConnections(server_fd);
-    std::optional<EpollStatus> eStatus; 
+    auto eStatus = EpollStatus::NotReady(); 
     do {
-        eStatus = co_await acCoro;
+        eStatus = co_await acCoro;        
         
-        if (!eStatus.has_value()) {
+        if (eStatus.status == ServerStatus::Processing) {
+            co_await handleRequests(eStatus.epoll_fd);
             continue;
         }
 
-        auto sRef = *eStatus;
-        
-        if (sRef.status == ServerStatus::Processing) {
-            co_await handleRequests(sRef.epoll_fd);
-            continue;
-        }
-
-        if (sRef.status < 0 ) {
+        if (eStatus.status < 0 ) {
             std::cerr << "Unexpected termination of the server!" << std::endl;
             Stop(); 
-            co_return sRef.status;
+            co_return eStatus.status;
         }
 
     } while(!cancellationToken);
 
     Stop();
-    co_return (*eStatus).status;
+    co_return eStatus.status;
 }
 
 void CacheServer::Stop() noexcept

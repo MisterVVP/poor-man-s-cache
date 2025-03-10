@@ -13,9 +13,9 @@ COPY . .
 # Number of elements to test
 ENV NUM_ELEMENTS=100000
 # Run hashtable tests
-RUN cd /app/src && g++ -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp compressor/gzip_compressor.cpp kvs/*.cpp primegen/primegen.cpp -lz -lgtest -lgtest_main -o kvs_test && ./kvs_test
+RUN cd /app/src && g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp compressor/gzip_compressor.cpp kvs/*.cpp primegen/primegen.cpp -lz -lgtest -lgtest_main -o kvs_test && ./kvs_test
 # Run compressor tests
-RUN cd /app/src && g++ -std=c++26 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o test_gzip && ./test_gzip
+RUN cd /app/src && g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o test_gzip && ./test_gzip
 
 ARG BUILD_TYPE="Debug"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .

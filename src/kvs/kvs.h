@@ -35,30 +35,96 @@ namespace kvs
         bool usePrimeNumbers = true;
     };
 
+    struct Entry {
+        char *key = nullptr;
+        char *value = nullptr;
+        size_t vSize = 0;
+        bool occupied = false;
+        bool compressed = false;
+    };
+
+    struct Bucket {
+        uint_fast64_t entries[BUCKET_SIZE];
+    };
+
+    struct PoolEntry {
+        uint_fast64_t i;
+        Entry& entry;
+    };
+
+    class MemoryPool : NonCopyableOrMovable  { // TODO: try out plain C arrays here instead of std::vector
+        private:
+            std::vector<Entry> pool;
+            std::atomic<size_t> freeIdx = 1;
+            std::atomic<size_t> deallocations;
+    
+            void defragment() {
+                size_t newFreeIdx = 1;
+                for (size_t i = 0; i < freeIdx; ++i) {
+                    if (pool[i].occupied) {
+                        if (i != newFreeIdx) {
+                            pool[newFreeIdx] = std::move(pool[i]);
+                        }
+                        ++newFreeIdx;
+                    }
+                }
+                freeIdx = newFreeIdx;
+                deallocations = 0;
+            }
+    
+        public:
+            explicit MemoryPool(size_t initialSize) : pool(initialSize), freeIdx(1), deallocations(0) {}
+
+            inline void expandPool(size_t newSize) {
+                pool.resize(newSize);
+            }
+
+            Entry& get(size_t i) {
+                return pool[i];
+            }
+
+            PoolEntry allocate() {
+                if (freeIdx == pool.capacity() - 1) {
+                    expandPool(pool.capacity() * 2);
+                }
+                if (deallocations >= pool.capacity() / 5) {
+                    defragment();
+                }
+                size_t i = freeIdx;
+                ++freeIdx;
+                return PoolEntry { i, pool[i] };
+            }
+    
+            void deallocate(size_t i) {
+                auto &entry = pool[i];
+                entry.occupied = false;
+                entry.compressed = false;
+                entry.vSize = 0;
+                delete[] entry.key;
+                delete[] entry.value;
+                entry.key = nullptr;
+                entry.value = nullptr;
+                ++deallocations;
+            }
+    };
+    
+
     class KeyValueStore : NonCopyableOrMovable {
         private:
-            struct Entry {
-                char* key;
-                char* value;
-                /// @brief Size of value
-                size_t vSize;
-                bool occupied;
-                bool compressed;
-            };
-
-            struct Bucket {
-                Entry entries[BUCKET_SIZE];
-            };
-
             Bucket *table;
             uint_fast64_t tableSize;
             uint_fast64_t numEntries;
             uint_fast64_t numCollisions;
             uint_fast32_t numResizes;
 
-
+            MemoryPool entryPool;
             bool isResizing = false;
             void resize();
+            void copyEntry(Entry &dest, const Entry &src);
+            uint_fast64_t insertEntry(const char *key, const char *value, size_t kSize, size_t vSize);
+            void migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx);
+            const char* decompressEntry(const Entry &entry);
+            void initializeTable(Bucket *table, uint_fast64_t size);
             void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
             uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
             

@@ -13,7 +13,7 @@ void ThreadSwitchAwaiter::await_suspend(std::coroutine_handle<> h)
 
 std::coroutine_handle<> server::AcceptConnTask::ConnAwaiter::await_suspend(std::coroutine_handle<> h)
 {
-    promise->eStatus = std::nullopt;
+    promise->eStatus = EpollStatus::NotReady();
 
     if (!promise->eventLoopHandle) {
         promise->eventLoopHandle = h; 
@@ -27,7 +27,7 @@ std::coroutine_handle<> server::AcceptConnTask::ConnAwaiter::await_suspend(std::
     return promise->eventLoopHandle;
 }
 
-std::optional<EpollStatus> server::AcceptConnTask::ConnAwaiter::await_resume()
+EpollStatus server::AcceptConnTask::ConnAwaiter::await_resume()
 {
     return promise->eStatus;
 }
