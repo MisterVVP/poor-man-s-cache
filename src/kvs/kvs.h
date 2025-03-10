@@ -85,11 +85,12 @@ namespace kvs
 
             PoolEntry allocate() {
                 if (freeIdx == pool.capacity() - 1) {
-                    expandPool(pool.capacity() * 2);
+                    expandPool(pool.capacity() * 1.5);
                 }
+                /* TODO: debug this
                 if (deallocations >= pool.capacity() / 5) {
                     defragment();
-                }
+                } */
                 size_t i = freeIdx;
                 ++freeIdx;
                 return PoolEntry { i, pool[i] };

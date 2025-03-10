@@ -10,7 +10,7 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
       isResizing(false),
       compressionEnabled(settings.compressionEnabled),
       usePrimeNumbers(settings.usePrimeNumbers),
-      entryPool(settings.initialSize * BUCKET_SIZE) {
+      entryPool(settings.initialSize) {
 #ifndef NDEBUG
     std::cout << "Table initialization started! initialSize = " << tableSize << " usePrimeNumbers = " << usePrimeNumbers 
               << " compressionEnabled = " << compressionEnabled << std::endl;
@@ -68,7 +68,7 @@ void KeyValueStore::resize() {
 #endif
     uint_fast64_t newTableSize = usePrimeNumbers ? primegen.PopNext() : tableSize * 2;
 
-    entryPool.expandPool(newTableSize * BUCKET_SIZE);
+    entryPool.expandPool(newTableSize);
     auto *newTable = new Bucket[newTableSize];
     initializeTable(newTable, newTableSize);
 
