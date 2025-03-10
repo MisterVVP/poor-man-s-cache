@@ -4,5 +4,6 @@ out
 .vscode
 .github
 .venv
+tests/.venv
 kvs_test
 test_gzip

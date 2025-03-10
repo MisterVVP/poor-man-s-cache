@@ -56,6 +56,13 @@ Don't forget to shut the detached container down by issuing:
 docker compose --profile main down
 ```
 
+#### To run only unit tests
+
+```
+docker build -f Dockerfile.utests . -t cache-tests:latest
+docker run -it cache-tests:latest
+```
+
 ### Local Ubuntu with sudo access
 Open terminal in repository root and apply system configuration via
 ```
@@ -78,13 +85,8 @@ sudo cmake --install .
 
 Run unit tests:
 ```
-cd ./src && \
-export NUM_ELEMENTS=10000 && \
-g++-14 -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L/usr/lib/ hash/*.cpp compressor/gzip_compressor.cpp kvs/*.cpp primegen/primegen.cpp -lz -lgtest -lgtest_main -o kvs_test && ./kvs_test && \
-g++-14 -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o test_gzip && ./test_gzip && \
-cd ..
+./run-all-tests.bash
 ```
-
 
 ### To debug memory issues
 > [!WARNING]
@@ -134,13 +136,6 @@ docker compose --profile tests-callgrind up
 > Results of the `callgrind_annotate` command are hard to read without a GUI. This repository does not provide any GUI example, but it's recommended to use [kcachegrind](https://kcachegrind.github.io/html/Home.html).
 > The `callgrind.out` file can be found in the `/callgrind` directory inside the Docker container.
 
-### To run only unit tests
-> [!TIP]
-> Use `--build-arg GPP_FLAGS="-m64 -std=c++23 -O3 -DNDEBUG"` to disable debugging helpers in code.
-```
-docker build -f Dockerfile.utests --build-arg GPP_FLAGS="-m64 -std=c++23 -O3" . -t cache-tests:latest
-docker run -it cache-tests:latest
-```
 
 ### Various helpful shell commands
 `sysctl -a` - Check that all required sysctl options were overwritten successfully in Docker.

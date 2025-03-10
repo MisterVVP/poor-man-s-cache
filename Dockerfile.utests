@@ -5,7 +5,7 @@ WORKDIR /app
 COPY . .
 
 # Number of elements to test
-ARG NUM_ELEMENTS=10000
+ARG NUM_ELEMENTS=100000
 ENV NUM_ELEMENTS=$NUM_ELEMENTS
 
 ENTRYPOINT [ "/app/run-all-tests.bash" ]
