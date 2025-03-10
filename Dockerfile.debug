@@ -13,7 +13,7 @@ COPY . .
 # Number of elements to test
 ENV NUM_ELEMENTS=10000000
 # Run all tests
-RUN /app/run-all-tests.bash
+RUN bash /app/run-all-tests.bash
 
 ARG BUILD_TYPE="Debug"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .
