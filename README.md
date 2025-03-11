@@ -27,6 +27,7 @@ Another pet project to practice.
 ### Unit tests
 
 #### KeyValueStore
+Local Ubuntu, 10M records:
 - KeyValueStoreTest.LargeJSONFiles (1167 ms)
 - KeyValueStoreTest.AddAndRetrieveElements (22795 ms)
 - KeyValueStoreTest.OverwriteElements (45561 ms)

@@ -124,7 +124,6 @@ inline void KeyValueStore::copyEntry(Entry &dest, const Entry &src) {
     memcpy(dest.key, src.key, kSize);
     memcpy(dest.value, src.value, vSize);
     dest.vSize = src.vSize;
-    dest.occupied = true;
     dest.compressed = src.compressed;
 }
 
@@ -189,7 +188,6 @@ uint_fast64_t KeyValueStore::insertEntry(const char *key, const char *value, siz
         memcpy(allocatedEntry.value, value, vSize);
     }
 
-    allocatedEntry.occupied = true;
     ++numEntries;
     return poolEntry.i;
 }

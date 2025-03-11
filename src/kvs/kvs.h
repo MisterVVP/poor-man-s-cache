@@ -39,8 +39,8 @@ namespace kvs
         char *key = nullptr;
         char *value = nullptr;
         size_t vSize = 0;
-        bool occupied = false;
         bool compressed = false;
+        size_t nextFree = 0;
     };
 
     struct Bucket {
@@ -52,60 +52,66 @@ namespace kvs
         Entry& entry;
     };
 
-    class MemoryPool : NonCopyableOrMovable  { // TODO: try out plain C arrays here instead of std::vector
+    
+    class MemoryPool : NonCopyableOrMovable {
         private:
-            std::vector<Entry> pool;
-            std::atomic<size_t> freeIdx = 1;
-            std::atomic<size_t> deallocations;
-    
-            void defragment() {
-                size_t newFreeIdx = 1;
-                for (size_t i = 0; i < freeIdx; ++i) {
-                    if (pool[i].occupied) {
-                        if (i != newFreeIdx) {
-                            pool[newFreeIdx] = std::move(pool[i]);
-                        }
-                        ++newFreeIdx;
-                    }
-                }
-                freeIdx = newFreeIdx;
-                deallocations = 0;
-            }
-    
+            Entry *pool;
+            size_t capacity;
+            std::atomic<size_t> freeListHead;
+            Primegen primegen;
         public:
-            explicit MemoryPool(size_t initialSize) : pool(initialSize), freeIdx(1), deallocations(0) {}
+            explicit MemoryPool(size_t initialSize) 
+                : capacity(initialSize), freeListHead(0) {
+                pool = new Entry[capacity];
+                for (size_t i = 1; i < capacity - 1; ++i) {
+                    pool[i].nextFree = i + 1;
+                }
+                pool[capacity - 1].nextFree = 0;
+                freeListHead = 1;
+            }
+        
+            ~MemoryPool() {
+                delete[] pool;
+            }
+        
+            PoolEntry allocate() {
+                if (freeListHead == 0) {
+                    expandPool(capacity * primegen.PopNext());
+                }
+                size_t i = freeListHead;
+                freeListHead = pool[i].nextFree;
+                return PoolEntry { i, pool[i] };
+            }
 
-            inline void expandPool(size_t newSize) {
-                pool.resize(newSize);
+            void deallocate(size_t i) {
+                auto &entry = pool[i];
+                delete[] entry.key;
+                delete[] entry.value;
+                entry.key = nullptr;
+                entry.value = nullptr;
+                entry.vSize = 0;
+                entry.compressed = false;
+        
+                entry.nextFree = freeListHead;
+                freeListHead = i;
             }
 
             Entry& get(size_t i) {
                 return pool[i];
             }
 
-            PoolEntry allocate() {
-                if (freeIdx == pool.capacity() - 1) {
-                    expandPool(pool.capacity() * 1.5);
+            void expandPool(size_t newSize) {
+                Entry *newPool = new Entry[newSize];
+                memcpy(newPool, pool, capacity * sizeof(Entry));
+                for (size_t i = capacity; i < newSize - 1; ++i) {
+                    newPool[i].nextFree = i + 1;
                 }
-                /* TODO: debug this
-                if (deallocations >= pool.capacity() / 5) {
-                    defragment();
-                } */
-                size_t i = freeIdx;
-                ++freeIdx;
-                return PoolEntry { i, pool[i] };
-            }
-    
-            void deallocate(size_t i) {
-                auto &entry = pool[i];
-                entry.occupied = false;
-                entry.compressed = false;
-                entry.vSize = 0;
-                delete[] entry.key;
-                delete[] entry.value;
-                entry.key = nullptr;
-                entry.value = nullptr;
-                ++deallocations;
+                newPool[newSize - 1].nextFree = 0;
+        
+                delete[] pool;
+                pool = newPool;
+                freeListHead = capacity;  
+                capacity = newSize;
             }
     };
     
