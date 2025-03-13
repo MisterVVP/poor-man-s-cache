@@ -73,16 +73,16 @@ namespace server {
                     ~promise_type() {}
             };
 
-            HandleReqTask(HandleReqTask &&rhs) : c_handle(rhs.c_handle) {
-                rhs.c_handle = nullptr;
+            HandleReqTask(HandleReqTask &&hrt) : c_handle(hrt.c_handle) {
+                hrt.c_handle = nullptr;
             }
 
-            HandleReqTask &operator=(HandleReqTask &&rhs) {
+            HandleReqTask &operator=(HandleReqTask &&hrt) {
                 if (c_handle) {
                     c_handle.destroy();
                 }
-                c_handle = rhs.c_handle;
-                rhs.c_handle = nullptr;
+                c_handle = hrt.c_handle;
+                hrt.c_handle = nullptr;
                 return *this;
             }
 
@@ -128,6 +128,19 @@ namespace server {
 
             int finalResult() {
                 return c_handle.promise().resultCode;
+            }
+
+            EventLoop(EventLoop &&el) : c_handle(el.c_handle) {
+                el.c_handle = nullptr;
+            }
+
+            EventLoop &operator=(EventLoop &&el) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = el.c_handle;
+                el.c_handle = nullptr;
+                return *this;
             }
 
             ~EventLoop() {
@@ -193,6 +206,19 @@ namespace server {
                     return ConnAwaiter{&promise};
                 }
             };
+
+            AcceptConnTask(AcceptConnTask &&act) : c_handle(act.c_handle) {
+                act.c_handle = nullptr;
+            }
+
+            AcceptConnTask &operator=(AcceptConnTask &&act) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = act.c_handle;
+                act.c_handle = nullptr;
+                return *this;
+            }
 
             ~AcceptConnTask() {
                 if (c_handle) {

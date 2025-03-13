@@ -76,7 +76,8 @@ namespace kvs
         
             PoolEntry allocate() {
                 if (freeListHead == 0) {
-                    expandPool(capacity * primegen.PopNext());
+                    auto newCapacity = primegen.PopNext();
+                    expandPool(newCapacity);
                 }
                 size_t i = freeListHead;
                 freeListHead = pool[i].nextFree;

@@ -20,9 +20,13 @@ Another pet project to practice.
 ## Current progress
 
 ### Functional tests
-- Server is able to handle 47000 requests per second on bare ubuntu (high end processor and half gbit internet). Next step is 100k+ requests per second
+Server is able to handle:
+- about 50000 requests per second on bare ubuntu (high end processor and half gbit internet).
+- 33000 RPS inside docker on Ubuntu (high end processor and half gbit internet)
 - 24000 RPS inside docker on Windows (same hardware as ubuntu above)
 - 7000 RPS on poor github runner (likely within a container as well)
+
+Next step is 100k+ requests per second
 
 ### Unit tests
 
@@ -84,10 +88,57 @@ ctest -V && \
 sudo cmake --install .
 ```
 
+Set env variables, for example:
+```
+source .env
+```
+
 Run unit tests:
 ```
 ./run-all-tests.bash
 ```
+> [!TIP]
+> Use Ctrl+C to send SIGTERM
+
+Build app using Cmake extension for VsCode, then run command below (or click a button in VsCode CMAKE extension).
+```
+./out/build/Release/src/poor-man-s-cache
+```
+
+Setup python virtual environment and run python tests from tests folder. For example:
+```
+cd tests
+virtualenv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 ./tcp_server_test.py
+```
+> [!TIP]
+> You can change the number of request sequences in tests via export TEST_ITERATIONS=100000
+
+#### Profiling (callgrind)
+Profiling setup is similar for all Valgrind tools, below is an example for callgrind. For callgrind, Debug build is recommended, but not required.
+
+Run (for Debug build)
+```
+valgrind --tool=callgrind --simulate-cache=yes ./out/build/Debug/src/poor-man-s-cache
+```
+
+Find pid, for example via `ps aux`. Callgrind will create a file called callgrind.out.<process id here>
+
+Run python tests, e.g. from tests folder:
+```
+python3 ./tcp_server_test.py
+```
+
+After tests have finished, send SIGTERM to cache server and check callgrind output from callgrind.out.<process id here> file created by callgrind.
+Open callgrind output file with [kcachegrind](https://kcachegrind.github.io/html/Home.html)
+
+Else (if you are a samurai), you can try to figure things out from callgrind_annotate
+```
+callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callgrind.out.<server process id>
+```
+
 
 ### To debug memory issues
 > [!WARNING]

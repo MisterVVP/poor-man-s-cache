@@ -67,16 +67,16 @@ namespace server {
 
             struct ReadRequestResult {
                 private:
-                    ReadRequestResult(ReqReadOperationResult res) : operationResult(res){};
+                    ReadRequestResult(ReqReadOperationResult res) : operationResult(res) {};
 
                 public:
                     std::string request;
                     ReqReadOperationResult operationResult;
 
-                    ReadRequestResult(std::string request, ReqReadOperationResult res) : request(request), operationResult(res){};
+                    ReadRequestResult(std::string&& request, ReqReadOperationResult res) : request(std::move(request)), operationResult(res) {};
 
-                    static ReadRequestResult Success(std::string request) noexcept {
-                        return ReadRequestResult { request, ReqReadOperationResult::Success };
+                    static ReadRequestResult Success(std::string req) noexcept {
+                        return ReadRequestResult { std::move(req), ReqReadOperationResult::Success };
                     };
 
                     static ReadRequestResult Failure() noexcept {
