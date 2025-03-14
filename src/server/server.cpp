@@ -228,7 +228,7 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 }
 
 
-EventLoop CacheServer::Start(std::queue<CacheServerMetrics>& channel)
+int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
     isRunning = true;
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
@@ -238,25 +238,36 @@ EventLoop CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
 
-    auto acCoro = connManager.acceptConnections(server_fd);
-    auto eStatus = EpollStatus::NotReady(); 
+    auto ac = connManager.acceptConnections(server_fd);
+    int rCode = 0;
     do {
-        eStatus = co_await acCoro;        
-        
-        if (eStatus.status == ServerStatus::Processing) {
-            co_await handleRequests(eStatus.epoll_fd);
-            continue;
-        }
+        auto loopRes = eventLoop(ac);
+        rCode = loopRes.finalResult();
+    } while(!cancellationToken && rCode > 0);
 
-        if (eStatus.status < 0 ) {
-            std::cerr << "Unexpected termination of the server!" << std::endl;
-            Stop(); 
-            co_return eStatus.status;
-        }
-
-    } while(!cancellationToken);
+    if (rCode < 0) {
+        std::cerr << "Unexpected termination of the server!" << std::endl;
+    }
 
     Stop();
+    
+    return rCode;
+}
+
+EventLoop server::CacheServer::eventLoop(AcceptConnTask& ac)
+{
+    auto eStatus = co_await ac;
+    
+    if (eStatus.status == ServerStatus::Processing) {
+        auto hrt = handleRequests(eStatus.epoll_fd);
+        co_await hrt;
+    }
+
+    if (eStatus.status < 0 ) {
+        std::cerr << "Unexpected termination of the server!" << std::endl;
+        Stop();
+    }
+
     co_return eStatus.status;
 }
 

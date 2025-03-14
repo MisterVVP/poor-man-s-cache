@@ -34,10 +34,10 @@ namespace server {
                     throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
                     co_return EpollStatus::Terminated();
                 }
+                co_yield EpollStatus::Running(epoll_fd);
                 sockaddr_in client_address;
                 socklen_t client_len = sizeof(client_address);
                 auto client_fd = -1;
-                co_yield EpollStatus::Running(epoll_fd);
                 do {
                     auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
                     if (client_fd >= 0) {
@@ -54,7 +54,7 @@ namespace server {
                         }
                     } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
                         perror("Failed to accept connection");
-                    }                    
+                    }
                 } while (!cancellationToken);
 
                 if (epoll_fd >= 0) {

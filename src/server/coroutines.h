@@ -1,7 +1,6 @@
 
 #pragma once
 #include <future>
-#include <optional>
 #include <coroutine>
 #include <thread>
 #include "../non_copyable.h"
@@ -44,23 +43,6 @@ namespace server {
             handle_type c_handle;
             HandleReqTask(handle_type h) : c_handle(h) {};
         public:
-            auto operator co_await() {
-                struct HandleReqAwaiter {
-                    HandleReqTask& task;
-            
-                    bool await_ready() const noexcept {
-                        return task.c_handle.done();
-                    }
-            
-                    std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) noexcept {
-                        return task.c_handle;
-                    }
-            
-                    void await_resume() noexcept {}
-                };
-                return HandleReqAwaiter{*this};
-            }
-
             class promise_type {
                 public:
                     std::suspend_never initial_suspend() { return {}; }
@@ -86,17 +68,93 @@ namespace server {
                 return *this;
             }
 
-            void runToCompletion() {
-                if (!c_handle.done()) {
-                    c_handle.resume();
-                }
-            }
-
             ~HandleReqTask() {
                 if (c_handle) {
                     c_handle.destroy();
                 }
             };
+            friend class EventLoop;
+            friend class HandleReqAwaiter;
+    };
+    
+    struct HandleReqAwaiter {
+        private:
+            HandleReqTask::promise_type *promise;
+        public:
+            HandleReqAwaiter(HandleReqTask::promise_type *p) : promise(p) {}
+            bool await_ready() const noexcept { return false; }
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
+            void await_resume() noexcept {}
+    };
+
+    class AcceptConnTask : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;
+        
+        private:
+            handle_type c_handle;
+            AcceptConnTask(handle_type h) : c_handle(h) {}
+        
+        public:        
+            class promise_type {
+            public:
+                EpollStatus eStatus;
+
+                std::suspend_never initial_suspend() { return {}; }
+                std::suspend_always final_suspend() noexcept {                    
+                    return {}; 
+                }
+        
+                void unhandled_exception() {}
+        
+                std::suspend_always yield_value(EpollStatus eStat) {
+                    eStatus = eStat;
+                    return {};
+                }
+        
+                void return_value(EpollStatus eStat) {
+                    eStatus = eStat;
+                }
+        
+                AcceptConnTask get_return_object() {
+                    auto handle = handle_type::from_promise(*this);
+                    return AcceptConnTask{handle};
+                }
+        
+                promise_type() : eStatus(EpollStatus::NotReady()) {}
+                ~promise_type() {}
+            };
+
+            AcceptConnTask(AcceptConnTask &&act) : c_handle(act.c_handle) {
+                act.c_handle = nullptr;
+            }
+
+            AcceptConnTask &operator=(AcceptConnTask &&act) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = act.c_handle;
+                act.c_handle = nullptr;
+                return *this;
+            }
+
+            ~AcceptConnTask() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            };
+        friend class EventLoop;
+    };
+
+    class ConnAwaiter {
+        private:
+            AcceptConnTask::promise_type *promise;
+        public:
+            ConnAwaiter(AcceptConnTask::promise_type *p) : promise(p) {}
+            bool await_ready() const noexcept { return false; }
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
+            EpollStatus await_resume();
     };
 
     class EventLoop : NonCopyable {
@@ -124,6 +182,16 @@ namespace server {
                         return EventLoop{handle}; 
                     }
                     ~promise_type() {}
+
+                    HandleReqAwaiter await_transform(HandleReqTask &hrt) {
+                        auto &promise = hrt.c_handle.promise();
+                        return HandleReqAwaiter{&promise};
+                    }
+
+                    ConnAwaiter await_transform(AcceptConnTask &ac) {
+                        auto &promise = ac.c_handle.promise();
+                        return ConnAwaiter{&promise};
+                    }
             };
 
             int finalResult() {
@@ -149,84 +217,6 @@ namespace server {
                 }
             };
     };
-
-    class AcceptConnTask : NonCopyable {
-        public:
-            class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;
-        
-            class ConnAwaiter {
-            private:
-                promise_type *promise;
-            public:
-                ConnAwaiter(promise_type *p) : promise(p) {}
-                bool await_ready() { return false; }
-                std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
-                EpollStatus await_resume();
-            };
-        
-        private:
-            handle_type c_handle;
-            AcceptConnTask(handle_type h) : c_handle(h) {}
-        
-        public:
-            auto operator co_await() {
-                return ConnAwaiter{&c_handle.promise()};
-            }
-        
-            class promise_type {
-            public:
-                EpollStatus eStatus;
-                std::coroutine_handle<> eventLoopHandle;
-
-                std::suspend_never initial_suspend() { return {}; }
-                std::suspend_always final_suspend() noexcept { return {}; }
-        
-                void unhandled_exception() {}
-        
-                std::suspend_always yield_value(EpollStatus eStat) {
-                    eStatus = eStat;
-                    return {};
-                }
-        
-                void return_value(EpollStatus eStat) {
-                    eStatus = eStat;
-                }
-        
-                AcceptConnTask get_return_object() {
-                    auto handle = handle_type::from_promise(*this);
-                    return AcceptConnTask{handle};
-                }
-        
-                promise_type() : eStatus(EpollStatus::NotReady()), eventLoopHandle(nullptr) {}
-                ~promise_type() {}
-        
-                ConnAwaiter await_transform(AcceptConnTask &ac) {
-                    auto &promise = ac.c_handle.promise();
-                    return ConnAwaiter{&promise};
-                }
-            };
-
-            AcceptConnTask(AcceptConnTask &&act) : c_handle(act.c_handle) {
-                act.c_handle = nullptr;
-            }
-
-            AcceptConnTask &operator=(AcceptConnTask &&act) {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-                c_handle = act.c_handle;
-                act.c_handle = nullptr;
-                return *this;
-            }
-
-            ~AcceptConnTask() {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-            };
-    };
-        
 
     class ThreadSwitchAwaiter {
         private:

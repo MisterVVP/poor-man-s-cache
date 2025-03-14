@@ -11,23 +11,35 @@ void ThreadSwitchAwaiter::await_suspend(std::coroutine_handle<> h)
     out = std::jthread([h] { h.resume(); });
 }
 
-std::coroutine_handle<> server::AcceptConnTask::ConnAwaiter::await_suspend(std::coroutine_handle<> h)
+std::coroutine_handle<> server::HandleReqAwaiter::await_suspend(std::coroutine_handle<> h)
+{
+    if (!h.done()) {
+       auto hrt = HandleReqTask::handle_type::from_promise(*promise);
+       if (!hrt.done()) {
+         hrt.resume();
+       }
+       return h;
+    }
+
+    return std::noop_coroutine();
+}
+
+std::coroutine_handle<> server::ConnAwaiter::await_suspend(std::coroutine_handle<> h)
 {
     promise->eStatus = EpollStatus::NotReady();
 
-    if (!promise->eventLoopHandle) {
-        promise->eventLoopHandle = h; 
+    if (!h.done()) {
+        auto acHandle = AcceptConnTask::handle_type::from_promise(*promise);
+        if (!acHandle.done()) {
+            acHandle.resume();
+        }
+        return h;
     }
 
-    if (!promise->eventLoopHandle.done()) {
-        auto acHandle = handle_type::from_promise(*promise);
-        acHandle.resume();
-    }
-
-    return promise->eventLoopHandle;
+    return std::noop_coroutine();
 }
 
-EpollStatus server::AcceptConnTask::ConnAwaiter::await_resume()
+EpollStatus server::ConnAwaiter::await_resume()
 {
     return promise->eStatus;
 }
