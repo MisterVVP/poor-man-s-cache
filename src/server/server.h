@@ -99,6 +99,7 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             ReadRequestResult readRequest(int client_fd);
+            const char* processRequest(char* requestData);
             HandleReqTask handleRequests(int epoll_fd);
             void sendResponse(int client_fd, const char* response, const size_t responseSize);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);

@@ -2,7 +2,7 @@
 
 using namespace server;
 
-const char* ServerShard::processCommand(const Command &command)
+const char* ServerShard::processCommand(const Command& command)
 {
     const char* response = nullptr;
     if (command.commandCode == 1) {
@@ -15,7 +15,7 @@ const char* ServerShard::processCommand(const Command &command)
     return response;
 }
 
-const char* ServerShard::processQuery(const Query &query)
+const char* ServerShard::processQuery(const Query& query)
 {
     const char* response = nullptr;
 
@@ -29,7 +29,7 @@ const char* ServerShard::processQuery(const Query &query)
     return response;
 }
 
-server::Query::Query(uint_fast16_t code, const char *arg_key, uint_fast64_t hash, int client_fd): queryCode(code), hash(hash), client_fd(client_fd)
+server::Query::Query(QueryCode code, const char *arg_key, uint_fast64_t hash): queryCode(code), hash(hash)
 {
     auto kSize = strlen(arg_key) + 1;
     key = std::make_unique<char[]>(kSize);
@@ -37,7 +37,7 @@ server::Query::Query(uint_fast16_t code, const char *arg_key, uint_fast64_t hash
     key.get()[kSize-1] = '\0';
 }
 
-server::Command::Command(uint_fast16_t code, const char *arg_key, const char *arg_value, uint_fast64_t hash, int client_fd): commandCode(code), hash(hash), client_fd(client_fd)
+server::Command::Command(CommandCode code, const char *arg_key, const char *arg_value, uint_fast64_t hash): commandCode(code), hash(hash)
 {
     auto vSize = strlen(arg_value) + 1;
     value = std::make_unique<char[]>(vSize);

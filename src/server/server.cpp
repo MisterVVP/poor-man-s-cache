@@ -16,6 +16,14 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         close(server_fd);
         throw std::system_error(errno, std::system_category(), "Failed to set TCP_NODELAY for server socket");
     }
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_DEFER_ACCEPT, &flag, sizeof(flag)) == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
+    }
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag)) == -1) {
+        close(server_fd);
+        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
+    }
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
         close(server_fd);
         throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEADDR for server socket");
@@ -24,7 +32,7 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         close(server_fd);
         throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
     }
-    
+
     int qlen = 5;
     if (setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
         close(server_fd);
@@ -112,6 +120,41 @@ CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
     return ReadRequestResult::Success(request);
 }
 
+const char *server::CacheServer::processRequest(char *requestData)
+{
+    char* com_saveptr = nullptr;
+    char* request = strtok_r(requestData, " ", &com_saveptr);
+
+    if (!request) {
+        ++numErrors;
+        return "ERROR: Unable to parse request";
+    }
+
+    char* key = strtok_r(nullptr, " ", &com_saveptr);
+    if (key) {
+        auto hash = hashFunc(key);
+        auto shardId = hash % numShards;
+        auto& shard = serverShards[shardId];
+
+        if (strcmp(request, "GET") == 0) {
+            Query query {QueryCode::GET, key, hash };
+            return shard.processQuery(query);
+        }
+
+        if (strcmp(request, "SET") == 0) {
+            if (com_saveptr) {
+                Command cmd {CommandCode::SET, key, com_saveptr, hash};
+                return shard.processCommand(cmd);
+            }
+            ++numErrors;
+            return "ERROR: Invalid SET command format";
+        }
+    }
+
+    ++numErrors;
+    return "ERROR: Unknown command";
+}
+
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
 {
     int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
@@ -137,56 +180,17 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 continue;
             }
 
-            char* com_saveptr = nullptr;
-            char* command = strtok_r(readResult.request.data(), " ", &com_saveptr);
-
-            if (!command) {
-                const char* response = "ERROR: Unable to parse command";
-                send(client_fd, response, strlen(response), 0);
-                connManager.closeConnection(client_fd);
-                readResult.request.clear();
-                ++numErrors;
-                continue;
-            }
-            char* key = strtok_r(nullptr, " ", &com_saveptr);
-            if (key) {
-                auto hash = hashFunc(key);
-                auto shardId = hash % numShards;
-                auto& shard = serverShards[shardId];
-                if (strcmp(command, "GET") == 0) {
-                    Query query {1, key, hash, client_fd };
-                    auto response = shard.processQuery(query);
-                    readResult.request.clear();
-                    auto responseSize = strlen(response);
-                    if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
-                        auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);
-                    } else {
-                        sendResponse(query.client_fd, response, responseSize);
-                    }
-                } else if (strcmp(command, "SET") == 0) {
-                    if (com_saveptr) {
-                        Command cmd {1, key, com_saveptr, hash, client_fd};
-                        auto response = shard.processCommand(cmd);
-                        sendResponse(client_fd, response, strlen(response));
-                        readResult.request.clear();
-                    } else {
-                        const char* response = "ERROR: Invalid SET command format";
-                        send(client_fd, response, strlen(response), 0);
-                        readResult.request.clear();
-                        connManager.closeConnection(client_fd);
-                        ++numErrors;
-                    }
-                }
+            auto response = processRequest(readResult.request.data());
+            auto responseSize = strlen(response);
+            if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
+                auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);
             } else {
-                const char* response = "ERROR: Unknown command";
-                send(client_fd, response, strlen(response), 0);
-                connManager.closeConnection(client_fd);
-                readResult.request.clear();
-                ++numErrors;
+                sendResponse(client_fd, response, responseSize);
             }
+            co_return;
         }
     }
-    
+
     co_return;
 }
 

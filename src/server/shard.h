@@ -10,23 +10,33 @@
 namespace server {
     using namespace kvs;
 
-     struct Command {
-        uint_fast16_t commandCode; // 0: Reserved, 1: SET
+    /// @brief Query codes, 0: Reserved, 1: GET
+    enum QueryCode : uint_fast8_t {
+        UnknownQuery = 0,
+        GET = 1,
+    };
+
+    /// @brief Command codes, 0: Reserved, 1: SET
+    enum CommandCode : uint_fast8_t {
+        UnknownCommand = 0,
+        SET = 1,
+    };
+
+     struct alignas(64) Command {
+        CommandCode commandCode;
         std::unique_ptr<char[]> key;
         std::unique_ptr<char[]> value;
         uint_fast64_t hash;
-        int client_fd;
 
-        Command(uint_fast16_t code, const char* arg_key, const char* arg_value, uint_fast64_t hash, int client_fd);
+        Command(CommandCode code, const char* arg_key, const char* arg_value, uint_fast64_t hash);
     };
 
-    struct Query {
-        uint_fast16_t queryCode;  // 0: Reserved, 1: GET
+    struct alignas(64) Query {
+        QueryCode queryCode;
         std::unique_ptr<char[]> key;
         uint_fast64_t hash;
-        int client_fd;
 
-        Query(uint_fast16_t code, const char* arg_key, uint_fast64_t hash, int client_fd);
+        Query(QueryCode code, const char* arg_key, uint_fast64_t hash);
     };
 
     struct ServerShard {

@@ -35,7 +35,7 @@ namespace kvs
         bool usePrimeNumbers = true;
     };
 
-    struct Entry {
+    struct alignas(64) Entry {
         char *key = nullptr;
         char *value = nullptr;
         size_t vSize = 0;
@@ -43,11 +43,11 @@ namespace kvs
         size_t nextFree = 0;
     };
 
-    struct Bucket {
+    struct alignas(64) Bucket {
         uint_fast64_t entries[BUCKET_SIZE];
     };
 
-    struct PoolEntry {
+    struct alignas(64) PoolEntry {
         uint_fast64_t i;
         Entry& entry;
     };
