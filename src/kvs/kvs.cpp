@@ -76,8 +76,10 @@ void KeyValueStore::resize() {
     for (uint_fast64_t i = 0; i < tableSize; ++i) {
         for (int j = 0; j < BUCKET_SIZE; ++j) {
             auto entryIdx = table[i].entries[j];
-            if (!entryIdx) continue;
-            migrateEntry(newTable, newTableSize, entryIdx);            
+            if (!entryIdx) {
+                continue;
+            }
+            migrateEntry(newTable, newTableSize, entryIdx);
         }
     }
 
@@ -96,23 +98,27 @@ void KeyValueStore::resize() {
 
 void KeyValueStore::migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx) {
     auto entry = entryPool.get(entryIdx);
+    if (!entry.key) {
+        return;
+    }
+
     uint_fast64_t attempt = 0, idx;
     uint_fast64_t primaryHash = hashFunc(entry.key);
-    bool inserted = false;
+    bool migrated = false;
 
     do {
         idx = calcIndex(primaryHash, attempt++, newTableSize);
         for (int k = 0; k < BUCKET_SIZE; ++k) {
             if (!newTable[idx].entries[k]) {
                 newTable[idx].entries[k] = entryIdx;
-                inserted = true;
+                migrated = true;
                 break;
             }
         }
-    } while (!inserted && attempt < MAX_READ_WRITE_ATTEMPTS);
+    } while (!migrated && attempt < MAX_READ_WRITE_ATTEMPTS);
 
-    if (!inserted) {
-        std::cerr << "Resize Error: Could not insert key during migration." << std::endl;
+    if (!migrated) {
+        std::cerr << "Could not migrate entry, key = " << entry.key << ", entryIdx = " << entryIdx << std::endl;
     }
 }
 
@@ -147,10 +153,12 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
             auto entryIdx = table[idx].entries[i];
             if (entryIdx) {
                 auto entry = entryPool.get(entryIdx);
-                if (strcmp(entry.key, key) == 0) {
-                    entryPool.deallocate(entryIdx);
-                } else {
-                    continue;
+                if (entry.key) {
+                    if (strcmp(entry.key, key) == 0) {
+                        entryPool.deallocate(entryIdx);
+                    } else {
+                        continue;
+                    }
                 }
             }
             table[idx].entries[i] = insertEntry(key, value, kSize, vSize);
@@ -203,8 +211,15 @@ const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
         idx = calcIndex(hash, attempt++, tableSize);
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             auto entryIdx = table[idx].entries[i];
-            if (!entryIdx) continue;
+            if (!entryIdx) {
+                continue;
+            }
+
             auto entry = entryPool.get(entryIdx);
+            if (!entry.key) {
+                continue;
+            }
+
             if (strcmp(entry.key, key) == 0) {
                 return entry.compressed ? decompressEntry(entry) : entry.value;
             }
@@ -217,4 +232,43 @@ const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
 inline const char* KeyValueStore::decompressEntry(const Entry &entry) {
     auto decompressed = GzipCompressor::Decompress(entry.value, entry.vSize);
     return decompressed.operationResult == 0 ? decompressed.data : nullptr;
+}
+
+bool kvs::KeyValueStore::del(const char *key)
+{
+    auto primaryHash = hashFunc(key);
+    return del(key, primaryHash);
+}
+
+bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
+{
+    // TODO: consider shrinking in future
+    uint_fast64_t attempt = 0, idx;
+    auto kSize = strlen(key) + 1;
+
+    do {
+        idx = calcIndex(hash, attempt++, tableSize);
+        for (int i = 0; i < BUCKET_SIZE; ++i) {
+            auto entryIdx = table[idx].entries[i];
+            if (!entryIdx) {
+                continue;
+            }
+
+            auto entry = entryPool.get(entryIdx);
+            if (!entry.key) {
+                continue;
+            }
+
+            if (strcmp(entry.key, key) == 0) {
+                entryPool.deallocate(entryIdx);
+                return true;
+            }
+        }
+        numCollisions++;
+    } while (attempt < MAX_READ_WRITE_ATTEMPTS);
+
+#ifndef NDEBUG
+    std::cerr << "Failed to delete key = " << key << " after " << attempt << " attempts." << std::endl;
+#endif
+    return false;
 }

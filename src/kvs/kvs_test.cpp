@@ -74,7 +74,7 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
         delete[] key;
         delete[] value;
     }
-    usleep(1000000);
+
     for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
         auto key = generateKey(i);
         auto value = generateValue(i);
@@ -119,6 +119,40 @@ TEST(KeyValueStoreTest, OverwriteElements) {
         delete[] key;
         delete[] expectedValue;
     }
+}
+
+// Test deletion of elements
+TEST(KeyValueStoreTest, DeleteElements) {
+    KeyValueStore kvStore;
+
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
+        auto key = generateKey(i);
+        auto value = generateValue(i);
+        ASSERT_TRUE(kvStore.set(key, value));
+        delete[] key;
+        delete[] value;
+    }
+
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; i += 2) {
+        auto key = generateKey(i);
+        ASSERT_TRUE(kvStore.del(key));
+        delete[] key;
+    }
+
+    for (int_fast64_t i = 0; i < NUM_ELEMENTS; ++i) {
+        auto key = generateKey(i);
+        auto kvsValue = kvStore.get(key);
+        if (i % 2 == 0) {
+            ASSERT_EQ(kvsValue, nullptr);
+        } else {
+            auto value = generateValue(i);
+            ASSERT_NE(kvsValue, nullptr);
+            ASSERT_STREQ(kvsValue, value);
+            delete[] value;
+        }
+        delete[] key;
+    }
+
 }
 
 int main(int argc, char** argv) {

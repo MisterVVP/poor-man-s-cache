@@ -11,7 +11,8 @@ Another pet project to practice.
 - Build an alternative to Redis cache from scratch. Requirements are limited to a simple distributed key-value storage for string data.
 
 ### Philosophy (or means to achieve goals)
-- Focus on performance, not readability or some 'patterns' and idioms. Prefer plain C-like code when necessary.
+- Focus on performance, not readability or some 'patterns' and idioms. Prefer plain C-like code when necessary. 
+- Avoid excessive defensive programming and argument checking deep inside the server code. Validate the input from network, but do not validate anything after. For example: there is no point to validate pointers in kvs.get(ptr) method, because we should not have passed invalid pointer there! And if it was passed -> we should fix the 'outer' layer, not memory storage.
 - Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string should be avoided for high load, std::unordered_map is a complete no-no).
 - Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. Prometheus metrics).
 - Solution should support only Linux, preferrably alpine or similar distribution. No Windows or Mac OS support... ever.

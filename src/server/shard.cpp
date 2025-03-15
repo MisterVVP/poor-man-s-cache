@@ -4,29 +4,34 @@ using namespace server;
 
 const char* ServerShard::processCommand(const Command& command)
 {
-    const char* response = nullptr;
-    if (command.commandCode == 1) {
-        auto setRes = keyValueStore->set(command.key.get(), command.value.get(), command.hash);
-        response = setRes ? "OK" : "ERROR: Internal error";
-    } else {
-        response = "ERROR: Invalid command code";
-    }
+    bool opRes = false;
+    switch (command.commandCode)
+    {
+        case CommandCode::SET:
+            opRes = keyValueStore->set(command.key.get(), command.value.get(), command.hash);
+            return opRes ? OK : INTERNAL_ERROR;
 
-    return response;
+        case CommandCode::DEL:
+            opRes = keyValueStore->del(command.key.get(), command.hash);
+            return opRes ? OK : INTERNAL_ERROR;
+        
+        default:
+            return INVALID_COMMAND_CODE;
+    }
 }
 
 const char* ServerShard::processQuery(const Query& query)
 {
-    const char* response = nullptr;
+    const char* value = nullptr;
+    switch (query.queryCode)
+    {
+        case QueryCode::GET:
+            value = keyValueStore->get(query.key.get(), query.hash);
+            return value ? value : NOTHING;
 
-    if (query.queryCode == 1) {
-        auto value = keyValueStore->get(query.key.get(), query.hash);
-        response = value ? value : "(nil)";
-    } else {
-        response = "ERROR: Invalid query code";
+        default:
+            return INVALID_QUERY_CODE;
     }
-
-    return response;
 }
 
 server::Query::Query(QueryCode code, const char *arg_key, uint_fast64_t hash): queryCode(code), hash(hash)

@@ -21,6 +21,7 @@
 #include "sockutils.h"
 #include "conn_manager.hpp"
 #include "shard.h"
+#include "protocol.h"
 #include "constants.hpp"
 #include "coroutines.h"
 

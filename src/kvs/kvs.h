@@ -155,9 +155,12 @@ namespace kvs
             }
 
             bool set(const char *key, const char *value);
-            bool set(const char *key, const char *value, uint_fast64_t hash); // use friend functions?
+            bool set(const char *key, const char *value, uint_fast64_t hash);
 
             const char* get(const char *key);
-            const char* get(const char *key, uint_fast64_t hash); // use friend functions?
+            const char* get(const char *key, uint_fast64_t hash);
+
+            bool del(const char *key);
+            bool del(const char *key, uint_fast64_t hash);
     };
 }

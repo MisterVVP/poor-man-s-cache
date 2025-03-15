@@ -5,22 +5,11 @@
 #include "../kvs/kvs.h"
 #include "conn_manager.hpp"
 #include "constants.hpp"
+#include "protocol.h"
 
 
 namespace server {
     using namespace kvs;
-
-    /// @brief Query codes, 0: Reserved, 1: GET
-    enum QueryCode : uint_fast8_t {
-        UnknownQuery = 0,
-        GET = 1,
-    };
-
-    /// @brief Command codes, 0: Reserved, 1: SET
-    enum CommandCode : uint_fast8_t {
-        UnknownCommand = 0,
-        SET = 1,
-    };
 
      struct alignas(64) Command {
         CommandCode commandCode;

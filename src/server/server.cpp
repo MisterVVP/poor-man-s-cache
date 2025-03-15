@@ -127,7 +127,7 @@ const char *server::CacheServer::processRequest(char *requestData)
 
     if (!request) {
         ++numErrors;
-        return "ERROR: Unable to parse request";
+        return UNABLE_TO_PARSE_REQUEST_ERROR;
     }
 
     char* key = strtok_r(nullptr, " ", &com_saveptr);
@@ -147,12 +147,21 @@ const char *server::CacheServer::processRequest(char *requestData)
                 return shard.processCommand(cmd);
             }
             ++numErrors;
-            return "ERROR: Invalid SET command format";
+            return INVALID_COMMAND_FORMAT;
+        }
+
+        if (strcmp(request, "DEL") == 0) {
+            if (com_saveptr) {
+                Command cmd {CommandCode::DEL, key, com_saveptr, hash};
+                return shard.processCommand(cmd);
+            }
+            ++numErrors;
+            return INVALID_COMMAND_FORMAT;
         }
     }
 
     ++numErrors;
-    return "ERROR: Unknown command";
+    return UNKNOWN_COMMAND;
 }
 
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
