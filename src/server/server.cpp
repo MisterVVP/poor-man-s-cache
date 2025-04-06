@@ -112,12 +112,8 @@ const char *server::CacheServer::processRequest(char *requestData)
         }
 
         if (strcmp(request, "DEL") == 0) {
-            if (com_saveptr) {
-                Command cmd {CommandCode::DEL, key, com_saveptr, hash};
-                return shard.processCommand(cmd);
-            }
-            ++numErrors;
-            return INVALID_COMMAND_FORMAT;
+            Command cmd {CommandCode::DEL, key, nullptr, hash};
+            return shard.processCommand(cmd);
         }
     }
 

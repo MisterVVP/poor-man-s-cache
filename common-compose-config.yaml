@@ -37,6 +37,6 @@ services:
     environment:
       - CACHE_PORT=9001
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=5000
+      - TEST_ITERATIONS=50000
       - CACHE_TYPE=custom
       - TEST_DATA_FOLDER=./data

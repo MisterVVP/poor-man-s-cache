@@ -40,9 +40,10 @@ Local setup. 10 million requests per test suite. 24 logical threads.
 2. ~ 90 000 RPS for GET / SET / DEL tests (DEL tests failed to complete )
 3. TBD
 
-CI setup. 100 000 request total (5 000 requests per test container), 20 test containers
+CI setup. 1 million requests total (50 000 requests per test container), 20 test containers
 1. TBD
 
+#### Goals
 Next step is 200k+ requests per second on Ubuntu
 
 ### Unit tests

@@ -62,7 +62,7 @@ services:
       file: common-compose-config.yaml
       service: tests-common
     environment:
-      - TEST_ITERATIONS=100000
+      - TEST_ITERATIONS=10000000
       - CACHE_HOST=cache
     profiles:
       - tests
