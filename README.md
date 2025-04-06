@@ -45,21 +45,21 @@ Local Ubuntu, 10M records:
 ### Docker
 Run cache and tests
 ```
-docker compose --profile main --profile tests build
-docker compose --profile main up --detach
+docker compose -f docker-compose-local.yaml --profile main --profile tests build
+docker compose -f docker-compose-local.yaml --profile main up --detach
 ```
 Wait a few moments for the server to start. Check server container logs for `TCP server is ready to process incoming connections`.
 
 After the server has started, run the test script:
 ```
-docker compose --profile tests up
+docker compose -f docker-compose-local.yaml --profile tests up
 ```
 
 You can check Prometheus metrics while tests are running by opening http://localhost:8080/metrics
 
 Don't forget to shut the detached container down by issuing:
 ```
-docker compose --profile main down
+docker compose -f docker-compose-local.yaml --profile main down
 ```
 
 #### To run only unit tests
@@ -108,10 +108,10 @@ Build app using Cmake extension for VsCode, then run command below (or click a b
 
 Setup python virtual environment and run python tests from tests folder. For example:
 ```
-cd tests
-virtualenv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cd tests && \
+virtualenv .venv && \
+source .venv/bin/activate && \
+pip install -r requirements.txt && \
 python3 ./tcp_server_test.py
 ```
 > [!TIP]
@@ -153,14 +153,14 @@ callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callg
 
 To run cache and tests:
 ```
-docker compose --profile valgrind --profile tests-valgrind build
-docker compose --profile valgrind up --detach
+docker compose -f docker-compose-local.yaml --profile valgrind --profile tests-valgrind build
+docker compose -f docker-compose-local.yaml --profile valgrind up --detach
 ```
 Wait a few moments for the server to start (Valgrind mode does not require long initialization time). Check server container logs for `TCP server is ready to process incoming connections`.
 
 After the server has started, run the test script:
 ```
-docker compose --profile tests-valgrind up
+docker compose -f docker-compose-local.yaml --profile tests-valgrind up
 ```
 Check Valgrind output in container std during and after execution.
 
@@ -168,14 +168,14 @@ Check Valgrind output in container std during and after execution.
 
 To run cache and tests:
 ```
-docker compose --profile callgrind --profile tests-callgrind build
-docker compose --profile callgrind up --detach
+docker compose -f docker-compose-local.yaml --profile callgrind --profile tests-callgrind build
+docker compose -f docker-compose-local.yaml --profile callgrind up --detach
 ```
 Wait a few minutes for the server to start (Callgrind slows down startup). Check server container logs for `TCP server is ready to process incoming connections`.
 
 After the server has started, run the test script:
 ```
-docker compose --profile tests-callgrind up
+docker compose -f docker-compose-local.yaml --profile tests-callgrind up
 ```
 > [!TIP]
 > `ps aux` can help to find the server process ID inside the cache-callgrind container.
@@ -207,8 +207,8 @@ done
 
 ### To check how Redis works with the same task
 ```
-docker compose --profile redis build
-docker compose --profile redis up
+docker compose -f docker-compose-local.yaml --profile redis build
+docker compose -f docker-compose-local.yaml --profile redis up
 ```
 Check Redis metrics at http://localhost:9121/metrics
 

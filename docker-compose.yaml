@@ -2,7 +2,7 @@ services:
   cache:
     build:
       context: .
-      dockerfile: Dockerfile # replace with Dockerfile.debug to add debugging tools
+      dockerfile: Dockerfile
       args:
         - BUILD_TYPE=Release
     extends:
@@ -10,44 +10,9 @@ services:
       service: cache-common
     profiles:
       - main
+    networks:
+      - cache_network
 
-  cache-valgrind:
-    build:
-      context: .
-      dockerfile: Dockerfile.debug
-      args:
-        - BUILD_TYPE=Release
-    extends:
-      file: common-compose-config.yaml
-      service: cache-common
-    entrypoint: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--verbose", "/app/poor-man-s-cache"]
-    profiles:
-      - valgrind
-
-  cache-helgrind:
-    build:
-      context: .
-      dockerfile: Dockerfile.debug
-      args:
-        - BUILD_TYPE=Release
-    extends:
-      file: common-compose-config.yaml
-      service: cache-common
-    entrypoint: ["valgrind", "--tool=helgrind", "/app/poor-man-s-cache"]
-    profiles:
-      - helgrind
-
-  cache-callgrind:
-    build:
-      context: .
-      dockerfile: Dockerfile.callgrindd
-      args:
-        - BUILD_TYPE=Release
-    extends:
-      file: common-compose-config.yaml
-      service: cache-common
-    profiles:
-      - callgrind
 
   tests-1:
     extends:
@@ -57,6 +22,8 @@ services:
       - CACHE_HOST=cache
     profiles:
       - tests
+    networks:
+      - cache_network
 
   tests-2:
     extends:
@@ -66,6 +33,8 @@ services:
       - CACHE_HOST=cache
     profiles:
       - tests
+    networks:
+      - cache_network
 
   tests-3:
     extends:
@@ -75,6 +44,8 @@ services:
       - CACHE_HOST=cache
     profiles:
       - tests
+    networks:
+      - cache_network
 
   tests-4:
     extends:
@@ -84,6 +55,8 @@ services:
       - CACHE_HOST=cache
     profiles:
       - tests
+    networks:
+      - cache_network
 
   tests-5:
     extends:
@@ -93,90 +66,1055 @@ services:
       - CACHE_HOST=cache
     profiles:
       - tests
+    networks:
+      - cache_network
 
-  tests-valgrind:
+  tests-6:
     extends:
       file: common-compose-config.yaml
       service: tests-common
     environment:
-      - CACHE_HOST=cache-valgrind
+      - CACHE_HOST=cache
     profiles:
-      - tests-valgrind
+      - tests
+    networks:
+      - cache_network
 
-  tests-helgrind:
+  tests-7:
     extends:
       file: common-compose-config.yaml
       service: tests-common
     environment:
-      - CACHE_HOST=cache-helgrind
+      - CACHE_HOST=cache
     profiles:
-      - tests-helgrind
+      - tests
+    networks:
+      - cache_network
 
-  tests-callgrind:
+  tests-8:
     extends:
       file: common-compose-config.yaml
       service: tests-common
     environment:
-      - CACHE_HOST=cache-callgrind
+      - CACHE_HOST=cache
     profiles:
-      - tests-callgrind
+      - tests
+    networks:
+      - cache_network
 
-  redis:
-    image: redis:latest
-    container_name: redis-server
-    ports:
-      - "6379:6379"
-    command: ["redis-server"]
-    sysctls:
-        - net.ipv4.tcp_rmem=16384 4194304 536870912
-        - net.ipv4.tcp_wmem=16384 4194304 536870912
-        - net.core.somaxconn=65535
-        - net.ipv4.tcp_tw_reuse=1
-        - net.ipv4.ip_local_port_range=1024 65535
-        - net.ipv4.tcp_fin_timeout=1
-    ulimits:
-      nofile:
-        soft: "1048576"
-        hard: "1048576"
-    profiles:
-      - redis
-
-  tests_redis:
-    build:
-      context: tests
-      dockerfile: Dockerfile
+  tests-9:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
     environment:
-      - CACHE_HOST=redis
-      - CACHE_PORT=6379
-      - CACHE_TYPE=redis
-      - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=100000
+      - CACHE_HOST=cache
     profiles:
-      - redis
-    depends_on:
-      - redis
+      - tests
+    networks:
+      - cache_network
 
-  redis-exporter:
-    image: oliver006/redis_exporter:alpine
-    ports:
-      - 9121:9121
-    command:
-      - '--redis.addr=redis://redis:6379'
+  tests-10:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
     profiles:
-      - redis
-    depends_on:
-      - redis
-  
-  redis-insights:
-    image: redis/redisinsight:latest
-    ports:
-      - 5540:5540
-    profiles:
-      - redis
-    depends_on:
-      - redis
-    volumes:
-      - redis_insights_data:/data
+      - tests
+    networks:
+      - cache_network
 
-volumes:
-  redis_insights_data:  
+  tests-11:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-12:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-13:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-14:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-15:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-16:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-17:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-18:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-19:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-20:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-21:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-22:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-23:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-24:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-25:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-26:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-27:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-28:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-29:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-30:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-31:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-32:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-33:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-34:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-35:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-36:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-37:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-38:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-39:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-40:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-41:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-42:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-43:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-44:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-45:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-46:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-47:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-48:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-49:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-50:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-51:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-52:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-53:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-54:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-55:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-56:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-57:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-58:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-59:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-60:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-61:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-62:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-63:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-64:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-65:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-66:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-67:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-68:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-69:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-70:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-71:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-72:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-73:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-74:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-75:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-76:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-77:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-78:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-79:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-80:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-81:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-82:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-83:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-84:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-85:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-86:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-87:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-88:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-89:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-90:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-91:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-92:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-93:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-94:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-95:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-96:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-97:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-98:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-99:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-100:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+
+networks:
+  cache_network:
+    driver: bridge

@@ -6,6 +6,7 @@ add_executable(
   server/shard.cpp
   server/conn_manager.hpp
   server/sockutils.cpp
+  utils/time.cpp
   hash/MurmurHash3.cpp
   hash/hash.cpp
   primegen/primegen.cpp

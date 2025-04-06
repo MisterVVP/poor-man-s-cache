@@ -1,7 +1,16 @@
 #include "metrics.h"
 #include "../server/server.h"
+#include "../server/constants.hpp"
 
 using namespace metrics;
+
+static Histogram::BucketBoundaries CreateLinearBuckets(std::int64_t start, std::int64_t end, std::int64_t step) {
+    auto bucket_boundaries = Histogram::BucketBoundaries{};
+    for (auto i = start; i < end; i += step) {
+        bucket_boundaries.push_back(i);
+    }
+    return bucket_boundaries;
+}
 
 void MetricsServer::RegisterMetrics()
 {
@@ -13,13 +22,19 @@ void MetricsServer::RegisterMetrics()
 
     server_num_active_connections = &BuildGauge()
                         .Name("server_num_active_connections")
-                        .Help("Total number of active connections")
+                        .Help("Number of active connections")
                         .Register(*registry)
                         .Add({});
 
     server_num_requests_total = &BuildCounter()
                         .Name("server_num_requests_total")
                         .Help("Total number of server requests")
+                        .Register(*registry)
+                        .Add({});
+
+    server_events_per_batch = &BuildGauge()
+                        .Name("server_events_per_batch")
+                        .Help("Number of processed events per batch")
                         .Register(*registry)
                         .Add({});
 }
@@ -35,11 +50,12 @@ MetricsServer::MetricsServer(std::string metrics_url)
 
 void MetricsServer::UpdateMetrics(CacheServerMetrics& serverMetrics)
 {
-    server_num_active_connections->Set(serverMetrics.serverNumActiveConnections);
+    server_num_active_connections->Set(serverMetrics.numActiveConnections);
+    server_events_per_batch->Set(serverMetrics.eventsPerBatch);
 
-    auto numErrorsInc = serverMetrics.serverNumErrors - server_num_errors_total->Value();
+    auto numErrorsInc = serverMetrics.numErrors - server_num_errors_total->Value();
     server_num_errors_total->Increment(numErrorsInc);
 
-    auto numRequestsInc = serverMetrics.serverNumRequests - server_num_requests_total->Value();
+    auto numRequestsInc = serverMetrics.numRequests - server_num_requests_total->Value();
     server_num_requests_total->Increment(numRequestsInc);
 }

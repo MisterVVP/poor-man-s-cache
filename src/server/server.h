@@ -30,22 +30,30 @@ namespace server {
     using namespace kvs;
 
     struct CacheServerMetrics {
-        uint_fast64_t serverNumErrors = 0;
-        uint_fast32_t serverNumActiveConnections = 0;
-        uint_fast64_t serverNumRequests = 0;
+        uint_fast64_t numErrors = 0;
+        uint_fast32_t numActiveConnections = 0;
+        uint_fast64_t numRequests = 0;
+        uint_fast32_t eventsPerBatch = 0;
 
-        CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests):
-            serverNumErrors(numErrors), serverNumActiveConnections(numConnections), serverNumRequests(numRequests) {
-        }
+        CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests, uint_fast32_t eventsPerBatch):
+        numErrors(numErrors), numActiveConnections(numConnections), numRequests(numRequests), eventsPerBatch(eventsPerBatch) {}
     };
 
     struct ServerSettings {
+
         /// @brief Server port
         int port = 9001;
+
         /// @brief Number of server shards, increase for stability and performance, decrease to save server resources
-        uint_fast16_t numShards = 24;
+        uint_fast32_t numShards = 24;
+
         /// @brief Requested buffer size for server socket
         int sockBuffer = 1048576;
+
+        /// @brief Server socket backlog, depends on tcp_max_syn_backlog, ignored when tcp_syncookies = 1, this is OS dependent, by default we are trying to pre-configure our server to have at least 1048576.
+        /// Check net.core.netdev_max_backlog = 1048576, net.core.somaxconn = 1048576 settings of kernel
+        uint_fast32_t connQueueLimit = 1048576;
+
         /// @brief Enable compression of stored values. Disable if RPS and processing speed is more important than memory consumption
         bool enableCompression = false;
     };
@@ -60,39 +68,16 @@ namespace server {
                 RequestPart(char* part, size_t size, size_t location): part(part), size(size), location(location){}
             };
 
-            /// @brief ReadRequest result codes
-            enum ReqReadOperationResult : int_fast8_t{
-                Failure = -1,
-                Success = 0,
-            };
-
-            struct ReadRequestResult {
-                private:
-                    ReadRequestResult(ReqReadOperationResult res) : operationResult(res) {};
-
-                public:
-                    std::string request;
-                    ReqReadOperationResult operationResult;
-
-                    ReadRequestResult(std::string&& request, ReqReadOperationResult res) : request(std::move(request)), operationResult(res) {};
-
-                    static ReadRequestResult Success(std::string req) noexcept {
-                        return ReadRequestResult { std::move(req), ReqReadOperationResult::Success };
-                    };
-
-                    static ReadRequestResult Failure() noexcept {
-                        return ReadRequestResult { ReqReadOperationResult::Failure };
-                    };
-            };
-
             std::binary_semaphore metricsSemaphore{0};
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
+            std::atomic<uint_fast32_t> eventsPerBatch = 0;
             std::atomic<bool>& cancellationToken;
             std::atomic<bool> isRunning = false;
-            std::jthread metricsUpdaterThread;
-            ConnManager connManager;
-            
+            std::jthread metricsUpdaterThread;            
+
+            std::mutex readReqMutex;
+
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
             int port;
@@ -100,12 +85,14 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             ReadRequestResult readRequest(int client_fd);
+            AsyncReadTask readRequestAsync(int client_fd);
             const char* processRequest(char* requestData);
             HandleReqTask handleRequests(int epoll_fd);
             void sendResponse(int client_fd, const char* response, const size_t responseSize);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
 
-            EventLoop eventLoop(AcceptConnTask& ac);
+            EventLoop eventLoopIteration(AcceptConnTask& ac);
+            int eventLoop();
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});
             ~CacheServer();

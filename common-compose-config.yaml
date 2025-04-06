@@ -3,7 +3,7 @@ services:
     sysctls:
         - net.ipv4.tcp_rmem=16384 4194304 536870912
         - net.ipv4.tcp_wmem=16384 4194304 536870912
-        - net.core.somaxconn=65535
+        - net.core.somaxconn=1048576
         - net.ipv4.tcp_tw_reuse=1
         - net.ipv4.ip_local_port_range=1024 65535
         - net.ipv4.tcp_fin_timeout=1
@@ -15,9 +15,10 @@ services:
       - SERVER_PORT=9001
       - METRICS_PORT=8080
       - METRICS_HOST=0.0.0.0
-      - NUM_SHARDS=128
-      - SOCK_BUF_SIZE=4194304 # request 4 mb socket buffer, depends on system tcp_rmem and tcp_wmem settings
-      - ENABLE_COMPRESSION=true
+      - NUM_SHARDS=128 # Higher number of shards increases memory overhead but usually leads to better RPS. Extremely high number of shards may lead to key collisions. Hard limit is 4,294,967,295
+      - CONN_QUEUE_LIMIT=1048576 # Align with net.core.netdev_max_backlog = 1048576, net.core.somaxconn = 1048576 settings of kernel
+      - SOCK_BUF_SIZE=4194304 # Request 4 mb socket buffer, depends on system tcp_rmem and tcp_wmem settings
+      - ENABLE_COMPRESSION=true # Compression is reccomended to be enabled. Small values are not compressed by default. TODO: introduce compression threshold setting (now all values of > 30 bytes are compressed)
     ports:
       - "9001:9001"
       - "8080:8080"
@@ -36,6 +37,6 @@ services:
     environment:
       - CACHE_PORT=9001
       - TEST_DELAY_SEC=1
-      - TEST_ITERATIONS=50000
+      - TEST_ITERATIONS=5000
       - CACHE_TYPE=custom
       - TEST_DATA_FOLDER=./data
