@@ -21,13 +21,29 @@ Another pet project to practice.
 ## Current progress
 
 ### Functional tests
-Server is able to handle:
-- about 50000 requests per second on bare ubuntu (high end processor and half gbit internet).
-- 33000 RPS inside docker on Ubuntu (high end processor and half gbit internet)
-- 24000 RPS inside docker on Windows (same hardware as ubuntu above)
-- 7000 RPS on poor github runner (likely within a container as well)
 
-Next step is 100k+ requests per second
+#### Test setups
+
+Local setup (all with high end processor and half gbit internet) variations.
+Lunix kernel settings used as much as possible for both local and docker setups can be found in local_server_setup.bash
+
+1. Ubuntu
+2. Docker on Ubuntu
+3. Docker on Windows
+
+CI setup (free github hosted runner hardware) variations
+1. Default
+
+#### Test details results
+Local setup. 10 million requests per test suite. 24 logical threads.
+1. ~ 110 000 RPS for GET / SET / DEL tests,  ~ 140 000 RPS for  (SET key, GET key, GET non_existent_key) workflow test
+2. ~ 90 000 RPS for GET / SET / DEL tests (DEL tests failed to complete )
+3. TBD
+
+CI setup. 100 000 request total (5 000 requests per test container), 20 test containers
+1. TBD
+
+Next step is 200k+ requests per second on Ubuntu
 
 ### Unit tests
 
@@ -117,10 +133,22 @@ python3 ./tcp_server_test.py
 > [!TIP]
 > You can change the number of request sequences in tests via export TEST_ITERATIONS=100000
 
+#### Check memory leaks (valgrind)
+
+Run (e.g. for Release build)
+```
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose ./out/build/Debug/src/poor-man-s-cache
+```
+
+Run python tests, e.g. from tests folder:
+```
+python3 ./tcp_server_test.py
+```
+
 #### Profiling (callgrind)
 Profiling setup is similar for all Valgrind tools, below is an example for callgrind. For callgrind, Debug build is recommended, but not required.
 
-Run (for Debug build)
+Run (e.g. for Debug build)
 ```
 valgrind --tool=callgrind --simulate-cache=yes ./out/build/Debug/src/poor-man-s-cache
 ```
@@ -225,18 +253,14 @@ Check Redis metrics at http://localhost:9121/metrics
 > Redis Pipelines could be something to try out when testing against Redis, but it won't be fair comparison until we implement batch processing within a single connection
 
 ## TODO
-> [!NOTE]
-> Data compression is quite inneficient so far and is disabled by default
-
 - Integrate valgrind checks into CI
 - Add docker image to releases and create helm chart
 - More corouties
 - Work on error responses from cache server
+- Support key expiration, support more operations.
 - Check if we can reduce memory usage during decompression as well.
-- Python code inside 'tests' folder deserves refactoring (low priority)
 - Integration between the main server and the metrics server can be improved.
 - Continue improving collision resolution (endless task, tbh...).
-- Support key expiration, support more operations.
 - Check if there are better ways of avoiding double hash calculation in the server and KVS (right now we just provide extra public methods in `kvs.cpp` which accept hash as an argument).
 - There is an opportunity to try out Robot Framework for testing & writing test cases (I've never used that tool). OR just use [Cucumber for Golang aka Godog](https://github.com/cucumber/godog) tests, which I know.
 - Write more documentation and describe the communication protocol.

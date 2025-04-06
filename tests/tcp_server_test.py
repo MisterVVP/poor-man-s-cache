@@ -18,7 +18,8 @@ host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
 delay_sec = float(os.environ.get('TEST_DELAY_SEC', 1))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
-pool_size = int(os.environ.get('TEST_POOL_SIZE', multiprocessing.cpu_count()))
+num_processes = int(os.environ.get('TEST_POOL_SIZE', multiprocessing.cpu_count()))
+pool_size = 1
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
 MSG_SEPARATOR = '\x1F'
 ENCODED_SEPARATOR = MSG_SEPARATOR.encode()
@@ -149,30 +150,72 @@ def build_iteration_func(name):
 
     return workflow if name == "workflow" else op
 
-async def safe_call(coro):
-    try:
-        return await coro
-    except Exception as e:
-        logger.error(f"Error in task: {e}")
+async def worker_main_single_connection(start_idx, end_idx, task_type):
+    reader, writer = await asyncio.open_connection(host, port)
+
+    async def send_command(command: str):
+        command += MSG_SEPARATOR
+        writer.write(command.encode())
+        await writer.drain()
+
+        response = bytearray()
+        if command.startswith(("SET", "DEL")):
+            response = await reader.readuntil(ENCODED_SEPARATOR)
+        else:
+            while True:
+                chunk = await reader.read(8096)
+                if not chunk:
+                    break
+                response.extend(chunk)
+                if ENCODED_SEPARATOR in chunk:
+                    break
+        return response.decode().rstrip(MSG_SEPARATOR)
+
+    async def send_with_retry(command, expected_response, retries=1):
+        for attempt in range(retries + 1):
+            try:
+                response = await send_command(command)
+                if response == expected_response:
+                    return True
+            except Exception as e:
+                logger.error(f"Exception during '{command}': {e}")
+            if attempt < retries:
+                await asyncio.sleep(delay_sec / 2)
+        logger.error(f"Command failed after retries: {command}")
         return False
 
+    results = []
+    for i in range(start_idx, end_idx):
+        if task_type == "set":
+            result = await send_with_retry(f"SET key{i} value{i}", "OK")
+        elif task_type == "get":
+            result = await send_with_retry(f"GET key{i}", f"value{i}")
+        elif task_type == "del":
+            result = await send_with_retry(f"DEL key{i}", "OK")
+        elif task_type == "workflow":
+            result = (await send_with_retry(f"SET key{i} value{i}", "OK") and
+                      await send_with_retry(f"GET key{i}", f"value{i}") and
+                      await send_with_retry("GET non_existent_key", "(nil)"))
+        else:
+            raise ValueError("Unknown task_type")
+        results.append(result)
+
+    writer.close()
+    await writer.wait_closed()
+    return len(results) - sum(results)  # number of failures
+
 def run_worker(start_idx, end_idx, task_type):
-    async def worker_main():
-        pool = ConnectionPool(1)
-        await pool.initialize()
-        func = build_iteration_func(task_type)
+    return asyncio.run(worker_main_single_connection(start_idx, end_idx, task_type))
 
-        tasks = [asyncio.create_task(func(i, pool)) for i in range(start_idx, end_idx)]
-        results = await asyncio.gather(*tasks)
-
-        await pool.close()  # <- Properly close here
-        return len(results) - sum(results)  # return just failures
-
-    return asyncio.run(worker_main())
-
+async def run_preload():
+    pool = ConnectionPool(pool_size)
+    await pool.initialize()
+    try:
+        await preload_json_files(pool)
+    finally:
+        await pool.close()
 
 def run_parallel(task_type, test_name, requests_multiplier=1):
-    num_processes = pool_size
     chunk_size = iterations_count // num_processes
     args_list = [
         (i * chunk_size, (i + 1) * chunk_size if i != num_processes - 1 else iterations_count, task_type)
@@ -206,7 +249,7 @@ def main():
     if run_del_tests(): sys.exit(1)
     time.sleep(delay_sec)
 
-    asyncio.run(preload_json_files(ConnectionPool(pool_size)))
+    asyncio.run(run_preload()) 
     time.sleep(delay_sec)
 
     result = run_workflow_tests()

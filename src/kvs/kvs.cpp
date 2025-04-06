@@ -264,7 +264,6 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
                 return true;
             }
         }
-        numCollisions++;
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
 #ifndef NDEBUG

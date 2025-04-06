@@ -63,9 +63,9 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         throw std::system_error(errno, std::system_category(), "Listen failed");
     }
 
-#ifndef NDEBUG
+    #ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards..." << std::endl;
-#endif
+    #endif
     serverShards.reserve(numShards);
     KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
     for (int i = 0; i < numShards; ++i) {
@@ -125,7 +125,7 @@ const char *server::CacheServer::processRequest(char *requestData)
     return UNKNOWN_COMMAND;
 }
 
-HandleReqTask CacheServer::handleRequests(int epoll_fd)
+HandleReqTask CacheServer::handleRequests(int epoll_fd, ConnManager& connManager)
 {
     while (!cancellationToken) {
 
@@ -148,7 +148,6 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
 
         numRequests += event_count;
         eventsPerBatch = event_count;
-        std::vector<int> unprocessedFds;
 
         for (int i = 0; i < event_count; ++i) {
             auto client_fd = epoll_events[i].data.fd;
@@ -167,16 +166,15 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 do {
                     readResult = asyncRead.readResult();
                 } while(!readResult.has_value());
+
                 if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
                     //connManager.closeConnection(client_fd);
                     ++numErrors;
                     continue;
                 }
 
-                // If the client has explicitly closed the connection
-                if (readResult.value().operationResult == ReqReadOperationResult::AwaitingForData) {
-                    //connManager.closeConnection(client_fd);
-                    unprocessedFds.emplace_back(client_fd);
+                if (readResult.value().operationResult == ReqReadOperationResult::ConnectionClosed) {
+                    connManager.closeConnection(client_fd);          
                     continue;
                 }
 
@@ -190,7 +188,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
         #ifndef NDEBUG
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-        std::cout << "handleRequests finished in " << duration.count() << " ns ! event_count = " << event_count << ", unprocessedFds.size() = " << unprocessedFds.size() << std::endl;
+        std::cout << "handleRequests finished in " << duration.count() << " ns ! event_count = " << event_count << std::endl;
         #endif
 
         co_return;
@@ -223,7 +221,7 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
         }
 
         if (bytes_read == 0) {
-            co_return ReadRequestResult::AwaitingForData();
+            co_return ReadRequestResult::ConnectionClosed();
         }
 
         if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
@@ -288,9 +286,10 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
     
-    std::vector<std::jthread> loopWorkers;
+
     std::atomic<int> executionResult;
-    const auto numThreads = 2; //std::thread::hardware_concurrency();
+    std::vector<std::jthread> loopWorkers;
+    const auto numThreads = 1; // TODO: right now we are not thread safe, but there might be potential in future !!! std::min(NUM_WORKERS, std::thread::hardware_concurrency());
     for (int i = 0; i < numThreads; ++i) {
         loopWorkers.emplace_back(std::jthread([this, &executionResult](std::stop_token stopToken)
         {
@@ -310,12 +309,12 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     return executionResult;
 }
 
-EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac)
+EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac, ConnManager& connManager)
 {
     auto eStatus = co_await ac;
     
     if (eStatus.status == ServerStatus::Processing) {
-        auto hrt = handleRequests(eStatus.epoll_fd);
+        auto hrt = handleRequests(eStatus.epoll_fd, connManager);
         co_await hrt;
     }
 
@@ -332,7 +331,7 @@ int CacheServer::eventLoop() {
     auto ac = connManager.acceptConnections(server_fd);
     int rCode = 0;
     do {
-        auto loop = eventLoopIteration(ac);
+        auto loop = eventLoopIteration(ac, connManager);
         rCode = loop.finalResult();
     } while(!cancellationToken && rCode > 0);
 

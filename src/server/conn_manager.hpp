@@ -18,7 +18,7 @@ namespace server {
     enum ReqReadOperationResult : int_fast8_t {
         Failure = -2,
         Success = 0,
-        AwaitingForData = 1,
+        ConnectionClosed = 1,
     };
 
     struct ReadRequestResult {
@@ -39,8 +39,8 @@ namespace server {
                 return ReadRequestResult { ReqReadOperationResult::Failure };
             };
 
-            static ReadRequestResult AwaitingForData() noexcept {
-                return ReadRequestResult { ReqReadOperationResult::AwaitingForData };
+            static ReadRequestResult ConnectionClosed() noexcept {
+                return ReadRequestResult { ReqReadOperationResult::ConnectionClosed };
             };
     };
 
@@ -51,8 +51,10 @@ namespace server {
             std::atomic<bool>& cancellationToken;
             std::atomic<uint_fast32_t> activeConnectionsCounter;
 
-            int registerConnection(int epoll_fd, int client_fd){
-                ++activeConnectionsCounter;
+            int registerConnection(int epoll_fd, int client_fd) {
+                #ifndef NDEBUG
+                std::cout << "Adding client_fd = " << client_fd << " to epoll_fd = " << epoll_fd << std::endl;
+                #endif
                 setNonBlocking(client_fd);
                 epoll_event event{};
                 event.events = EPOLLIN | EPOLLET;
@@ -63,6 +65,7 @@ namespace server {
                     closeConnection(client_fd);
                     return -1;
                 }
+                ++activeConnectionsCounter;
                 return 0; 
             };
 
@@ -74,9 +77,9 @@ namespace server {
                 auto closeRes = close(fd);
                 if (closeRes == -1) {
                     perror("Error when closing socket descriptor");
-                } else {
-                    --activeConnectionsCounter;
                 }
+
+                --activeConnectionsCounter;                
             };
 
             AcceptConnTask acceptConnections(int server_fd) {
@@ -85,22 +88,24 @@ namespace server {
                 socklen_t client_len = sizeof(client_address);
                 do {
                     auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
-                    if (client_fd >= 0) {                       
+                    if (client_fd >= 0) {
                         if(registerConnection(epoll_fd, client_fd) == -1) {
                             continue;
-                        };
-
-                        co_yield EpollStatus::Processing(epoll_fd);                        
+                        };                      
                     } else {
-                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            continue;
-                        } else if (errno == EINTR) {
+                        if (errno == EINTR) {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;
+                        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            co_yield EpollStatus::Running(epoll_fd);
+                        } else {
+                            perror("Failed to accept connection");
                         }
-                        perror("Failed to accept connection");
-                        co_yield EpollStatus::Running(epoll_fd);
-                    }                    
+                    }
+
+                    if (activeConnectionsCounter > 0) {
+                        co_yield EpollStatus::Processing(epoll_fd);  
+                    }
                 } while (!cancellationToken);
 
                 if (epoll_fd >= 0) {

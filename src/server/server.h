@@ -77,6 +77,7 @@ namespace server {
             std::jthread metricsUpdaterThread;            
 
             std::mutex readReqMutex;
+            std::mutex writeMutex;
 
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
@@ -84,14 +85,13 @@ namespace server {
             int server_fd;
             epoll_event epoll_events[MAX_EVENTS];
 
-            ReadRequestResult readRequest(int client_fd);
             AsyncReadTask readRequestAsync(int client_fd);
             const char* processRequest(char* requestData);
-            HandleReqTask handleRequests(int epoll_fd);
+            HandleReqTask handleRequests(int epoll_fd, ConnManager& connManager);
             void sendResponse(int client_fd, const char* response, const size_t responseSize);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
 
-            EventLoop eventLoopIteration(AcceptConnTask& ac);
+            EventLoop eventLoopIteration(AcceptConnTask& ac, ConnManager& connManager);
             int eventLoop();
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});

@@ -10,6 +10,8 @@ services:
       service: cache-common
     profiles:
       - main
+    networks:
+      - cache_network
 
   cache-valgrind:
     build:
@@ -23,6 +25,8 @@ services:
     entrypoint: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--verbose", "/app/poor-man-s-cache"]
     profiles:
       - valgrind
+    networks:
+      - cache_network
 
   cache-helgrind:
     build:
@@ -36,6 +40,8 @@ services:
     entrypoint: ["valgrind", "--tool=helgrind", "/app/poor-man-s-cache"]
     profiles:
       - helgrind
+    networks:
+      - cache_network
 
   cache-callgrind:
     build:
@@ -48,51 +54,20 @@ services:
       service: cache-common
     profiles:
       - callgrind
+    networks:
+      - cache_network
 
-  tests-1:
+  tests:
     extends:
       file: common-compose-config.yaml
       service: tests-common
     environment:
+      - TEST_ITERATIONS=100000
       - CACHE_HOST=cache
     profiles:
       - tests
-
-  tests-2:
-    extends:
-      file: common-compose-config.yaml
-      service: tests-common
-    environment:
-      - CACHE_HOST=cache
-    profiles:
-      - tests
-
-  tests-3:
-    extends:
-      file: common-compose-config.yaml
-      service: tests-common
-    environment:
-      - CACHE_HOST=cache
-    profiles:
-      - tests
-
-  tests-4:
-    extends:
-      file: common-compose-config.yaml
-      service: tests-common
-    environment:
-      - CACHE_HOST=cache
-    profiles:
-      - tests
-
-  tests-5:
-    extends:
-      file: common-compose-config.yaml
-      service: tests-common
-    environment:
-      - CACHE_HOST=cache
-    profiles:
-      - tests
+    networks:
+      - cache_network
 
   tests-valgrind:
     extends:
@@ -102,6 +77,8 @@ services:
       - CACHE_HOST=cache-valgrind
     profiles:
       - tests-valgrind
+    networks:
+      - cache_network
 
   tests-helgrind:
     extends:
@@ -111,6 +88,8 @@ services:
       - CACHE_HOST=cache-helgrind
     profiles:
       - tests-helgrind
+    networks:
+      - cache_network
 
   tests-callgrind:
     extends:
@@ -120,6 +99,8 @@ services:
       - CACHE_HOST=cache-callgrind
     profiles:
       - tests-callgrind
+    networks:
+      - cache_network
 
   redis:
     image: redis:latest
@@ -180,3 +161,8 @@ services:
 
 volumes:
   redis_insights_data:  
+
+
+networks:
+  cache_network:
+    driver: bridge
