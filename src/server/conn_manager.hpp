@@ -3,6 +3,7 @@
 #include <atomic>
 #include <mutex>
 #include <coroutine>
+#include <unordered_map>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -44,12 +45,16 @@ namespace server {
             };
     };
 
+    struct ConnectionData {
+        timespec lastActivity {0, 0};
+        int epoll_fd = -1;
+    }
+
     class ConnManager {
-        private:
-            int epoll_fd;
         public:
             std::atomic<bool>& cancellationToken;
             std::atomic<uint_fast32_t> activeConnectionsCounter;
+            std::unordered_map<int, ConnectionData> connections;
 
             int registerConnection(int epoll_fd, int client_fd) {
                 #ifndef NDEBUG
@@ -65,8 +70,30 @@ namespace server {
                     closeConnection(client_fd);
                     return -1;
                 }
+                timespec time{0, 0};
+                if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
+                    auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd );
+                    if (!success) {
+                        std::cerr << "Error saving connection info for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
+                        return -1;
+                    }
+                } else {
+                    perror("clock_gettime() failed when registering connection");
+                    return -1;
+                }
                 ++activeConnectionsCounter;
                 return 0; 
+            };
+
+            bool updateActivity(int fd) {
+                timespec time{0, 0};
+                if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
+                    connections[fd].lastActivity = time;
+                } else {
+                    perror("clock_gettime() failed when updating connection activity");
+                    return false;
+                }
+                return true;
             };
 
             void closeConnection(int fd) noexcept {
@@ -79,10 +106,16 @@ namespace server {
                     perror("Error when closing socket descriptor");
                 }
 
-                --activeConnectionsCounter;                
+                --activeConnectionsCounter;
+                connections.erase(fd);
             };
 
             AcceptConnTask acceptConnections(int server_fd) {
+                co_yield EpollStatus::NotReady();
+                auto epoll_fd = epoll_create1(0);
+                if (epoll_fd == -1) {
+                    throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
+                }
                 co_yield EpollStatus::Running(epoll_fd);
                 sockaddr_in client_address;
                 socklen_t client_len = sizeof(client_address);
@@ -93,6 +126,21 @@ namespace server {
                             continue;
                         };                      
                     } else {
+                        timespec now{0, 0};
+                        if (clock_gettime(CLOCK_MONOTONIC_COARSE, &now) == 0) {
+                            for (auto it = connections.begin(); it != connections.end();) {
+                                auto diff = now - it->second.lastActivity;
+                                if (diff.tv_sec > MAX_CONN_LIFETIME_SEC) {
+                                    closeConnection(it->first);
+                                    it = connections.erase(it);
+                                } else {
+                                    ++it;
+                                }
+                            }
+                        } else {
+                            perror("clock_gettime() failed when validating connections");
+                            return -1;
+                        }
                         if (errno == EINTR) {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;
@@ -118,12 +166,7 @@ namespace server {
                 }            
             }
 
-            ConnManager(std::atomic<bool>& cToken): cancellationToken(cToken), activeConnectionsCounter(0) {
-                epoll_fd = epoll_create1(0);
-                if (epoll_fd == -1) {
-                    throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
-                }
-            }
+            ConnManager(std::atomic<bool>& cToken): cancellationToken(cToken), activeConnectionsCounter(0) {}
     };
 
     class AsyncReadTask : NonCopyable {

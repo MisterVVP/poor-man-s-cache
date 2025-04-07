@@ -84,14 +84,15 @@ namespace server {
             int port;
             int server_fd;
             epoll_event epoll_events[MAX_EVENTS];
+            ConnManager connManager;
 
             AsyncReadTask readRequestAsync(int client_fd);
             const char* processRequest(char* requestData);
-            HandleReqTask handleRequests(int epoll_fd, ConnManager& connManager);
+            HandleReqTask handleRequests(int epoll_fd);
             void sendResponse(int client_fd, const char* response, const size_t responseSize);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
 
-            EventLoop eventLoopIteration(AcceptConnTask& ac, ConnManager& connManager);
+            EventLoop eventLoopIteration(AcceptConnTask& ac);
             int eventLoop();
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});

@@ -3,7 +3,7 @@
 using namespace server;
 
 CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings):
-    cancellationToken(cToken), numShards(settings.numShards), port(settings.port)
+    cancellationToken(cToken), numShards(settings.numShards), port(settings.port), connManager(cToken)
 {
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -121,7 +121,7 @@ const char *server::CacheServer::processRequest(char *requestData)
     return UNKNOWN_COMMAND;
 }
 
-HandleReqTask CacheServer::handleRequests(int epoll_fd, ConnManager& connManager)
+HandleReqTask CacheServer::handleRequests(int epoll_fd)
 {
     while (!cancellationToken) {
 
@@ -148,7 +148,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd, ConnManager& connManager
         for (int i = 0; i < event_count; ++i) {
             auto client_fd = epoll_events[i].data.fd;
             if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
-                //connManager.closeConnection(client_fd);
+                connManager.closeConnection(client_fd);
                 continue;
             }
 
@@ -164,7 +164,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd, ConnManager& connManager
                 } while(!readResult.has_value());
 
                 if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
-                    //connManager.closeConnection(client_fd);
+                    connManager.closeConnection(client_fd);
                     ++numErrors;
                     continue;
                 }
@@ -174,6 +174,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd, ConnManager& connManager
                     continue;
                 }
 
+                connManager.updateActivity(client_fd);
                 auto response = processRequest(readResult.value().request.data());
                 auto responseSize = strlen(response);
 
@@ -267,7 +268,7 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, 0 /*TODO: fix metrics *connManager.activeConnectionsCounter*/, numRequests, eventsPerBatch));
+        channel.push(CacheServerMetrics(numErrors, 0 connManager.activeConnectionsCounter, numRequests, eventsPerBatch));
     }
 }
 
@@ -305,12 +306,12 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     return executionResult;
 }
 
-EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac, ConnManager& connManager)
+EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac)
 {
     auto eStatus = co_await ac;
     
     if (eStatus.status == ServerStatus::Processing) {
-        auto hrt = handleRequests(eStatus.epoll_fd, connManager);
+        auto hrt = handleRequests(eStatus.epoll_fd);
         co_await hrt;
     }
 
@@ -323,7 +324,6 @@ EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac, ConnManage
 }
 
 int CacheServer::eventLoop() {
-    ConnManager connManager { cancellationToken };
     auto ac = connManager.acceptConnections(server_fd);
     int rCode = 0;
     do {

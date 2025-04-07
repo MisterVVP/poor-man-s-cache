@@ -27,8 +27,11 @@ static constexpr uint_fast32_t ASYNC_RESPONSE_SIZE_THRESHOLD = 1048576;
 /// @brief Event batching delay - time to wait until next data arrival for batch processing
 static constexpr long BATCHING_DELAY_NSEC = 500000; // 0.5 msec
 
-
+/// @brief Starting number of event loop workers
 static constexpr uint_fast32_t BATCH_MIN_SIZE = 32;
 
 /// @brief Starting number of event loop workers
 static constexpr unsigned int NUM_WORKERS = 4;
+
+/// @brief Max client connection lifetime
+static constexpr long MAX_CONN_LIFETIME_SEC = 300; // 5 min
