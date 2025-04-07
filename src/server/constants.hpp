@@ -4,7 +4,7 @@
 #include <future>
 
 #define MSG_SEPARATOR 0x1F
-#define EPOLL_WAIT_TIMEOUT -1
+#define EPOLL_WAIT_TIMEOUT_MSEC 100 // TODO: make configurable
 #define MAX_EVENTS 2048 // TODO: make configurable
 #define MAX_REQUEST_SIZE 536870912
 #define READ_BUFFER_SIZE 16384
@@ -34,4 +34,4 @@ static constexpr uint_fast32_t BATCH_MIN_SIZE = 32;
 static constexpr unsigned int NUM_WORKERS = 4;
 
 /// @brief Max client connection lifetime
-static constexpr long MAX_CONN_LIFETIME_SEC = 300; // 5 min
+static constexpr long MAX_CONN_LIFETIME_SEC = 300; // 5 min // TODO: make configurable

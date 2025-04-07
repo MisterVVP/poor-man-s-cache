@@ -8,6 +8,7 @@
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include "../kvs/kvs.h"
+#include "../utils/time.h"
 #include "../non_copyable.h"
 #include "coroutines.h"
 #include "sockutils.h"
@@ -19,7 +20,7 @@ namespace server {
     enum ReqReadOperationResult : int_fast8_t {
         Failure = -2,
         Success = 0,
-        ConnectionClosed = 1,
+        AwaitingData = 1,
     };
 
     struct ReadRequestResult {
@@ -40,22 +41,18 @@ namespace server {
                 return ReadRequestResult { ReqReadOperationResult::Failure };
             };
 
-            static ReadRequestResult ConnectionClosed() noexcept {
-                return ReadRequestResult { ReqReadOperationResult::ConnectionClosed };
+            static ReadRequestResult AwaitingData() noexcept {
+                return ReadRequestResult { ReqReadOperationResult::AwaitingData };
             };
     };
 
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
-    }
+    };
 
     class ConnManager {
-        public:
-            std::atomic<bool>& cancellationToken;
-            std::atomic<uint_fast32_t> activeConnectionsCounter;
-            std::unordered_map<int, ConnectionData> connections;
-
+        private:
             int registerConnection(int epoll_fd, int client_fd) {
                 #ifndef NDEBUG
                 std::cout << "Adding client_fd = " << client_fd << " to epoll_fd = " << epoll_fd << std::endl;
@@ -85,6 +82,28 @@ namespace server {
                 return 0; 
             };
 
+            void validateConnections() {
+                timespec now{0, 0};
+                if (clock_gettime(CLOCK_MONOTONIC_COARSE, &now) == 0) {
+                    for (auto it = connections.begin(); it != connections.end();) {
+                        auto diff = now - it->second.lastActivity;
+                        if (diff.tv_sec > MAX_CONN_LIFETIME_SEC) {
+                            closeConnection(it->first);
+                            it = connections.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
+                } else {
+                    perror("clock_gettime() failed when validating connections");
+                }
+            };
+
+        public:
+            std::atomic<bool>& cancellationToken;
+            std::atomic<uint_fast32_t> activeConnectionsCounter;
+            std::unordered_map<int, ConnectionData> connections;
+
             bool updateActivity(int fd) {
                 timespec time{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
@@ -107,7 +126,6 @@ namespace server {
                 }
 
                 --activeConnectionsCounter;
-                connections.erase(fd);
             };
 
             AcceptConnTask acceptConnections(int server_fd) {
@@ -122,25 +140,11 @@ namespace server {
                 do {
                     auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
                     if (client_fd >= 0) {
-                        if(registerConnection(epoll_fd, client_fd) == -1) {
+                        if (registerConnection(epoll_fd, client_fd) == -1) {
                             continue;
                         };                      
                     } else {
-                        timespec now{0, 0};
-                        if (clock_gettime(CLOCK_MONOTONIC_COARSE, &now) == 0) {
-                            for (auto it = connections.begin(); it != connections.end();) {
-                                auto diff = now - it->second.lastActivity;
-                                if (diff.tv_sec > MAX_CONN_LIFETIME_SEC) {
-                                    closeConnection(it->first);
-                                    it = connections.erase(it);
-                                } else {
-                                    ++it;
-                                }
-                            }
-                        } else {
-                            perror("clock_gettime() failed when validating connections");
-                            return -1;
-                        }
+                        validateConnections();
                         if (errno == EINTR) {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;

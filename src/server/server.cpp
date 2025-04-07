@@ -130,15 +130,16 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
         std::cout << "handleRequests started! epoll_fd = " << epoll_fd << std::endl;
         #endif
 
-        int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
+        int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
         if (event_count == -1) {
-            if (errno == EINTR) {
-                continue;
+            if (errno != EINTR) {
+                perror("epoll_wait failed");
             }
-            perror("epoll_wait failed");
             co_return;
         } else if (event_count == 0) {
+            #ifndef NDEBUG
             std::cout << "handleRequests finished without events to handle!" << std::endl;
+            #endif
             co_return;
         }
 
@@ -157,6 +158,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 std::cout << "readRequest client_fd = " << client_fd  << ", epoll_fd = " << epoll_fd << std::endl;
                 #endif
 
+                //TODO: fix this busy looping
                 auto asyncRead = readRequestAsync(client_fd);
                 std::optional<ReadRequestResult> readResult;
                 do {
@@ -164,13 +166,11 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 } while(!readResult.has_value());
 
                 if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
-                    connManager.closeConnection(client_fd);
                     ++numErrors;
                     continue;
                 }
 
-                if (readResult.value().operationResult == ReqReadOperationResult::ConnectionClosed) {
-                    connManager.closeConnection(client_fd);          
+                if (readResult.value().operationResult == ReqReadOperationResult::AwaitingData) {
                     continue;
                 }
 
@@ -218,7 +218,7 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
         }
 
         if (bytes_read == 0) {
-            co_return ReadRequestResult::ConnectionClosed();
+            co_return ReadRequestResult::AwaitingData();
         }
 
         if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
@@ -268,7 +268,7 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, 0 connManager.activeConnectionsCounter, numRequests, eventsPerBatch));
+        channel.push(CacheServerMetrics(numErrors, connManager.activeConnectionsCounter, numRequests, eventsPerBatch));
     }
 }
 
@@ -327,7 +327,7 @@ int CacheServer::eventLoop() {
     auto ac = connManager.acceptConnections(server_fd);
     int rCode = 0;
     do {
-        auto loop = eventLoopIteration(ac, connManager);
+        auto loop = eventLoopIteration(ac);
         rCode = loop.finalResult();
     } while(!cancellationToken && rCode > 0);
 

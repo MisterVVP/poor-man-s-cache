@@ -254,6 +254,11 @@ Check Redis metrics at http://localhost:9121/metrics
 > Redis Pipelines could be something to try out when testing against Redis, but it won't be fair comparison until we implement batch processing within a single connection
 
 ## TODO
+- Revisit batching strategies on server
+- Consider support for pipelining requests
+- Add active connections checks
+- Revisit multithreading on server
+- Test edge case scenarios
 - Integrate valgrind checks into CI
 - Add docker image to releases and create helm chart
 - More corouties
