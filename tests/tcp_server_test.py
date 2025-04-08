@@ -1,215 +1,258 @@
-import socket
-import logging
+import os
 import sys
 import time
-import os
-import redis
-from multiprocessing import Pool, cpu_count
+import logging
+import asyncio
+import multiprocessing
 
-# configure logger
+# Logger config
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# Configuration from environment or defaults
+# Env config
 host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
-delay_sec = int(os.environ.get('TEST_DELAY_SEC', 1))
+delay_sec = float(os.environ.get('TEST_DELAY_SEC', 1))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
-cache_type = os.environ.get('CACHE_TYPE', 'custom')  # "custom" or "redis"
-redis_password = os.environ.get('REDIS_PASSWORD', None)  # Only for Redis
+num_processes = int(os.environ.get('TEST_POOL_SIZE', multiprocessing.cpu_count()))
+pool_size = 1
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
+MSG_SEPARATOR = '\x1F'
+ENCODED_SEPARATOR = MSG_SEPARATOR.encode()
 
-redis_client = None
-if cache_type == 'redis':
-    redis_client = redis.StrictRedis(host=host, port=port, password=redis_password, decode_responses=True)
+class ConnectionPool:
+    def __init__(self, size):
+        self.size = size
+        self.connections = asyncio.Queue()
+        self.initialized = False
 
-def calc_thread_pool_size():
-    thread_pool_size = 2
-    if iterations_count >= 10000000:
-        thread_pool_size = 24
-    elif iterations_count >= 1000000:
-        thread_pool_size = 16
-    elif iterations_count >= 100000:
-        thread_pool_size = 8
-    elif iterations_count >= 10000:
-        thread_pool_size = 4
-    return min(thread_pool_size, cpu_count())
+    async def initialize(self):
+        for _ in range(self.size):
+            reader, writer = await asyncio.open_connection(host, port)
+            await self.connections.put((reader, writer))
+        self.initialized = True
 
-def send_command_to_custom_cache(command: str, bufSize: int):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((host, port))
-            command += "\x1F"
-            s.sendall(command.encode('utf-8'))
-            if command.startswith("SET"):
-                response = s.recv(bufSize).decode('utf-8')
-                return response.strip().rstrip("\x1F")
-            else:
-                s.settimeout(10)
-                response = bytearray()
-                while True:
-                    try:
-                        chunk = s.recv(bufSize)
-                        if not chunk:
-                            break
-                        response.extend(chunk)
-                        if b'\x1F' in chunk:
-                            break
-                    except socket.timeout:
-                        logger.error("Socket read timeout")
-                        exit(1)
-                    except socket.error as e:
-                        logger.error(e)
-                        exit(1)
-                return response.decode('utf-8').strip().rstrip("\x1F")
-    except socket.error as e:
-        return f"Socket error: {e}"
-    except Exception as e:
-        return f"Error: {e}"
+    async def acquire(self):
+        return await self.connections.get()
 
-def send_command_to_redis(command: str):
-    try:
-        parts = command.split(" ", 2)
-        cmd = parts[0].upper()
-        if cmd == "SET" and len(parts) == 3:
-            key, value = parts[1], parts[2]
-            response = redis_client.set(key, value)
-            return "+OK" if response else "ERROR"
-        elif cmd == "GET" and len(parts) == 2:
-            key = parts[1]
-            response = redis_client.get(key)
-            return response if response else "nil"
-        else:
-            return redis_client.execute_command(*command.split())
-    except redis.RedisError as e:
-        return f"Redis error: {e}"
-    except Exception as e:
-        return f"Error: {e}"
+    async def release(self, conn):
+        await self.connections.put(conn)
 
-def send_command(command: str, bufSize=1024):
-    if cache_type == 'redis':
-        return send_command_to_redis(command)
-    return send_command_to_custom_cache(command, bufSize)
+    async def close(self):
+        while not self.connections.empty():
+            reader, writer = await self.connections.get()
+            writer.close()
+            await writer.wait_closed()
 
-def send_with_retry(command: str, expected: str, retries: int = 1, delay: float = None, bufSize: int = 1024):
-    if delay is None:
-        delay = delay_sec / 2
-    response = send_command(command, bufSize)
-    if response != expected:
-        logger.debug(f"Retrying request: {command}")
-        time.sleep(delay)
-        response = send_command(command, bufSize)
-    return response
-
-def run_parallel(iter_func, test_name: str, requests_multiplier: int = 3):
-    thread_pool_size = calc_thread_pool_size()
-    logger.info(f"Running {test_name} with {iterations_count} iterations and thread pool size {thread_pool_size}...\n")
-    start = time.time()
-    with Pool(thread_pool_size) as pool:
-        results = pool.map(iter_func, range(iterations_count))
-        failed_iterations = sum(not res for res in results)
-    end = time.time()
-    test_time = end - start
-    num_requests = requests_multiplier * iterations_count
-    rps = num_requests / test_time
-    logger.info(f"{test_name} completed. Test time: {test_time:.2f} seconds. Average RPS: {rps:.2f}\n")
-    return 1 if failed_iterations > 0 else 0
-
-def preload_json_files():
-    if not os.path.exists(data_folder):
-        logger.warning(f"Data folder '{data_folder}' does not exist. Skipping JSON preloading.")
-        return
-    
-    json_files = [f for f in os.listdir(data_folder) if f.endswith(".json")]
-    
-    for file_name in json_files:
-        file_path = os.path.join(data_folder, file_name)
+    async def discard(self, conn):
+        reader, writer = conn
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                json_content = f.read()
-            key = file_name.rsplit('.', maxsplit=1)[0]
-            requestSize = len(json_content)
-            isBigData = requestSize > 1000000
-            readBufferSize = 131072 if isBigData else 1024
+            writer.close()
+            await writer.wait_closed()
+        except:
+            pass
 
-            response = send_command(f'SET {key} {json_content}')
-            expectedResponse = "+OK" if cache_type == 'redis' else "OK"
-            if response != expectedResponse:
-                logger.error(f"Failed to store {key} in cache. Response: {response}")
-                exit(1)
-            
-            logger.info(f"Successfully stored {key} in cache.")
-            time.sleep(delay_sec)
-            
-            # Retry GET if needed
-            response = send_command(f"GET {key}", bufSize=readBufferSize)
-            if cache_type == 'redis':
-                response = response.lstrip("$").split("\r\n", 1)[-1].strip()
-            
-            if response != json_content:
-                logger.debug(f"Retrying request: GET {key}")
-                time.sleep(delay_sec / 2)
-                response = send_command(f'GET {key}', bufSize=readBufferSize)
-                if isBigData:
-                    if len(response) != requestSize:
-                        logger.error(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}")
-                        exit(1)
-                else:
-                    if response != json_content:
-                        logger.error(f"Failed to retrieve {key} from cache! Response: {response}")
-                        exit(1)
-            
-            logger.info(f"Successfully retrieved {key} from cache.")
+async def send_command(command: str, conn_pool: ConnectionPool, buf_size=1024):
+    reader, writer = await conn_pool.acquire()
+    discard_connection = False
+
+    try:
+        command += MSG_SEPARATOR
+        writer.write(command.encode())
+        await writer.drain()
+
+        response = bytearray()
+        if command.startswith(("SET", "DEL")):
+            response = await reader.readuntil(ENCODED_SEPARATOR)
+            if not response:
+                discard_connection = True
+                raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+        else:
+            while True:
+                chunk = await reader.read(buf_size)
+                if not chunk:
+                    discard_connection = True
+                    raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+                response.extend(chunk)
+                if ENCODED_SEPARATOR in chunk:
+                    break
+
+        return response.decode().rstrip(MSG_SEPARATOR)
+
+    except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
+        discard_connection = True
+        logger.warning(f"Connection error, discarding connection: {e}")
+        raise
+
+    finally:
+        if discard_connection:
+            await conn_pool.discard((reader, writer))
+            # Re-establish a new connection to keep pool size constant
+            try:
+                new_conn = await asyncio.open_connection(host, port)
+                await conn_pool.release(new_conn)
+            except Exception as e:
+                logger.error(f"Failed to replenish discarded connection: {e}")
+        else:
+            await conn_pool.release((reader, writer))
+
+
+
+async def send_with_retry(command, expected_response, conn_pool, retries=1, delay=None):
+    delay = delay or (delay_sec / 2)
+    for attempt in range(retries + 1):
+        try:
+            response = await send_command(command, conn_pool)
+            if response == expected_response:
+                return True
         except Exception as e:
-            logger.error(f"Error processing {file_name}: {e}")
-            exit(1)
+            logger.error(f"Exception during '{command}': {e}")
+        if attempt < retries:
+            await asyncio.sleep(delay)
+    logger.error(f"Command failed after retries: {command}")
+    return False
 
-def test_iteration(x):
-    """Perform one test iteration with SET and GET commands using retry logic."""
-    result = True
-    try:
-        if send_with_retry(f"SET key{x} value{x}", "OK") != "OK":
-            result = False
-        if send_with_retry(f"GET key{x}", f"value{x}") != f"value{x}":
-            result = False
+async def preload_json_files(conn_pool):
+    logger.info("Preloading JSON files...")
+    if not os.path.exists(data_folder):
+        logger.warning("Data folder not found. Skipping.")
+        return
 
-        expected_response = "" if cache_type == "redis" else "(nil)"
-        if send_with_retry("GET non_existent_key", expected_response) != expected_response:
-            result = False
+    for file_name in filter(lambda f: f.endswith('.json'), os.listdir(data_folder)):
+        with open(os.path.join(data_folder, file_name), "r", encoding="utf-8") as f:
+            content = f.read()
+        key = file_name.rsplit('.', 1)[0]
+        if not await send_with_retry(f'SET {key} {content}', 'OK', conn_pool):
+            logger.error(f"Failed storing {key}")
+            sys.exit(1)
+        logger.info(f"Stored {key}")
+        await asyncio.sleep(delay_sec)
 
-    except Exception as e:
-        result = False
-        logger.error(f"Error during test iteration {x}: {e}")
-    return result
+def build_iteration_func(name):
+    async def workflow(x, pool):  # SET, GET, GET (miss)
+        return await send_with_retry(f"SET key{x} value{x}", "OK", pool) and \
+               await send_with_retry(f"GET key{x}", f"value{x}", pool) and \
+               await send_with_retry("GET non_existent_key", "(nil)", pool)
 
-def delete_iteration(x):
-    """Perform one iteration with DEL command."""
-    try:
-        return send_command(f"DEL key{x}") == "OK"
-    except Exception as e:
-        logger.error(f"Error during deletion iteration {x}: {e}")
+    async def op(x, pool):        
+        if name == "set":
+            return await send_with_retry(f"SET key{x} value{x}", "OK", pool)
+        elif name == "get":
+            return await send_with_retry(f"GET key{x}", f"value{x}", pool)
+        elif name == "del":
+            return await send_with_retry(f"DEL key{x}", "OK", pool)
+        else:
+            raise ValueError(f"Invalid operation: {name}")
+
+    return workflow if name == "workflow" else op
+
+async def worker_main_single_connection(start_idx, end_idx, task_type):
+    reader, writer = await asyncio.open_connection(host, port)
+
+    async def send_command(command: str):
+        command += MSG_SEPARATOR
+        writer.write(command.encode())
+        await writer.drain()
+
+        response = bytearray()
+        if command.startswith(("SET", "DEL")):
+            response = await reader.readuntil(ENCODED_SEPARATOR)
+        else:
+            while True:
+                chunk = await reader.read(8096)
+                if not chunk:
+                    break
+                response.extend(chunk)
+                if ENCODED_SEPARATOR in chunk:
+                    break
+        return response.decode().rstrip(MSG_SEPARATOR)
+
+    async def send_with_retry(command, expected_response, retries=1):
+        for attempt in range(retries + 1):
+            try:
+                response = await send_command(command)
+                if response == expected_response:
+                    return True
+            except Exception as e:
+                logger.error(f"Exception during '{command}': {e}")
+            if attempt < retries:
+                await asyncio.sleep(delay_sec / 2)
+        logger.error(f"Command failed after retries: {command}")
         return False
 
-def run_load_tests():
-    return run_parallel(test_iteration, "load tests", requests_multiplier=3)
+    results = []
+    for i in range(start_idx, end_idx):
+        if task_type == "set":
+            result = await send_with_retry(f"SET key{i} value{i}", "OK")
+        elif task_type == "get":
+            result = await send_with_retry(f"GET key{i}", f"value{i}")
+        elif task_type == "del":
+            result = await send_with_retry(f"DEL key{i}", "OK")
+        elif task_type == "workflow":
+            result = (await send_with_retry(f"SET key{i} value{i}", "OK") and
+                      await send_with_retry(f"GET key{i}", f"value{i}") and
+                      await send_with_retry("GET non_existent_key", "(nil)"))
+        else:
+            raise ValueError("Unknown task_type")
+        results.append(result)
 
-def delete_everything():
-    return run_parallel(delete_iteration, "deletion tests", requests_multiplier=3)
+    writer.close()
+    await writer.wait_closed()
+    return len(results) - sum(results)  # number of failures
 
-if __name__ == "__main__":
-    logger.info("Sending large JSON data from files ...\n")
-    preload_json_files()
-    logger.info(f"Starting load tests in {delay_sec} seconds...\n")
+def run_worker(start_idx, end_idx, task_type):
+    return asyncio.run(worker_main_single_connection(start_idx, end_idx, task_type))
+
+async def run_preload():
+    pool = ConnectionPool(pool_size)
+    await pool.initialize()
+    try:
+        await preload_json_files(pool)
+    finally:
+        await pool.close()
+
+def run_parallel(task_type, test_name, requests_multiplier=1):
+    chunk_size = iterations_count // num_processes
+    args_list = [
+        (i * chunk_size, (i + 1) * chunk_size if i != num_processes - 1 else iterations_count, task_type)
+        for i in range(num_processes)
+    ]
+    logger.info(f"Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process ...")
+    start = time.time()
+    ctx = multiprocessing.get_context("fork")
+
+    with ctx.Pool(processes=num_processes) as pool:
+        failures = sum(pool.starmap(run_worker, args_list))
+    duration = time.time() - start
+
+    total_requests = iterations_count * requests_multiplier
+    rps = total_requests / duration
+    print(f"{test_name} completed in {duration:.2f}s — RPS: {rps:.2f}, Failures: {failures}, Processes: {num_processes}")
+    return 1 if failures else 0
+
+def run_set_tests(): return run_parallel("set", "SET tests")
+def run_get_tests(): return run_parallel("get", "GET tests")
+def run_del_tests(): return run_parallel("del", "DEL tests")
+def run_workflow_tests(): return run_parallel("workflow", "Workflow tests", requests_multiplier=3)
+
+def main():
+    if run_set_tests(): sys.exit(1)
     time.sleep(delay_sec)
-    load_test_res = run_load_tests()
-    if load_test_res != 0:
-        exit(load_test_res)
-    logger.info(f"Deleting everything by sending DEL commands after {delay_sec} seconds...\n")
+
+    if run_get_tests(): sys.exit(1)
     time.sleep(delay_sec)
-    del_res = delete_everything()
-    exit(del_res)
+
+    if run_del_tests(): sys.exit(1)
+    time.sleep(delay_sec)
+
+    asyncio.run(run_preload()) 
+    time.sleep(delay_sec)
+
+    result = run_workflow_tests()
+    sys.exit(result)
+
+main()

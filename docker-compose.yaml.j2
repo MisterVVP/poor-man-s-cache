@@ -1,0 +1,31 @@
+services:
+  cache:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILD_TYPE=Release
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    profiles:
+      - main
+    networks:
+      - cache_network
+
+{% for i in range(1, num_tests + 1) %}
+  tests-{{ i }}:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+{% endfor %}
+
+networks:
+  cache_network:
+    driver: bridge

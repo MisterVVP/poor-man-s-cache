@@ -44,11 +44,12 @@ server::Query::Query(QueryCode code, const char *arg_key, uint_fast64_t hash): q
 
 server::Command::Command(CommandCode code, const char *arg_key, const char *arg_value, uint_fast64_t hash): commandCode(code), hash(hash)
 {
-    auto vSize = strlen(arg_value) + 1;
-    value = std::make_unique<char[]>(vSize);
-    memcpy(value.get(), arg_value, vSize);
-    value.get()[vSize-1] = '\0';
-
+    if (arg_value) { // not every command has value, e.g. DEL key1
+        auto vSize = strlen(arg_value) + 1;
+        value = std::make_unique<char[]>(vSize);
+        memcpy(value.get(), arg_value, vSize);
+        value.get()[vSize-1] = '\0';
+    }
     auto kSize = strlen(arg_key) + 1;
     key = std::make_unique<char[]>(kSize);
     memcpy(key.get(), arg_key, kSize);

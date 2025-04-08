@@ -1,0 +1,168 @@
+services:
+  cache:
+    build:
+      context: .
+      dockerfile: Dockerfile # replace with Dockerfile.debug to add debugging tools
+      args:
+        - BUILD_TYPE=Release
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    profiles:
+      - main
+    networks:
+      - cache_network
+
+  cache-valgrind:
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
+      args:
+        - BUILD_TYPE=Release
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    entrypoint: ["valgrind", "--leak-check=full", "--show-leak-kinds=all", "--track-origins=yes", "--verbose", "/app/poor-man-s-cache"]
+    profiles:
+      - valgrind
+    networks:
+      - cache_network
+
+  cache-helgrind:
+    build:
+      context: .
+      dockerfile: Dockerfile.debug
+      args:
+        - BUILD_TYPE=Release
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    entrypoint: ["valgrind", "--tool=helgrind", "/app/poor-man-s-cache"]
+    profiles:
+      - helgrind
+    networks:
+      - cache_network
+
+  cache-callgrind:
+    build:
+      context: .
+      dockerfile: Dockerfile.callgrindd
+      args:
+        - BUILD_TYPE=Release
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    profiles:
+      - callgrind
+    networks:
+      - cache_network
+
+  tests:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - TEST_ITERATIONS=10000000
+      - CACHE_HOST=cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
+  tests-valgrind:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache-valgrind
+    profiles:
+      - tests-valgrind
+    networks:
+      - cache_network
+
+  tests-helgrind:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache-helgrind
+    profiles:
+      - tests-helgrind
+    networks:
+      - cache_network
+
+  tests-callgrind:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache-callgrind
+    profiles:
+      - tests-callgrind
+    networks:
+      - cache_network
+
+  redis:
+    image: redis:latest
+    container_name: redis-server
+    ports:
+      - "6379:6379"
+    command: ["redis-server"]
+    sysctls:
+        - net.ipv4.tcp_rmem=16384 4194304 536870912
+        - net.ipv4.tcp_wmem=16384 4194304 536870912
+        - net.core.somaxconn=1048576
+        - net.ipv4.tcp_tw_reuse=1
+        - net.ipv4.ip_local_port_range=1024 65535
+        - net.ipv4.tcp_fin_timeout=1
+    ulimits:
+      nofile:
+        soft: "1048576"
+        hard: "1048576"
+    profiles:
+      - redis
+
+  tests_redis:
+    build:
+      context: tests
+      dockerfile: Dockerfile
+    environment:
+      - CACHE_HOST=redis
+      - CACHE_PORT=6379
+      - CACHE_TYPE=redis
+      - TEST_DELAY_SEC=1
+      - TEST_ITERATIONS=100000
+    profiles:
+      - redis
+    depends_on:
+      - redis
+
+  redis-exporter:
+    image: oliver006/redis_exporter:alpine
+    ports:
+      - 9121:9121
+    command:
+      - '--redis.addr=redis://redis:6379'
+    profiles:
+      - redis
+    depends_on:
+      - redis
+  
+  redis-insights:
+    image: redis/redisinsight:latest
+    ports:
+      - 5540:5540
+    profiles:
+      - redis
+    depends_on:
+      - redis
+    volumes:
+      - redis_insights_data:/data
+
+volumes:
+  redis_insights_data:  
+
+
+networks:
+  cache_network:
+    driver: bridge

@@ -3,8 +3,7 @@
 using namespace server;
 
 CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings):
-    numErrors(0), cancellationToken(cToken), isRunning(false), numRequests(0), numShards(settings.numShards),
-    port(settings.port), connManager(cToken)
+    cancellationToken(cToken), numShards(settings.numShards), port(settings.port), connManager(cToken)
 {
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -59,14 +58,14 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         throw std::system_error(errno, std::system_category(), "Bind failed");
     }
 
-    if (listen(server_fd, CONN_QUEUE_LIMIT) < 0) {
+    if (listen(server_fd, settings.connQueueLimit) < 0) {
         close(server_fd);
         throw std::system_error(errno, std::system_category(), "Listen failed");
     }
 
-#ifndef NDEBUG
+    #ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards..." << std::endl;
-#endif
+    #endif
     serverShards.reserve(numShards);
     KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
     for (int i = 0; i < numShards; ++i) {
@@ -80,44 +79,6 @@ CacheServer::~CacheServer() {
         close(server_fd);
     }
     serverShards.clear();
-}
-
-CacheServer::ReadRequestResult server::CacheServer::readRequest(int client_fd)
-{
-    char buffer[READ_BUFFER_SIZE];
-    buffer[0] = 0;
-    std::string request;
-    request.reserve(READ_BUFFER_SIZE);
-    uint16_t readErrorsCounter = 0;
-    bool receivedLastBlock = false;
-    uint_fast32_t read_attempts = 0;
-    while (!receivedLastBlock && read_attempts < READ_MAX_ATTEMPTS) {
-        auto bytes_read = read(client_fd, buffer, sizeof(buffer));
-        if (bytes_read == -1) {
-            readErrorsCounter++;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
-            } else if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
-                perror("Failed to read client request buffer: interruption signal received. Retrying...");
-                continue;
-            }
-            perror("Failed to read client request buffer");
-            return ReadRequestResult::Failure();
-        } 
-        
-        if (bytes_read == 0) {
-            return ReadRequestResult::Failure();
-        }
-
-        if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
-            receivedLastBlock = true;
-            --bytes_read;
-        }
-        buffer[bytes_read] = '\0';
-        request += buffer;
-        ++read_attempts;
-    }
-    return ReadRequestResult::Success(request);
 }
 
 const char *server::CacheServer::processRequest(char *requestData)
@@ -151,12 +112,8 @@ const char *server::CacheServer::processRequest(char *requestData)
         }
 
         if (strcmp(request, "DEL") == 0) {
-            if (com_saveptr) {
-                Command cmd {CommandCode::DEL, key, com_saveptr, hash};
-                return shard.processCommand(cmd);
-            }
-            ++numErrors;
-            return INVALID_COMMAND_FORMAT;
+            Command cmd {CommandCode::DEL, key, nullptr, hash};
+            return shard.processCommand(cmd);
         }
     }
 
@@ -166,41 +123,117 @@ const char *server::CacheServer::processRequest(char *requestData)
 
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
 {
-    int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT);
-    if (event_count == -1 && errno != EINTR) {
-        perror("epoll_wait failed");
-        co_return;
-    }
-    ++numRequests;
+    while (!cancellationToken) {
 
-    for (int i = 0; i < event_count; ++i) {
-        auto client_fd = epoll_events[i].data.fd;
-        if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
-            connManager.closeConnection(client_fd);
-            continue;
+        #ifndef NDEBUG
+        auto start = std::chrono::high_resolution_clock::now();
+        std::cout << "handleRequests started! epoll_fd = " << epoll_fd << std::endl;
+        #endif
+
+        int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
+        if (event_count == -1) {
+            if (errno != EINTR) {
+                perror("epoll_wait failed");
+            }
+            co_return;
+        } else if (event_count == 0) {
+            #ifndef NDEBUG
+            std::cout << "handleRequests finished without events to handle!" << std::endl;
+            #endif
+            co_return;
         }
 
-        if (epoll_events[i].events & EPOLLIN) {
-            auto readResult = readRequest(client_fd);
+        numRequests += event_count;
+        eventsPerBatch = event_count;
 
-            if (readResult.operationResult == ReqReadOperationResult::Failure) {
+        for (int i = 0; i < event_count; ++i) {
+            auto client_fd = epoll_events[i].data.fd;
+            if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
                 connManager.closeConnection(client_fd);
-                ++numErrors;
                 continue;
             }
 
-            auto response = processRequest(readResult.request.data());
-            auto responseSize = strlen(response);
-            if (responseSize > ASYNC_RESPONSE_SIZE_THRESHOLD) {
-                auto aq = std::async(std::launch::async, &CacheServer::sendResponse, this, client_fd, response, responseSize);
-            } else {
+            if (epoll_events[i].events & EPOLLIN) {
+                #ifndef NDEBUG
+                std::cout << "readRequest client_fd = " << client_fd  << ", epoll_fd = " << epoll_fd << std::endl;
+                #endif
+
+                //TODO: fix this busy looping
+                auto asyncRead = readRequestAsync(client_fd);
+                std::optional<ReadRequestResult> readResult;
+                do {
+                    readResult = asyncRead.readResult();
+                } while(!readResult.has_value());
+
+                if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
+                    ++numErrors;
+                    continue;
+                }
+
+                if (readResult.value().operationResult == ReqReadOperationResult::AwaitingData) {
+                    continue;
+                }
+
+                connManager.updateActivity(client_fd);
+                auto response = processRequest(readResult.value().request.data());
+                auto responseSize = strlen(response);
+
                 sendResponse(client_fd, response, responseSize);
             }
-            co_return;
         }
+
+        #ifndef NDEBUG
+        auto stop = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+        std::cout << "handleRequests finished in " << duration.count() << " ns ! event_count = " << event_count << std::endl;
+        #endif
+
+        co_return;
+    }
+}
+
+AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
+{
+    char buffer[READ_BUFFER_SIZE];
+    buffer[0] = 0;
+    std::string request;
+    request.reserve(READ_BUFFER_SIZE);
+    uint16_t readErrorsCounter = 0;
+    bool receivedLastBlock = false;
+    uint_fast32_t read_attempts = 0;
+
+    while (!receivedLastBlock && read_attempts < READ_MAX_ATTEMPTS) {
+        ssize_t bytes_read = co_await AsyncReadAwaiter(client_fd, buffer, sizeof(buffer));
+        if (bytes_read == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            } else if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
+                perror("Failed to read client request buffer: interruption signal received. Retrying...");
+                ++readErrorsCounter;
+                continue;
+            }
+
+            perror("Failed to read client request buffer, client_fd = " + client_fd);
+            co_return ReadRequestResult::Failure();
+        }
+
+        if (bytes_read == 0) {
+            co_return ReadRequestResult::AwaitingData();
+        }
+
+        if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
+            receivedLastBlock = true;
+            --bytes_read;
+        }
+        buffer[bytes_read] = '\0';
+        request.append(buffer);
+        ++read_attempts;
     }
 
-    co_return;
+    if (receivedLastBlock) {
+        co_return ReadRequestResult::Success(request);
+    }
+    co_return ReadRequestResult::Failure();    
 }
 
 void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
@@ -228,7 +261,6 @@ void server::CacheServer::sendResponse(int client_fd, const char* response, cons
         totalSent += bytesSent;
     }
 
-    connManager.closeConnection(client_fd);
     responseWithSeparator.reset();
 }
 
@@ -236,7 +268,7 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, connManager.activeConnectionsCounter, numRequests));
+        channel.push(CacheServerMetrics(numErrors, connManager.activeConnectionsCounter, numRequests, eventsPerBatch));
     }
 }
 
@@ -250,24 +282,31 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     });
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
+    
 
-    auto ac = connManager.acceptConnections(server_fd);
-    int rCode = 0;
-    do {
-        auto loopRes = eventLoop(ac);
-        rCode = loopRes.finalResult();
-    } while(!cancellationToken && rCode > 0);
-
-    if (rCode < 0) {
-        std::cerr << "Unexpected termination of the server!" << std::endl;
+    std::atomic<int> executionResult;
+    std::vector<std::jthread> loopWorkers;
+    const auto numThreads = 1; // TODO: right now we are not thread safe, but there might be potential in future !!! std::min(NUM_WORKERS, std::thread::hardware_concurrency());
+    for (int i = 0; i < numThreads; ++i) {
+        loopWorkers.emplace_back(std::jthread([this, &executionResult](std::stop_token stopToken)
+        {
+            auto res = eventLoop();
+            if(executionResult != ServerStatus::Stopped) {
+                executionResult = res;
+            }
+        }));
     }
+
+    for (int i = 0; i < numThreads; ++i) {
+        loopWorkers[i].join();
+    };
 
     Stop();
     
-    return rCode;
+    return executionResult;
 }
 
-EventLoop server::CacheServer::eventLoop(AcceptConnTask& ac)
+EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac)
 {
     auto eStatus = co_await ac;
     
@@ -282,6 +321,17 @@ EventLoop server::CacheServer::eventLoop(AcceptConnTask& ac)
     }
 
     co_return eStatus.status;
+}
+
+int CacheServer::eventLoop() {
+    auto ac = connManager.acceptConnections(server_fd);
+    int rCode = 0;
+    do {
+        auto loop = eventLoopIteration(ac);
+        rCode = loop.finalResult();
+    } while(!cancellationToken && rCode > 0);
+
+    return rCode;
 }
 
 void CacheServer::Stop() noexcept

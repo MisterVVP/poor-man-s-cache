@@ -39,11 +39,12 @@ int main() {
 
 
     auto serverPort = getFromEnv<int>("SERVER_PORT", true);
-    auto numShards = getFromEnv<uint_fast16_t>("NUM_SHARDS", false, 24);
+    auto numShards = getFromEnv<uint_fast32_t>("NUM_SHARDS", false, 24);
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
+    auto connQueueLimit = getFromEnv<uint_fast32_t>("CONN_QUEUE_LIMIT", false, 1048576);
     auto enableCompression = getFromEnv<bool>("ENABLE_COMPRESSION", false, true);
 
-    ServerSettings serverSettings { serverPort, numShards, sockBufferSize, enableCompression };
+    ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression };
 
     CacheServer cacheServer { cancellationToken, serverSettings };
 
