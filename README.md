@@ -41,7 +41,7 @@ Local setup. 10 million requests per test suite. 24 logical threads.
 3. TBD
 
 CI setup. 1 million requests total (50 000 requests per test container), 20 test containers
-1. TBD
+1. 20 000 RPS for GET / SET / DEL tests ,  ~ 22 000 RPS for  (SET key, GET key, GET non_existent_key) workflow test
 
 #### Goals
 Next step is 200k+ requests per second on Ubuntu
@@ -256,7 +256,6 @@ Check Redis metrics at http://localhost:9121/metrics
 ## TODO
 - Revisit batching strategies on server
 - Consider support for pipelining requests
-- Add active connections checks
 - Revisit multithreading on server
 - Test edge case scenarios
 - Integrate valgrind checks into CI
