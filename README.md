@@ -256,7 +256,6 @@ Check Redis metrics at http://localhost:9121/metrics
 ## TODO
 - Revisit batching strategies on server
 - Consider support for pipelining requests
-- Add active connections checks
 - Revisit multithreading on server
 - Test edge case scenarios
 - Integrate valgrind checks into CI

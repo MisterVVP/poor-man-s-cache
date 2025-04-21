@@ -287,7 +287,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 
     std::atomic<int> executionResult;
     std::vector<std::jthread> loopWorkers;
-    const auto numThreads = 1; // TODO: right now we are not thread safe, but there might be potential in future !!! std::min(NUM_WORKERS, std::thread::hardware_concurrency());
+    const auto numThreads = 1; // TODO: right now we are not thread safe, investigate if multithreading could make sense std::min(NUM_WORKERS, std::thread::hardware_concurrency());
     for (int i = 0; i < numThreads; ++i) {
         loopWorkers.emplace_back(std::jthread([this, &executionResult](std::stop_token stopToken)
         {

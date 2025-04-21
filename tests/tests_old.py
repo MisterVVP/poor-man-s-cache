@@ -1,3 +1,7 @@
+# [WARNING]
+# Deprecated tests version, spawns new connection on every request
+# It's recommended to use persistent connections when working with cache server
+
 import socket
 import logging
 import sys
@@ -50,7 +54,7 @@ def send_command_to_custom_cache(command: str, bufSize: int):
                 response = s.recv(bufSize).decode('utf-8')
                 return response.strip().rstrip("\x1F")
             else:
-                s.settimeout(10)
+                s.settimeout(15)
                 response = bytearray()
                 while True:
                     try:
