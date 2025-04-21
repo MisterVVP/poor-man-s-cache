@@ -140,4 +140,5 @@ namespace server {
             }
 
             ConnManager(std::atomic<bool>& cToken): cancellationToken(cToken), activeConnectionsCounter(0) {}
+    };
 }
