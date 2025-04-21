@@ -6,6 +6,35 @@
 #include "../non_copyable.h"
 
 namespace server {
+    /// @brief ReadRequest result codes
+    enum ReqReadOperationResult : int_fast8_t {
+        Failure = -2,
+        Success = 0,
+        AwaitingData = 1,
+    };
+
+    struct ReadRequestResult {
+        private:
+            ReadRequestResult(ReqReadOperationResult res) : operationResult(res) {};
+
+        public:
+            std::string request;
+            ReqReadOperationResult operationResult;
+
+            ReadRequestResult(std::string&& request, ReqReadOperationResult res) : request(std::move(request)), operationResult(res) {};
+
+            static ReadRequestResult Success(std::string req) noexcept {
+                return ReadRequestResult { std::move(req), ReqReadOperationResult::Success };
+            };
+
+            static ReadRequestResult Failure() noexcept {
+                return ReadRequestResult { ReqReadOperationResult::Failure };
+            };
+
+            static ReadRequestResult AwaitingData() noexcept {
+                return ReadRequestResult { ReqReadOperationResult::AwaitingData };
+            };
+    };
 
     /// @brief Server status results
     enum ServerStatus : int_fast8_t {
@@ -35,6 +64,95 @@ namespace server {
             EpollStatus();
     };
 
+    class AsyncReadTask : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;   
+            int client_fd = -1; 
+        private:
+            handle_type c_handle;
+            AsyncReadTask(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    std::optional<ReadRequestResult> result;
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+
+                    void unhandled_exception() {}
+                    void return_value(std::optional<ReadRequestResult> res){
+                        result = res;
+                    }
+
+                    AsyncReadTask get_return_object() { return AsyncReadTask{handle_type::from_promise(*this)}; }
+                    ~promise_type() {}
+            };
+
+            AsyncReadTask(AsyncReadTask &&art) : c_handle(art.c_handle), client_fd(art.client_fd) {
+                art.c_handle = nullptr;
+                art.client_fd = -1;
+            }
+
+            AsyncReadTask &operator=(AsyncReadTask &&art) {
+                client_fd = art.client_fd;
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = art.c_handle;
+                art.c_handle = nullptr;
+                return *this;
+            }
+
+            ~AsyncReadTask() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            }
+            friend class AsyncReadAwaiter;
+            friend class ReadRequestAwaiter;
+            friend class HandleReqTask;
+    };
+
+
+    class ReadRequestAwaiter {
+        private:
+            std::coroutine_handle<AsyncReadTask::promise_type> c_handle;
+        public:
+            ReadRequestAwaiter(AsyncReadTask &art) : c_handle(art.c_handle) {}
+            bool await_ready() const noexcept { return false; }
+
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
+                if (!c_handle.done()) {
+                    c_handle.resume();
+                    return c_handle;
+                }
+                return h;
+            }
+            
+            std::optional<ReadRequestResult> await_resume()
+            {
+                return c_handle.promise().result;
+            }
+    };
+
+    class AsyncReadAwaiter {
+        private:
+            int fd;
+            char* buffer;
+            size_t bufSize;
+        public:
+            AsyncReadAwaiter(int fd, char* buffer, size_t bufSize) : fd(fd), buffer(buffer), bufSize(bufSize) {}
+            bool await_ready() const noexcept { return false; }
+
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
+                return h;
+            }
+
+            ssize_t await_resume() {
+                return ::read(fd, buffer, bufSize);
+            }
+    };
+
     class HandleReqTask : NonCopyable {
         public:
             class promise_type;
@@ -53,6 +171,10 @@ namespace server {
 
                     HandleReqTask get_return_object() { return HandleReqTask{handle_type::from_promise(*this)}; }
                     ~promise_type() {}
+
+                    ReadRequestAwaiter await_transform(AsyncReadTask &art) {
+                        return ReadRequestAwaiter{art};
+                    }
             };
 
             HandleReqTask(HandleReqTask &&hrt) : c_handle(hrt.c_handle) {
@@ -98,32 +220,32 @@ namespace server {
         
         public:        
             class promise_type {
-            public:
-                EpollStatus eStatus;
+                public:
+                    EpollStatus eStatus;
 
-                std::suspend_never initial_suspend() { return {}; }
-                std::suspend_always final_suspend() noexcept {                    
-                    return {}; 
-                }
-        
-                void unhandled_exception() {}
-        
-                std::suspend_always yield_value(EpollStatus eStat) {
-                    eStatus = eStat;
-                    return {};
-                }
-        
-                void return_value(EpollStatus eStat) {
-                    eStatus = eStat;
-                }
-        
-                AcceptConnTask get_return_object() {
-                    auto handle = handle_type::from_promise(*this);
-                    return AcceptConnTask{handle};
-                }
-        
-                promise_type() : eStatus(EpollStatus::NotReady()) {}
-                ~promise_type() {}
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept {                    
+                        return {}; 
+                    }
+            
+                    void unhandled_exception() {}
+            
+                    std::suspend_always yield_value(EpollStatus eStat) {
+                        eStatus = eStat;
+                        return {};
+                    }
+            
+                    void return_value(EpollStatus eStat) {
+                        eStatus = eStat;
+                    }
+            
+                    AcceptConnTask get_return_object() {
+                        auto handle = handle_type::from_promise(*this);
+                        return AcceptConnTask{handle};
+                    }
+            
+                    promise_type() : eStatus(EpollStatus::NotReady()) {}
+                    ~promise_type() {}
             };
 
             AcceptConnTask(AcceptConnTask &&act) : c_handle(act.c_handle) {
@@ -218,13 +340,4 @@ namespace server {
             };
     };
 
-    class ThreadSwitchAwaiter {
-        private:
-            std::jthread* p_out;
-        public:
-            ThreadSwitchAwaiter(std::jthread* out):p_out(out){};
-            bool await_ready() const noexcept { return false; }
-            void await_suspend(std::coroutine_handle<>);
-            void await_resume() const noexcept {}
-    };
 }

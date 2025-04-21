@@ -145,7 +145,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
 
         numRequests += event_count;
         eventsPerBatch = event_count;
-
+        std::vector<AsyncReadTask> readers;
         for (int i = 0; i < event_count; ++i) {
             auto client_fd = epoll_events[i].data.fd;
             if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
@@ -158,28 +158,29 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 std::cout << "readRequest client_fd = " << client_fd  << ", epoll_fd = " << epoll_fd << std::endl;
                 #endif
 
-                //TODO: fix this busy looping
                 auto asyncRead = readRequestAsync(client_fd);
-                std::optional<ReadRequestResult> readResult;
-                do {
-                    readResult = asyncRead.readResult();
-                } while(!readResult.has_value());
-
-                if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
-                    ++numErrors;
-                    continue;
-                }
-
-                if (readResult.value().operationResult == ReqReadOperationResult::AwaitingData) {
-                    continue;
-                }
-
                 connManager.updateActivity(client_fd);
-                auto response = processRequest(readResult.value().request.data());
-                auto responseSize = strlen(response);
-
-                sendResponse(client_fd, response, responseSize);
+                asyncRead.client_fd = client_fd;
+                readers.emplace_back(std::move(asyncRead));
             }
+        }
+
+        for (int i = 0; i < readers.size(); ++i) {
+            auto fd = readers[i].client_fd;
+            auto readResult = co_await readers[i];
+            if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
+                ++numErrors;
+                continue;
+            }
+
+            if (readResult.value().operationResult == ReqReadOperationResult::AwaitingData) {
+                continue;
+            }
+
+            auto response = processRequest(readResult.value().request.data());
+            auto responseSize = strlen(response);
+
+            sendResponse(fd, response, responseSize);
         }
 
         #ifndef NDEBUG
@@ -233,7 +234,7 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     if (receivedLastBlock) {
         co_return ReadRequestResult::Success(request);
     }
-    co_return ReadRequestResult::Failure();    
+    co_return ReadRequestResult::Failure();
 }
 
 void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
