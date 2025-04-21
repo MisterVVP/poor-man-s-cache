@@ -15,7 +15,6 @@
 #include "constants.hpp"
 
 namespace server {
-
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
@@ -141,74 +140,4 @@ namespace server {
             }
 
             ConnManager(std::atomic<bool>& cToken): cancellationToken(cToken), activeConnectionsCounter(0) {}
-    };
-
-    class AsyncReadTask : NonCopyable {
-        public:
-            class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;    
-        private:
-            handle_type c_handle;
-            AsyncReadTask(handle_type h) : c_handle(h) {};
-        public:
-            class promise_type {
-                public:
-                    std::optional<ReadRequestResult> result;
-                    std::suspend_never initial_suspend() { return {}; }
-                    std::suspend_always final_suspend() noexcept { return {}; }
-
-                    void unhandled_exception() {}
-                    void return_value(std::optional<ReadRequestResult> res){
-                        result = res;
-                    }
-
-                    AsyncReadTask get_return_object() { return AsyncReadTask{handle_type::from_promise(*this)}; }
-                    promise_type() {}
-                    ~promise_type() {}
-            };
-
-            std::optional<ReadRequestResult> readResult() {
-                if(!c_handle.done()){
-                    c_handle.resume();
-                }
-                return c_handle.promise().result;
-            }
-
-            AsyncReadTask(AsyncReadTask &&art) : c_handle(art.c_handle) {
-                art.c_handle = nullptr;
-            }
-
-            AsyncReadTask &operator=(AsyncReadTask &&art) {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-                c_handle = art.c_handle;
-                art.c_handle = nullptr;
-                return *this;
-            }
-
-            ~AsyncReadTask() {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-            };
-            friend class AsyncReadAwaiter;
-    };
-
-    class AsyncReadAwaiter {
-        private:
-            int fd;
-            char* buffer;
-            size_t bufSize;
-        public:
-            AsyncReadAwaiter(int fd, char* buffer, size_t bufSize) : fd(fd), buffer(buffer), bufSize(bufSize) {}
-            bool await_ready() const noexcept { return false; }
-            void await_suspend(std::coroutine_handle<> h) {}
-            
-            ssize_t await_resume()
-            {
-                // When resumed, actually perform read
-                return ::read(fd, buffer, bufSize);
-            }
-    };
 }
