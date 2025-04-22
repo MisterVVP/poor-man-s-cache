@@ -170,6 +170,14 @@ callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callg
 ```
 
 
+### Kube Deployment
+> [!TIP] You can replace namespace and release name
+> You can also supply different deployment configuration by editing values.yaml or providing arguments to helm, see [docs](https://helm.sh/docs/helm/helm_upgrade/)
+
+```
+helm upgrade --install poor-man-s-cache ./helm/poor-man-s-cache -n poor-man-s-cache --create-namespace
+```
+
 ### To debug memory issues
 > [!WARNING]
 > Debug mode is very slow! Performance could be 20 or 30 times slower. Valgrind (profiler) settings can be changed in the docker-compose file under the 'cache-valgrind' service configuration.
@@ -259,7 +267,6 @@ Check Redis metrics at http://localhost:9121/metrics
 - Revisit multithreading on server
 - Test edge case scenarios
 - Integrate valgrind checks into CI
-- Add docker image to releases and create helm chart
 - More corouties
 - Work on error responses from cache server
 - Support key expiration, support more operations.
