@@ -5,6 +5,9 @@ permissions:
 on:
   release:
     types: [published]
+  push:
+    branches:
+    - dev*
 
 jobs:
   push_to_registries:
@@ -35,6 +38,7 @@ jobs:
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        if: "!contains(github.ref, 'dev')"
         with:
           images: |
             mistervvp/poor-man-s-cache
@@ -53,6 +57,7 @@ jobs:
       - name: Build and push Docker images
         id: push
         uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        if: "!contains(github.ref, 'dev')"
         with:
           context: .
           push: true
