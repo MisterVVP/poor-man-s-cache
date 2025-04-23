@@ -30,4 +30,10 @@ COPY --from=build /usr/local/lib/ /usr/local/lib/
 EXPOSE 9001
 EXPOSE 8080
 
+RUN groupadd --gid 10001 notroot \
+    && useradd --uid 10001 --gid notroot --no-create-home --home-dir /app --shell /bin/false poor-man-s-cache \
+    && usermod -a -G poor-man-s-cache
+
+USER 10001
+
 ENTRYPOINT ["/app/poor-man-s-cache"]
