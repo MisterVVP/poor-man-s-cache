@@ -3,7 +3,7 @@ replicaCount: 1
 image:
   repository: mistervvp/poor-man-s-cache
   pullPolicy: IfNotPresent
-  tag: "dev"
+  tag: "latest"
 
 imagePullSecrets: []
 nameOverride: ""
