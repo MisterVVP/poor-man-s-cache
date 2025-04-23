@@ -171,8 +171,9 @@ callgrind_annotate --tree=both --inclusive=yes --auto=yes --show-percs=yes callg
 
 
 ### Kube Deployment
-> [!TIP] You can replace namespace and release name
-> You can also supply different deployment configuration by editing values.yaml or providing arguments to helm, see [docs](https://helm.sh/docs/helm/helm_upgrade/)
+> [!TIP]
+> You can replace namespace and release name.
+> You can also supply different deployment configuration by editing values.yaml or providing arguments to helm, see [docs](https://helm.sh/docs/helm/helm_upgrade/).
 > Use helm cmd arguments or edit image.tag in values.yaml to deploy different tag
 ```
 helm upgrade --install poor-man-s-cache ./helm/poor-man-s-cache -n poor-man-s-cache --create-namespace
