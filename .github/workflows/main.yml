@@ -1,8 +1,12 @@
+name: Continuous integration
+permissions:
+  contents: read
+
 on:
   push:
     branches:
     - main
-    - dev
+    - dev*
     - release/*
 
 env:

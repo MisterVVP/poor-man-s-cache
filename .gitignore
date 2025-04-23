@@ -49,4 +49,5 @@ Research.md
 kvs_test
 test_gzip
 .venv
+out
 callgrind.out.*
