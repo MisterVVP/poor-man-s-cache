@@ -268,7 +268,7 @@ Check Redis metrics at http://localhost:9121/metrics
 - Revisit multithreading on server
 - Test edge case scenarios
 - Integrate valgrind checks into CI
-- More corouties
+- More corouties + refactor coroutine code to templates & other fancy things
 - Work on error responses from cache server
 - Support key expiration, support more operations.
 - Check if we can reduce memory usage during decompression as well.

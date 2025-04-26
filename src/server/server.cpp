@@ -81,14 +81,14 @@ CacheServer::~CacheServer() {
     serverShards.clear();
 }
 
-const char *server::CacheServer::processRequest(char *requestData)
+ProcessRequestTask server::CacheServer::processRequest(char *requestData, int client_fd)
 {
     char* com_saveptr = nullptr;
     char* request = strtok_r(requestData, " ", &com_saveptr);
-
+    const char* response;
     if (!request) {
         ++numErrors;
-        return UNABLE_TO_PARSE_REQUEST_ERROR;
+        response = UNABLE_TO_PARSE_REQUEST_ERROR;
     }
 
     char* key = strtok_r(nullptr, " ", &com_saveptr);
@@ -99,26 +99,31 @@ const char *server::CacheServer::processRequest(char *requestData)
 
         if (strcmp(request, "GET") == 0) {
             Query query {QueryCode::GET, key, hash };
-            return shard.processQuery(query);
+            response = shard.processQuery(query);
         }
 
         if (strcmp(request, "SET") == 0) {
             if (com_saveptr) {
                 Command cmd {CommandCode::SET, key, com_saveptr, hash};
-                return shard.processCommand(cmd);
+                response = shard.processCommand(cmd);
+            } else {
+                ++numErrors;
+                response = INVALID_COMMAND_FORMAT;
             }
-            ++numErrors;
-            return INVALID_COMMAND_FORMAT;
         }
 
         if (strcmp(request, "DEL") == 0) {
             Command cmd {CommandCode::DEL, key, nullptr, hash};
-            return shard.processCommand(cmd);
+            response = shard.processCommand(cmd);
         }
     }
 
-    ++numErrors;
-    return UNKNOWN_COMMAND;
+    if (!response) {
+        ++numErrors;
+        response = UNKNOWN_COMMAND;
+    }
+    auto srt = sendResponse(client_fd, response);
+    co_await srt;
 }
 
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
@@ -165,6 +170,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
             }
         }
 
+        std::vector<ProcessRequestTask> requestsToProcess;
         for (int i = 0; i < readers.size(); ++i) {
             auto fd = readers[i].client_fd;
             auto readResult = co_await readers[i];
@@ -177,10 +183,12 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
                 continue;
             }
 
-            auto response = processRequest(readResult.value().request.data());
-            auto responseSize = strlen(response);
+            auto processReqTask = processRequest(readResult.value().request.data(), fd);
+            requestsToProcess.emplace_back(std::move(processReqTask));
+        }
 
-            sendResponse(fd, response, responseSize);
+        for (int i = 0; i < requestsToProcess.size(); ++i) {
+            co_await requestsToProcess[i];
         }
 
         #ifndef NDEBUG
@@ -237,20 +245,20 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     co_return ReadRequestResult::Failure();
 }
 
-void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
+AsyncSendTask server::CacheServer::sendResponse(int client_fd, const char* response)
 {
+    size_t totalSent = 0;
+    auto responseSize = strlen(response);
     const size_t responseWithSeparatorSize = responseSize + 1;
     auto responseWithSeparator = std::make_unique_for_overwrite<char[]>(responseWithSeparatorSize);
     memcpy(responseWithSeparator.get(), response, responseWithSeparatorSize);
     responseWithSeparator.get()[responseSize] = MSG_SEPARATOR;
 
-    size_t totalSent = 0;
     while (totalSent < responseWithSeparatorSize) {
-        ssize_t bytesSent = send(client_fd, responseWithSeparator.get() + totalSent, responseWithSeparatorSize - totalSent, 0);
+        ssize_t bytesSent = co_await AsyncSendAwaiter(client_fd, responseWithSeparator.get() + totalSent, responseWithSeparatorSize - totalSent);
 
         if (bytesSent == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                std::this_thread::yield();
                 continue;
             } else {
                 perror("Error when sending data back to client");

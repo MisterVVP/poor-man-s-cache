@@ -87,9 +87,9 @@ namespace server {
             ConnManager connManager;
 
             AsyncReadTask readRequestAsync(int client_fd);
-            const char* processRequest(char* requestData);
+            ProcessRequestTask processRequest(char* requestData, int client_fd);
             HandleReqTask handleRequests(int epoll_fd);
-            void sendResponse(int client_fd, const char* response, const size_t responseSize);
+            AsyncSendTask sendResponse(int client_fd, const char* response);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
 
             EventLoop eventLoopIteration(AcceptConnTask& ac);

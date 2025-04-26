@@ -3,6 +3,7 @@
 #include <future>
 #include <coroutine>
 #include <thread>
+#include <sys/socket.h>
 #include "../non_copyable.h"
 
 namespace server {
@@ -122,10 +123,6 @@ namespace server {
             bool await_ready() const noexcept { return false; }
 
             std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
-                if (!c_handle.done()) {
-                    c_handle.resume();
-                    return c_handle;
-                }
                 return h;
             }
             
@@ -153,6 +150,137 @@ namespace server {
             }
     };
 
+    class AsyncSendTask : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;
+        private:
+            handle_type c_handle;
+            AsyncSendTask(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+
+                    void unhandled_exception() {}
+                    void return_void(){}
+
+                    AsyncSendTask get_return_object() { return AsyncSendTask{handle_type::from_promise(*this)}; }
+                    ~promise_type() {}
+            };
+
+            AsyncSendTask(AsyncSendTask &&art) : c_handle(art.c_handle){
+                art.c_handle = nullptr;
+            }
+
+            AsyncSendTask &operator=(AsyncSendTask &&art) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = art.c_handle;
+                art.c_handle = nullptr;
+                return *this;
+            }
+
+            ~AsyncSendTask() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            }
+            friend class ProcessRequestAwaiter;
+            friend class ProcessRequestTask;
+    };
+
+    class SuspendSelfAwaiter {
+        public:
+          bool await_ready() { return false; }
+          std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
+              return h;
+          }
+          void await_resume() {}
+      };
+      
+
+    class AsyncSendAwaiter {
+        private:
+            int fd;
+            const void* buffer;
+            size_t bufSize;
+        public:
+            AsyncSendAwaiter(int fd, const void* buffer, size_t bufSize) : fd(fd), buffer(buffer), bufSize(bufSize) {}
+            bool await_ready() const noexcept { return false; }
+
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
+                return h;
+            }
+
+            ssize_t await_resume() {
+                return ::send(fd, buffer, bufSize, 0);
+            }
+    };
+
+    class ProcessRequestTask : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;    
+        private:
+            handle_type c_handle;
+            ProcessRequestTask(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+
+                    void unhandled_exception() {}
+                    void return_void() {}
+
+                    ProcessRequestTask get_return_object() { return ProcessRequestTask{handle_type::from_promise(*this)}; }
+                    ~promise_type() {}
+
+                    SuspendSelfAwaiter await_transform(AsyncSendTask &ast) {
+                        return SuspendSelfAwaiter{};
+                    }
+            };
+
+            ProcessRequestTask(ProcessRequestTask &&hrt) : c_handle(hrt.c_handle) {
+                hrt.c_handle = nullptr;
+            }
+
+            ProcessRequestTask &operator=(ProcessRequestTask &&hrt) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = hrt.c_handle;
+                hrt.c_handle = nullptr;
+                return *this;
+            }
+
+            ~ProcessRequestTask() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            };
+            friend class HandleReqTask;
+            friend class HandleReqAwaiter;
+            friend class ProcessRequestAwaiter;
+    };
+
+    class ProcessRequestAwaiter {
+        private:
+            std::coroutine_handle<ProcessRequestTask::promise_type> c_handle;
+        public:
+            ProcessRequestAwaiter(ProcessRequestTask &prt) : c_handle(prt.c_handle) {}
+            bool await_ready() const noexcept { return false; }
+
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
+                return h;
+            }
+            
+            void await_resume() { }
+    };
+
     class HandleReqTask : NonCopyable {
         public:
             class promise_type;
@@ -174,6 +302,10 @@ namespace server {
 
                     ReadRequestAwaiter await_transform(AsyncReadTask &art) {
                         return ReadRequestAwaiter{art};
+                    }
+
+                    ProcessRequestAwaiter await_transform (ProcessRequestTask &prt) {
+                        return ProcessRequestAwaiter{prt};
                     }
             };
 
