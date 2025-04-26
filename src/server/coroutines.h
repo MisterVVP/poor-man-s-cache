@@ -2,7 +2,7 @@
 #pragma once
 #include <future>
 #include <coroutine>
-#include <thread>
+#include <optional>
 #include <sys/socket.h>
 #include "../non_copyable.h"
 
