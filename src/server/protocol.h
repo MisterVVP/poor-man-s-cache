@@ -3,6 +3,8 @@
 
 namespace server {
 
+    static const char MSG_SEPARATOR = 0x1F;
+
     // TODO: add error generator inline func ('ERROR: <reason>') + convert this to .hpp
 
     static constexpr const char* OK = "OK";

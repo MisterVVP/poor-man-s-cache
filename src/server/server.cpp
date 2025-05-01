@@ -128,11 +128,13 @@ ProcessRequestTask server::CacheServer::processRequest(char *requestData, int cl
 
 HandleReqTask CacheServer::handleRequests(int epoll_fd)
 {
+    std::vector<AsyncReadTask> readers;
+    readers.reserve(MAX_EVENTS);
+
     while (!cancellationToken) {
 
         #ifndef NDEBUG
         auto start = std::chrono::high_resolution_clock::now();
-        std::cout << "handleRequests started! epoll_fd = " << epoll_fd << std::endl;
         #endif
 
         int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
@@ -150,6 +152,7 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
 
         numRequests += event_count;
         eventsPerBatch = event_count;
+        readers.clear();
         std::vector<AsyncReadTask> readers;
         for (int i = 0; i < event_count; ++i) {
             auto client_fd = epoll_events[i].data.fd;
@@ -159,10 +162,6 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
             }
 
             if (epoll_events[i].events & EPOLLIN) {
-                #ifndef NDEBUG
-                std::cout << "readRequest client_fd = " << client_fd  << ", epoll_fd = " << epoll_fd << std::endl;
-                #endif
-
                 auto asyncRead = readRequestAsync(client_fd);
                 connManager.updateActivity(client_fd);
                 asyncRead.client_fd = client_fd;
@@ -173,6 +172,9 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
         std::vector<ProcessRequestTask> requestsToProcess;
         for (int i = 0; i < readers.size(); ++i) {
             auto fd = readers[i].client_fd;
+            #ifndef NDEBUG
+            std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
+            #endif
             auto readResult = co_await readers[i];
             if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
                 ++numErrors;
@@ -245,6 +247,41 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     co_return ReadRequestResult::Failure();
 }
 
+AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
+    const auto responseSize = strlen(response);
+    char sep = MSG_SEPARATOR;
+    struct iovec iov[2];
+
+    iov[0].iov_base = const_cast<char*>(response);
+    iov[0].iov_len  = responseSize;
+    iov[1].iov_base = &sep;
+    iov[1].iov_len  = 1;
+
+    size_t totalRequired = responseSize + 1;
+    size_t totalSent = 0;
+    int iov_idx = 0;
+    
+    struct msghdr msg{};
+    msg.msg_iov    = iov;
+    msg.msg_iovlen = 2;
+
+    while (totalSent < totalRequired) {
+        auto bytesSent = co_await AsyncSendAwaiter(client_fd, &msg);
+
+        if (bytesSent == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            } else {
+                perror("Error when sending data back to client");
+                ++numErrors;
+                break;
+            }
+        }
+
+        totalSent += bytesSent;
+    }
+}
+/*
 AsyncSendTask server::CacheServer::sendResponse(int client_fd, const char* response)
 {
     size_t totalSent = 0;
@@ -271,7 +308,7 @@ AsyncSendTask server::CacheServer::sendResponse(int client_fd, const char* respo
     }
 
     responseWithSeparator.reset();
-}
+}*/
 
 void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
 {

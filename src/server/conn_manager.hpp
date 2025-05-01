@@ -1,7 +1,6 @@
 #pragma once
 #include <cstdint>
 #include <atomic>
-#include <mutex>
 #include <coroutine>
 #include <unordered_map>
 #include <sys/socket.h>

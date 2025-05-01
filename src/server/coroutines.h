@@ -205,10 +205,9 @@ namespace server {
     class AsyncSendAwaiter {
         private:
             int fd;
-            const void* buffer;
-            size_t bufSize;
+            const msghdr* message;
         public:
-            AsyncSendAwaiter(int fd, const void* buffer, size_t bufSize) : fd(fd), buffer(buffer), bufSize(bufSize) {}
+            AsyncSendAwaiter(int fd, const msghdr* message) : fd(fd), message(message) {}
             bool await_ready() const noexcept { return false; }
 
             std::coroutine_handle<> await_suspend(std::coroutine_handle<> h) {
@@ -216,7 +215,7 @@ namespace server {
             }
 
             ssize_t await_resume() {
-                return ::send(fd, buffer, bufSize, 0);
+                return ::sendmsg(fd, message, 0);
             }
     };
 

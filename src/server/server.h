@@ -76,9 +76,6 @@ namespace server {
             std::atomic<bool> isRunning = false;
             std::jthread metricsUpdaterThread;            
 
-            std::mutex readReqMutex;
-            std::mutex writeMutex;
-
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
             int port;
