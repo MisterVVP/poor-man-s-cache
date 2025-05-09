@@ -21,6 +21,9 @@ namespace server {
 
     class ConnManager {
         private:
+            std::atomic<bool> cancellationToken;
+            int epoll_fd;
+
             int registerConnection(int epoll_fd, int client_fd) {
                 #ifndef NDEBUG
                 std::cout << "Adding client_fd = " << client_fd << " to epoll_fd = " << epoll_fd << std::endl;
@@ -68,7 +71,6 @@ namespace server {
             };
 
         public:
-            std::atomic<bool>& cancellationToken;
             std::atomic<uint_fast32_t> activeConnectionsCounter;
             std::unordered_map<int, ConnectionData> connections;
 
@@ -96,13 +98,7 @@ namespace server {
                 --activeConnectionsCounter;
             };
 
-            AcceptConnTask acceptConnections(int server_fd) {
-                co_yield EpollStatus::NotReady();
-                auto epoll_fd = epoll_create1(0);
-                if (epoll_fd == -1) {
-                    throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
-                }
-                co_yield EpollStatus::Running(epoll_fd);
+            void acceptConnections(int server_fd) {
                 sockaddr_in client_address;
                 socklen_t client_len = sizeof(client_address);
                 do {
@@ -112,32 +108,25 @@ namespace server {
                             continue;
                         };                      
                     } else {
-                        validateConnections();
+                        if (activeConnectionsCounter > 0) {
+                            validateConnections();
+                        }
                         if (errno == EINTR) {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;
                         } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            co_yield EpollStatus::Running(epoll_fd);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
                         } else {
                             perror("Failed to accept connection");
                         }
                     }
-
-                    if (activeConnectionsCounter > 0) {
-                        co_yield EpollStatus::Processing(epoll_fd);  
-                    }
                 } while (!cancellationToken);
-
-                if (epoll_fd >= 0) {
-                    close(epoll_fd);
-                }
-                if (cancellationToken) {
-                    co_return EpollStatus::Stopped();
-                } else {
-                    co_return EpollStatus::Terminated();
-                }            
             }
 
-            ConnManager(std::atomic<bool>& cToken): cancellationToken(cToken), activeConnectionsCounter(0) {}
+            void stop() {
+                cancellationToken = true;
+            }
+
+            ConnManager(int epoll_fd): epoll_fd(epoll_fd), cancellationToken(false), activeConnectionsCounter(0) {}
     };
 }

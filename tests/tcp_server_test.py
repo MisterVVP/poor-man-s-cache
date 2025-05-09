@@ -4,6 +4,8 @@ import time
 import logging
 import asyncio
 import multiprocessing
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Logger config
 logger = logging.getLogger(__name__)
@@ -18,7 +20,8 @@ host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
 delay_sec = float(os.environ.get('TEST_DELAY_SEC', 1))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
-num_processes = int(os.environ.get('TEST_POOL_SIZE', multiprocessing.cpu_count()))
+num_processes = int(os.environ.get('NUM_PROCESSES', multiprocessing.cpu_count()))
+threads_per_proc = int(os.getenv("TEST_THREADS_PER_PROC", "4"))
 pool_size = 1
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
 MSG_SEPARATOR = '\x1F'
@@ -204,8 +207,24 @@ async def worker_main_single_connection(start_idx, end_idx, task_type):
     await writer.wait_closed()
     return len(results) - sum(results)  # number of failures
 
+def thread_worker(start_idx, end_idx, task_type):
+    return asyncio.run(
+        worker_main_single_connection(start_idx, end_idx, task_type)
+    )
+
 def run_worker(start_idx, end_idx, task_type):
-    return asyncio.run(worker_main_single_connection(start_idx, end_idx, task_type))
+    chunk = (end_idx - start_idx) // threads_per_proc
+    args = [
+        (start_idx + i * chunk,
+         start_idx + (i + 1) * chunk if i != threads_per_proc - 1 else end_idx,
+         task_type)
+        for i in range(threads_per_proc)
+    ]
+
+    with ThreadPoolExecutor(max_workers=threads_per_proc) as tp:
+        failures = sum(tp.map(lambda p: thread_worker(*p), args))
+    return failures
+
 
 async def run_preload():
     pool = ConnectionPool(pool_size)
@@ -221,7 +240,7 @@ def run_parallel(task_type, test_name, requests_multiplier=1):
         (i * chunk_size, (i + 1) * chunk_size if i != num_processes - 1 else iterations_count, task_type)
         for i in range(num_processes)
     ]
-    logger.info(f"Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process ...")
+    logger.info(f"Running {test_name} with {iterations_count} iterations {num_processes} processes, {threads_per_proc} threads per process and {chunk_size} chunks per process ...")
     start = time.time()
     ctx = multiprocessing.get_context("fork")
 

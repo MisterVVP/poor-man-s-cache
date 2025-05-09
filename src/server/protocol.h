@@ -16,6 +16,10 @@ namespace server {
     static constexpr const char* UNABLE_TO_PARSE_REQUEST_ERROR = "ERROR: Unable to parse request";
     static constexpr const char* INVALID_COMMAND_FORMAT = "ERROR: Invalid command format";
 
+    static constexpr const char* GET_STR = "GET";
+    static constexpr const char* SET_STR = "SET";
+    static constexpr const char* DEL_STR = "DEL";
+
     /// @brief Query codes, 0: Reserved, 1: GET
     enum QueryCode : uint_fast8_t {
         UnknownQuery = 0,

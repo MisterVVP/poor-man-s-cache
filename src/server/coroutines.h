@@ -15,26 +15,8 @@ namespace server {
     };
 
     struct ReadRequestResult {
-        private:
-            ReadRequestResult(ReqReadOperationResult res) : operationResult(res) {};
-
-        public:
-            std::string request;
-            ReqReadOperationResult operationResult;
-
-            ReadRequestResult(std::string&& request, ReqReadOperationResult res) : request(std::move(request)), operationResult(res) {};
-
-            static ReadRequestResult Success(std::string req) noexcept {
-                return ReadRequestResult { std::move(req), ReqReadOperationResult::Success };
-            };
-
-            static ReadRequestResult Failure() noexcept {
-                return ReadRequestResult { ReqReadOperationResult::Failure };
-            };
-
-            static ReadRequestResult AwaitingData() noexcept {
-                return ReadRequestResult { ReqReadOperationResult::AwaitingData };
-            };
+        std::string request;
+        ReqReadOperationResult operationResult;
     };
 
     /// @brief Server status results
@@ -76,17 +58,16 @@ namespace server {
         public:
             class promise_type {
                 public:
-                    std::optional<ReadRequestResult> result;
+                    ReadRequestResult result;
                     std::suspend_never initial_suspend() { return {}; }
                     std::suspend_always final_suspend() noexcept { return {}; }
 
                     void unhandled_exception() {}
-                    void return_value(std::optional<ReadRequestResult> res){
+                    void return_value(ReadRequestResult res) {
                         result = res;
                     }
 
                     AsyncReadTask get_return_object() { return AsyncReadTask{handle_type::from_promise(*this)}; }
-                    ~promise_type() {}
             };
 
             AsyncReadTask(AsyncReadTask &&art) : c_handle(art.c_handle), client_fd(art.client_fd) {
@@ -126,8 +107,7 @@ namespace server {
                 return h;
             }
             
-            std::optional<ReadRequestResult> await_resume()
-            {
+            ReadRequestResult await_resume() {
                 return c_handle.promise().result;
             }
     };
@@ -167,7 +147,6 @@ namespace server {
                     void return_void(){}
 
                     AsyncSendTask get_return_object() { return AsyncSendTask{handle_type::from_promise(*this)}; }
-                    ~promise_type() {}
             };
 
             AsyncSendTask(AsyncSendTask &&art) : c_handle(art.c_handle){
@@ -236,7 +215,6 @@ namespace server {
                     void return_void() {}
 
                     ProcessRequestTask get_return_object() { return ProcessRequestTask{handle_type::from_promise(*this)}; }
-                    ~promise_type() {}
 
                     SuspendSelfAwaiter await_transform(AsyncSendTask &ast) {
                         return SuspendSelfAwaiter{};
@@ -262,7 +240,6 @@ namespace server {
                 }
             };
             friend class HandleReqTask;
-            friend class HandleReqAwaiter;
             friend class ProcessRequestAwaiter;
     };
 
@@ -277,7 +254,7 @@ namespace server {
                 return h;
             }
             
-            void await_resume() { }
+            void await_resume() {}
     };
 
     class HandleReqTask : NonCopyable {
@@ -294,10 +271,18 @@ namespace server {
                     std::suspend_always final_suspend() noexcept { return {}; }
 
                     void unhandled_exception() {}
-                    void return_void(){}
+                    int event_count;
+
+                    void return_value(int value) {
+                        event_count = value;
+                    }
+
+                    std::suspend_always yield_value(int value) {
+                        event_count = value;
+                        return {};
+                    }
 
                     HandleReqTask get_return_object() { return HandleReqTask{handle_type::from_promise(*this)}; }
-                    ~promise_type() {}
 
                     ReadRequestAwaiter await_transform(AsyncReadTask &art) {
                         return ReadRequestAwaiter{art};
@@ -307,6 +292,14 @@ namespace server {
                         return ProcessRequestAwaiter{prt};
                     }
             };
+
+            int next_value() {
+                auto &promise = c_handle.promise();
+                if (!c_handle.done()) {
+                    c_handle.resume();
+                }
+                return promise.event_count;
+            }
 
             HandleReqTask(HandleReqTask &&hrt) : c_handle(hrt.c_handle) {
                 hrt.c_handle = nullptr;
@@ -326,149 +319,6 @@ namespace server {
                     c_handle.destroy();
                 }
             };
-            friend class EventLoop;
-            friend class HandleReqAwaiter;
+            friend class SuspendSelfAwaiter;
     };
-    
-    struct HandleReqAwaiter {
-        private:
-            HandleReqTask::promise_type *promise;
-        public:
-            HandleReqAwaiter(HandleReqTask::promise_type *p) : promise(p) {}
-            bool await_ready() const noexcept { return false; }
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
-            void await_resume() noexcept {}
-    };
-
-    class AcceptConnTask : NonCopyable {
-        public:
-            class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;
-        
-        private:
-            handle_type c_handle;
-            AcceptConnTask(handle_type h) : c_handle(h) {}
-        
-        public:        
-            class promise_type {
-                public:
-                    EpollStatus eStatus;
-
-                    std::suspend_never initial_suspend() { return {}; }
-                    std::suspend_always final_suspend() noexcept {                    
-                        return {}; 
-                    }
-            
-                    void unhandled_exception() {}
-            
-                    std::suspend_always yield_value(EpollStatus eStat) {
-                        eStatus = eStat;
-                        return {};
-                    }
-            
-                    void return_value(EpollStatus eStat) {
-                        eStatus = eStat;
-                    }
-            
-                    AcceptConnTask get_return_object() {
-                        auto handle = handle_type::from_promise(*this);
-                        return AcceptConnTask{handle};
-                    }
-            
-                    promise_type() : eStatus(EpollStatus::NotReady()) {}
-                    ~promise_type() {}
-            };
-
-            AcceptConnTask(AcceptConnTask &&act) : c_handle(act.c_handle) {
-                act.c_handle = nullptr;
-            }
-
-            AcceptConnTask &operator=(AcceptConnTask &&act) {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-                c_handle = act.c_handle;
-                act.c_handle = nullptr;
-                return *this;
-            }
-
-            ~AcceptConnTask() {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-            };
-        friend class EventLoop;
-    };
-
-    class ConnAwaiter {
-        private:
-            AcceptConnTask::promise_type *promise;
-        public:
-            ConnAwaiter(AcceptConnTask::promise_type *p) : promise(p) {}
-            bool await_ready() const noexcept { return false; }
-            std::coroutine_handle<> await_suspend(std::coroutine_handle<> h);
-            EpollStatus await_resume();
-    };
-
-    class EventLoop : NonCopyable {
-        public:
-            class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;
-        private:
-            handle_type c_handle;
-            EventLoop(handle_type h) : c_handle(h) {};
-        public:
-            class promise_type {
-                public:
-                    int resultCode;
-
-                    std::suspend_never initial_suspend() { return {}; }
-                    std::suspend_always final_suspend() noexcept { return {}; }
-
-                    void unhandled_exception() {}
-                    void return_value(int rCode) {
-                        resultCode = rCode;
-                    }
-
-                    EventLoop get_return_object() {
-                        auto handle = handle_type::from_promise(*this);
-                        return EventLoop{handle}; 
-                    }
-                    ~promise_type() {}
-
-                    HandleReqAwaiter await_transform(HandleReqTask &hrt) {
-                        auto &promise = hrt.c_handle.promise();
-                        return HandleReqAwaiter{&promise};
-                    }
-
-                    ConnAwaiter await_transform(AcceptConnTask &ac) {
-                        auto &promise = ac.c_handle.promise();
-                        return ConnAwaiter{&promise};
-                    }
-            };
-
-            int finalResult() {
-                return c_handle.promise().resultCode;
-            }
-
-            EventLoop(EventLoop &&el) : c_handle(el.c_handle) {
-                el.c_handle = nullptr;
-            }
-
-            EventLoop &operator=(EventLoop &&el) {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-                c_handle = el.c_handle;
-                el.c_handle = nullptr;
-                return *this;
-            }
-
-            ~EventLoop() {
-                if (c_handle) {
-                    c_handle.destroy();
-                }
-            };
-    };
-
 }
