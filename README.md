@@ -22,6 +22,20 @@ Another pet project to practice.
 
 ### Functional tests
 
+#### Testing method
+Local python script which is leveraging multiprocessing to send requests to the running server and await response from server.
+
+There are few testing scenarios supported right now:
+1. Multiple GET requests
+2. Multiple SET requests
+3. Multiple DEL requests
+4. (SET key, GET key, GET non_existent_key) workflow
+
+Functional RPS is calculated based on: `T<sub>client<sub>+T<sub>server<sub> / N`  
+- T<sub>client<sub> - time spent to send all the requests by client + time to receive and verify the responses
+- T<sub>server<sub> - time spent to process and respond to all the request by server
+- N - total number of requests 
+
 #### Test setups
 
 Local setup (all with high end processor and half gbit internet) variations.
@@ -44,7 +58,10 @@ CI setup. 1 million requests total (50 000 requests per test container), 20 test
 1. 20 000 RPS for GET / SET / DEL tests ,  ~ 22 000 RPS for  (SET key, GET key, GET non_existent_key) workflow test
 
 #### Goals
-Next step is 200k+ requests per second on Ubuntu
+Next step is 200k+ functional RPS on Ubuntu
+
+### Performance tests
+TODO. Server performance (client agnostic) should be calculated on server. Can introduce PERF command into the protocol
 
 ### Unit tests
 
@@ -244,6 +261,7 @@ done
 ```
 
 ### To check how Redis works with the same task
+
 ```
 docker compose -f docker-compose-local.yaml --profile redis build
 docker compose -f docker-compose-local.yaml --profile redis up
@@ -251,16 +269,7 @@ docker compose -f docker-compose-local.yaml --profile redis up
 Check Redis metrics at http://localhost:9121/metrics
 
 #### Results
-> [!NOTE]
-> There could be a way to configure Redis to work with the same amount of data, however, I cannot verify this without diving deep into Redis configuration. Thus, I am comparing against the default Redis configuration.
-> It is possible that there is automatic DDoS protection integrated into Redis as well, though I do not think it is fair to enable such functionality by default.
-
-- Redis just stops processing requests normally in multithreaded high troughput scenario, poor-man's-cache works.
-- Redis seems to have very low throughput
-- Redis uses a small amount of memory, while poor-man's-cache consumes significantly more.
-
-> [!NOTE]
-> Redis Pipelines could be something to try out when testing against Redis, but it won't be fair comparison until we implement batch processing within a single connection
+TODO - revisit this
 
 ## TODO
 - Revisit batching strategies on server
