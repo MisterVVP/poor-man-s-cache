@@ -22,7 +22,7 @@ jobs:
       uses: actions/checkout@v3
     
     - name: Generate test suite
-      run: pip install jinja2 && python generate_compose.py 20
+      run: pip install jinja2 && python generate_compose.py 1
 
     - name: Build docker images and run unit tests
       run: docker compose --profile main --profile tests build

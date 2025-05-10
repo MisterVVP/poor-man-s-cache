@@ -3,7 +3,7 @@
 using namespace server;
 
 CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings):
-    cancellationToken(cToken), numShards(settings.numShards), port(settings.port), connManager(cToken)
+    cancellationToken(cToken), numShards(settings.numShards), port(settings.port)
 {
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -63,8 +63,15 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         throw std::system_error(errno, std::system_category(), "Listen failed");
     }
 
+    epoll_fd = epoll_create1(0);
+    if (epoll_fd == -1) {
+        throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
+    }
+
+    connManager = std::make_unique<ConnManager>(epoll_fd);
+
     #ifndef NDEBUG
-    std::cout << "Initializing " << numShards << " server shards..." << std::endl;
+    std::cout << "Initializing " << numShards << " server shards…" << std::endl;
     #endif
     serverShards.reserve(numShards);
     KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
@@ -81,14 +88,14 @@ CacheServer::~CacheServer() {
     serverShards.clear();
 }
 
-const char *server::CacheServer::processRequest(char *requestData)
+ProcessRequestTask server::CacheServer::processRequest(char *requestData, int client_fd)
 {
     char* com_saveptr = nullptr;
     char* request = strtok_r(requestData, " ", &com_saveptr);
-
+    const char* response;
     if (!request) {
         ++numErrors;
-        return UNABLE_TO_PARSE_REQUEST_ERROR;
+        response = UNABLE_TO_PARSE_REQUEST_ERROR;
     }
 
     char* key = strtok_r(nullptr, " ", &com_saveptr);
@@ -97,37 +104,40 @@ const char *server::CacheServer::processRequest(char *requestData)
         auto shardId = hash % numShards;
         auto& shard = serverShards[shardId];
 
-        if (strcmp(request, "GET") == 0) {
+        if (strcmp(request, GET_STR) == 0) {
             Query query {QueryCode::GET, key, hash };
-            return shard.processQuery(query);
+            response = shard.processQuery(query);
         }
 
-        if (strcmp(request, "SET") == 0) {
+        if (strcmp(request, SET_STR) == 0) {
             if (com_saveptr) {
                 Command cmd {CommandCode::SET, key, com_saveptr, hash};
-                return shard.processCommand(cmd);
+                response = shard.processCommand(cmd);
+            } else {
+                ++numErrors;
+                response = INVALID_COMMAND_FORMAT;
             }
-            ++numErrors;
-            return INVALID_COMMAND_FORMAT;
         }
 
-        if (strcmp(request, "DEL") == 0) {
+        if (strcmp(request, DEL_STR) == 0) {
             Command cmd {CommandCode::DEL, key, nullptr, hash};
-            return shard.processCommand(cmd);
+            response = shard.processCommand(cmd);
         }
     }
 
-    ++numErrors;
-    return UNKNOWN_COMMAND;
+    if (!response) {
+        ++numErrors;
+        response = UNKNOWN_COMMAND;
+    }
+    auto srt = sendResponse(client_fd, response);
+    co_await srt;
 }
 
-HandleReqTask CacheServer::handleRequests(int epoll_fd)
+HandleReqTask CacheServer::handleRequests()
 {
     while (!cancellationToken) {
-
         #ifndef NDEBUG
         auto start = std::chrono::high_resolution_clock::now();
-        std::cout << "handleRequests started! epoll_fd = " << epoll_fd << std::endl;
         #endif
 
         int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
@@ -135,61 +145,63 @@ HandleReqTask CacheServer::handleRequests(int epoll_fd)
             if (errno != EINTR) {
                 perror("epoll_wait failed");
             }
-            co_return;
+            co_return event_count;
         } else if (event_count == 0) {
             #ifndef NDEBUG
             std::cout << "handleRequests finished without events to handle!" << std::endl;
             #endif
-            co_return;
-        }
+            co_yield event_count;
+        } else {
+            std::vector<AsyncReadTask> readers;
+            readers.reserve(MAX_EVENTS);
+            numRequests += event_count;
+            eventsPerBatch = event_count;
+            for (int i = 0; i < event_count; ++i) {
+                auto client_fd = epoll_events[i].data.fd;
+                if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
+                    connManager->closeConnection(client_fd);
+                    continue;
+                }
 
-        numRequests += event_count;
-        eventsPerBatch = event_count;
-        std::vector<AsyncReadTask> readers;
-        for (int i = 0; i < event_count; ++i) {
-            auto client_fd = epoll_events[i].data.fd;
-            if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
-                connManager.closeConnection(client_fd);
-                continue;
+                if (epoll_events[i].events & EPOLLIN) {
+                    auto asyncRead = readRequestAsync(client_fd);
+                    connManager->updateActivity(client_fd);
+                    asyncRead.client_fd = client_fd;
+                    readers.emplace_back(std::move(asyncRead));
+                }
             }
 
-            if (epoll_events[i].events & EPOLLIN) {
+            std::vector<ProcessRequestTask> requestsToProcess;
+            for (int i = 0; i < readers.size(); ++i) {
+                auto fd = readers[i].client_fd;
                 #ifndef NDEBUG
-                std::cout << "readRequest client_fd = " << client_fd  << ", epoll_fd = " << epoll_fd << std::endl;
+                std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
                 #endif
+                auto readResult = co_await readers[i];
+                if (readResult.operationResult == ReqReadOperationResult::Failure) {
+                    ++numErrors;
+                    continue;
+                }
 
-                auto asyncRead = readRequestAsync(client_fd);
-                connManager.updateActivity(client_fd);
-                asyncRead.client_fd = client_fd;
-                readers.emplace_back(std::move(asyncRead));
+                if (readResult.operationResult == ReqReadOperationResult::AwaitingData) {
+                    continue;
+                }
+
+                auto processReqTask = processRequest(readResult.request.data(), fd);
+                requestsToProcess.emplace_back(std::move(processReqTask));
             }
+
+            for (int i = 0; i < requestsToProcess.size(); ++i) {
+                co_await requestsToProcess[i];
+            }
+
+            #ifndef NDEBUG
+            auto stop = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
+            std::cout << "handleRequests interation finished in " << duration.count() << " ns ! event_count = " << event_count << std::endl;
+            #endif
+            co_yield event_count;
         }
-
-        for (int i = 0; i < readers.size(); ++i) {
-            auto fd = readers[i].client_fd;
-            auto readResult = co_await readers[i];
-            if (readResult.value().operationResult == ReqReadOperationResult::Failure) {
-                ++numErrors;
-                continue;
-            }
-
-            if (readResult.value().operationResult == ReqReadOperationResult::AwaitingData) {
-                continue;
-            }
-
-            auto response = processRequest(readResult.value().request.data());
-            auto responseSize = strlen(response);
-
-            sendResponse(fd, response, responseSize);
-        }
-
-        #ifndef NDEBUG
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
-        std::cout << "handleRequests finished in " << duration.count() << " ns ! event_count = " << event_count << std::endl;
-        #endif
-
-        co_return;
     }
 }
 
@@ -209,17 +221,17 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             } else if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
-                perror("Failed to read client request buffer: interruption signal received. Retrying...");
+                perror("Failed to read client request buffer: interruption signal received. Retrying…");
                 ++readErrorsCounter;
                 continue;
             }
-
-            perror("Failed to read client request buffer, client_fd = " + client_fd);
-            co_return ReadRequestResult::Failure();
+            std::string_view errMessage = "Failed to read client request buffer, client_fd = " + client_fd;
+            perror(errMessage.data());
+            co_return ReadRequestResult{{}, ReqReadOperationResult::Failure};
         }
 
         if (bytes_read == 0) {
-            co_return ReadRequestResult::AwaitingData();
+            co_return ReadRequestResult{{}, ReqReadOperationResult::AwaitingData};
         }
 
         if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
@@ -232,25 +244,34 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     }
 
     if (receivedLastBlock) {
-        co_return ReadRequestResult::Success(request);
+        co_return ReadRequestResult{ std::move(request), ReqReadOperationResult::Success };
     }
-    co_return ReadRequestResult::Failure();
+    co_return ReadRequestResult{{}, ReqReadOperationResult::Failure};
 }
 
-void server::CacheServer::sendResponse(int client_fd, const char* response, const size_t responseSize)
-{
-    const size_t responseWithSeparatorSize = responseSize + 1;
-    auto responseWithSeparator = std::make_unique_for_overwrite<char[]>(responseWithSeparatorSize);
-    memcpy(responseWithSeparator.get(), response, responseWithSeparatorSize);
-    responseWithSeparator.get()[responseSize] = MSG_SEPARATOR;
+AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
+    const auto responseSize = strlen(response);
+    char sep = MSG_SEPARATOR;
+    struct iovec iov[2];
 
+    iov[0].iov_base = const_cast<char*>(response);
+    iov[0].iov_len  = responseSize;
+    iov[1].iov_base = &sep;
+    iov[1].iov_len  = 1;
+
+    size_t totalRequired = responseSize + 1;
     size_t totalSent = 0;
-    while (totalSent < responseWithSeparatorSize) {
-        ssize_t bytesSent = send(client_fd, responseWithSeparator.get() + totalSent, responseWithSeparatorSize - totalSent, 0);
+    int iov_idx = 0;
+    
+    struct msghdr msg{};
+    msg.msg_iov    = iov;
+    msg.msg_iovlen = 2;
+
+    while (totalSent < totalRequired) {
+        auto bytesSent = co_await AsyncSendAwaiter(client_fd, &msg);
 
         if (bytesSent == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                std::this_thread::yield();
                 continue;
             } else {
                 perror("Error when sending data back to client");
@@ -261,15 +282,13 @@ void server::CacheServer::sendResponse(int client_fd, const char* response, cons
 
         totalSent += bytesSent;
     }
-
-    responseWithSeparator.reset();
 }
 
 void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, connManager.activeConnectionsCounter, numRequests, eventsPerBatch));
+        channel.push(CacheServerMetrics(numErrors, connManager->activeConnectionsCounter, numRequests, eventsPerBatch));
     }
 }
 
@@ -277,78 +296,58 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
 {
     isRunning = true;
-    metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken)
-    {
+    metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken) {
         metricsUpdater(channel, stopToken);
     });
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
-    
 
-    std::atomic<int> executionResult;
-    std::vector<std::jthread> loopWorkers;
-    const auto numThreads = 1; // TODO: right now we are not thread safe, investigate if multithreading could make sense std::min(NUM_WORKERS, std::thread::hardware_concurrency());
-    for (int i = 0; i < numThreads; ++i) {
-        loopWorkers.emplace_back(std::jthread([this, &executionResult](std::stop_token stopToken)
-        {
-            auto res = eventLoop();
-            if(executionResult != ServerStatus::Stopped) {
-                executionResult = res;
+    int resultCode = 0;
+
+    connManagerThread = std::jthread([this](std::stop_token stopToken) {
+        connManager->acceptConnections(server_fd);
+        shutdownLatch.count_down();
+    });
+
+    reqHandlerThread = std::jthread([this](std::stop_token stopToken) {
+        auto hrt = handleRequests();
+        while (!stopToken.stop_requested() && !cancellationToken) {
+            auto events_processed = hrt.next_value();
+            if (!events_processed) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
-        }));
-    }
+            // TODO: try to recover when events_processed = -1
+        }
+        shutdownLatch.count_down();
+    });
 
-    for (int i = 0; i < numThreads; ++i) {
-        loopWorkers[i].join();
-    };
+    shutdownLatch.arrive_and_wait();
 
     Stop();
     
-    return executionResult;
-}
-
-EventLoop server::CacheServer::eventLoopIteration(AcceptConnTask& ac)
-{
-    auto eStatus = co_await ac;
-    
-    if (eStatus.status == ServerStatus::Processing) {
-        auto hrt = handleRequests(eStatus.epoll_fd);
-        co_await hrt;
-    }
-
-    if (eStatus.status < 0 ) {
-        std::cerr << "Unexpected termination of the server!" << std::endl;
-        Stop();
-    }
-
-    co_return eStatus.status;
-}
-
-int CacheServer::eventLoop() {
-    auto ac = connManager.acceptConnections(server_fd);
-    int rCode = 0;
-    do {
-        auto loop = eventLoopIteration(ac);
-        rCode = loop.finalResult();
-    } while(!cancellationToken && rCode > 0);
-
-    return rCode;
+    return resultCode;
 }
 
 void CacheServer::Stop() noexcept
 {
-    if(isRunning) {
-        isRunning = false;
-
-        std::cout << "Stopping server..." << std::endl;
-        cancellationToken = true;
-
-        std::cout << "Stopping metrics updater thread..." << std::endl;
-        auto mu_sSource =  metricsUpdaterThread.get_stop_source();
-        if (mu_sSource.stop_possible()) {
-            mu_sSource.request_stop();
-        }
-        std::cout << "Metrics updater thread stopped" << std::endl;
-        std::cout << "Server stopped" << std::endl;
+    if (!isRunning) {
+        return;
     }
+
+    std::cout << "Stopping server…\n";
+    connManager->stop();
+    isRunning        = false;
+    cancellationToken = true;
+
+    if (epoll_fd >= 0) {
+        close(epoll_fd);
+    }
+
+    for (auto* t : { &metricsUpdaterThread, &connManagerThread, &reqHandlerThread }) {
+        if (t->joinable()) {
+            t->request_stop();
+        }
+    }
+
+    std::cout << "Server stopped.\n";
 }

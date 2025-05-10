@@ -22,6 +22,20 @@ Another pet project to practice.
 
 ### Functional tests
 
+#### Testing method
+Local python script which is leveraging multiprocessing to send requests to the running server and await response from server.
+
+There are few testing scenarios supported right now:
+1. Multiple GET requests
+2. Multiple SET requests
+3. Multiple DEL requests
+4. (SET key, GET key, GET non_existent_key) workflow
+
+Functional RPS is calculated based on: `T<sub>client<sub>+T<sub>server<sub> / N`  
+- T<sub>client<sub> - time spent to send all the requests by client + time to receive and verify the responses
+- T<sub>server<sub> - time spent to process and respond to all the request by server
+- N - total number of requests 
+
 #### Test setups
 
 Local setup (all with high end processor and half gbit internet) variations.
@@ -40,11 +54,47 @@ Local setup. 10 million requests per test suite. 24 logical threads.
 2. ~ 90 000 RPS for GET / SET / DEL tests, TBD
 3. TBD
 
-CI setup. 1 million requests total (50 000 requests per test container), 20 test containers
-1. 20 000 RPS for GET / SET / DEL tests ,  ~ 22 000 RPS for  (SET key, GET key, GET non_existent_key) workflow test
+CI setup. 1 million requests total (4 processes and 250000 chunks per process)
+1. ~ 22 500 RPS for GET / SET / DEL tests ,  ~ 22 500 RPS for  (SET key, GET key, GET non_existent_key) workflow test
 
 #### Goals
-Next step is 200k+ requests per second on Ubuntu
+Next step is 200k+ functional RPS on Ubuntu
+
+#### How Redis works with the same task
+Below are results that I got from using Redis.
+
+1. Ubuntu
+
+Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/apt/
+
+```
+redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+```
+
+**Results**:  ~ 110 000 RPS for GET / SET tests
+**Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
+
+2. Docker on Ubuntu
+
+Run redis in docker
+```
+docker compose -f docker-compose-local.yaml --profile redis build
+docker compose -f docker-compose-local.yaml --profile redis up
+```
+
+Run official redis-benchmark tool
+```
+docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+```
+
+**Results**:  ~ 110 000 RPS for GET / SET tests
+
+3. Docker on Windows
+
+TODO: not verified
+
+### Performance tests
+TODO. Server performance (client agnostic) should be calculated on server. Can introduce PERF command into the protocol
 
 ### Unit tests
 
@@ -243,32 +293,12 @@ do
 done
 ```
 
-### To check how Redis works with the same task
-```
-docker compose -f docker-compose-local.yaml --profile redis build
-docker compose -f docker-compose-local.yaml --profile redis up
-```
-Check Redis metrics at http://localhost:9121/metrics
-
-#### Results
-> [!NOTE]
-> There could be a way to configure Redis to work with the same amount of data, however, I cannot verify this without diving deep into Redis configuration. Thus, I am comparing against the default Redis configuration.
-> It is possible that there is automatic DDoS protection integrated into Redis as well, though I do not think it is fair to enable such functionality by default.
-
-- Redis just stops processing requests normally in multithreaded high troughput scenario, poor-man's-cache works.
-- Redis seems to have very low throughput
-- Redis uses a small amount of memory, while poor-man's-cache consumes significantly more.
-
-> [!NOTE]
-> Redis Pipelines could be something to try out when testing against Redis, but it won't be fair comparison until we implement batch processing within a single connection
-
 ## TODO
-- Revisit batching strategies on server
-- Consider support for pipelining requests
-- Revisit multithreading on server
+- Implement requests pipelining -> this could be killer feature for performance in high throughput scenarios
+- Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
-- More corouties
+- More corouties + refactor coroutine code to templates & other fancy things (if that won't hurt performance)
 - Work on error responses from cache server
 - Support key expiration, support more operations.
 - Check if we can reduce memory usage during decompression as well.

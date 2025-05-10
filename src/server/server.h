@@ -8,6 +8,7 @@
 #include <functional>
 #include <thread>
 #include <vector>
+#include <latch>
 #include <queue>
 #include <semaphore>
 #include <fcntl.h>
@@ -68,32 +69,30 @@ namespace server {
                 RequestPart(char* part, size_t size, size_t location): part(part), size(size), location(location){}
             };
 
+            std::latch shutdownLatch{2};
             std::binary_semaphore metricsSemaphore{0};
+            std::unique_ptr<ConnManager> connManager;
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<uint_fast32_t> eventsPerBatch = 0;
             std::atomic<bool>& cancellationToken;
             std::atomic<bool> isRunning = false;
-            std::jthread metricsUpdaterThread;            
-
-            std::mutex readReqMutex;
-            std::mutex writeMutex;
+            std::jthread metricsUpdaterThread;
+            std::jthread connManagerThread;
+            std::jthread reqHandlerThread;
 
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
             int port;
             int server_fd;
+            int epoll_fd;
             epoll_event epoll_events[MAX_EVENTS];
-            ConnManager connManager;
 
             AsyncReadTask readRequestAsync(int client_fd);
-            const char* processRequest(char* requestData);
-            HandleReqTask handleRequests(int epoll_fd);
-            void sendResponse(int client_fd, const char* response, const size_t responseSize);
+            ProcessRequestTask processRequest(char* requestData, int client_fd);
+            HandleReqTask handleRequests();
+            AsyncSendTask sendResponse(int client_fd, const char* response);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
-
-            EventLoop eventLoopIteration(AcceptConnTask& ac);
-            int eventLoop();
         public:
             CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});
             ~CacheServer();

@@ -3,7 +3,6 @@
 #include <chrono>
 #include <future>
 
-#define MSG_SEPARATOR 0x1F
 #define EPOLL_WAIT_TIMEOUT_MSEC 100 // TODO: make configurable
 #define MAX_EVENTS 2048 // TODO: make configurable
 #define MAX_REQUEST_SIZE 536870912
