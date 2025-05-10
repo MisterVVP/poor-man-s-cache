@@ -295,6 +295,7 @@ done
 
 ## TODO
 - Implement requests pipelining -> this could be killer feature for performance in high throughput scenarios
+- Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
 - More corouties + refactor coroutine code to templates & other fancy things (if that won't hurt performance)
