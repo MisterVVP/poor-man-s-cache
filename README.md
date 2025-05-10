@@ -188,7 +188,7 @@ python3 ./tcp_server_test.py
 
 Run (e.g. for Release build)
 ```
-valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose ./out/build/Debug/src/poor-man-s-cache
+valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose ./out/build/Release/src/poor-man-s-cache
 ```
 
 Run python tests, e.g. from tests folder:
