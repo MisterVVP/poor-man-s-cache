@@ -54,11 +54,44 @@ Local setup. 10 million requests per test suite. 24 logical threads.
 2. ~ 90 000 RPS for GET / SET / DEL tests, TBD
 3. TBD
 
-CI setup. 1 million requests total (50 000 requests per test container), 20 test containers
-1. 20 000 RPS for GET / SET / DEL tests ,  ~ 22 000 RPS for  (SET key, GET key, GET non_existent_key) workflow test
+CI setup. 1 million requests total (4 processes and 250000 chunks per process)
+1. ~ 22 500 RPS for GET / SET / DEL tests ,  ~ 22 500 RPS for  (SET key, GET key, GET non_existent_key) workflow test
 
 #### Goals
 Next step is 200k+ functional RPS on Ubuntu
+
+#### How Redis works with the same task
+Below are results that I got from using Redis.
+
+1. Ubuntu
+
+Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/apt/
+
+```
+redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+```
+
+**Results**:  ~ 110 000 RPS for GET / SET tests
+**Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
+
+2. Docker on Ubuntu
+
+Run redis in docker
+```
+docker compose -f docker-compose-local.yaml --profile redis build
+docker compose -f docker-compose-local.yaml --profile redis up
+```
+
+Run official redis-benchmark tool
+```
+docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+```
+
+**Results**:  ~ 110 000 RPS for GET / SET tests
+
+3. Docker on Windows
+
+TODO: not verified
 
 ### Performance tests
 TODO. Server performance (client agnostic) should be calculated on server. Can introduce PERF command into the protocol
@@ -260,21 +293,8 @@ do
 done
 ```
 
-### To check how Redis works with the same task
-
-```
-docker compose -f docker-compose-local.yaml --profile redis build
-docker compose -f docker-compose-local.yaml --profile redis up
-```
-Check Redis metrics at http://localhost:9121/metrics
-
-#### Results
-TODO - revisit this
-
 ## TODO
-- Revisit batching strategies on server
-- Consider support for pipelining requests
-- Revisit multithreading on server
+- Implement requests pipelining -> this could be killer feature for performance in high throughput scenarios
 - Test edge case scenarios
 - Integrate valgrind checks into CI
 - More corouties + refactor coroutine code to templates & other fancy things (if that won't hurt performance)
