@@ -71,7 +71,7 @@ Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install
 redis-benchmark -t set -r 1000000 -n 1000000 -d 12
 ```
 
-**Results**:  ~ 110 000 RPS for GET / SET tests
+**Results**:  ~ 110 000 RPS for GET / SET tests  
 **Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
 
 2. Docker on Ubuntu
