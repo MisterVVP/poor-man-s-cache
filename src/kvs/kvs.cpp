@@ -269,5 +269,5 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 #ifndef NDEBUG
     std::cerr << "Failed to find key during deletion, key = " << key << " after " << attempt << " attempts." << std::endl;
 #endif
-    return true;
+    return false;
 }
