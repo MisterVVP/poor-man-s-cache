@@ -241,11 +241,11 @@ def run_workflow_tests(): return run_parallel("workflow", "Workflow tests", requ
 
 async def pipeline_scenario():
     reader, writer = await asyncio.open_connection(host, port)
-    writer.write(b"SET a 1\x1FSET b 2\x1FGET a\x1F")
+    writer.write(b"SET a 1\x1FSET b 2\x1FGET a\x1FDEL b\x1FGET b\x1FDEL a\x1F")
     await writer.drain()
 
     responses = []
-    for _ in range(3):
+    for _ in range(6):
         resp = await reader.readuntil(ENCODED_SEPARATOR)
         responses.append(resp.decode().rstrip(MSG_SEPARATOR))
 
