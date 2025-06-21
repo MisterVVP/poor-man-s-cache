@@ -3,6 +3,7 @@
 #include <atomic>
 #include <coroutine>
 #include <unordered_map>
+#include <string>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -17,6 +18,10 @@ namespace server {
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
+        std::string readBuffer;
+
+        ConnectionData() = default;
+        ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {}
     };
 
     class ConnManager {
