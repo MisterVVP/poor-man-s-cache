@@ -7,3 +7,4 @@ out
 tests/.venv
 kvs_test
 test_gzip
+docs
