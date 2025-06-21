@@ -19,7 +19,6 @@ graph TD
 ### Current
 
 ```mermaid
-
 sequenceDiagram
     participant Client
     participant Server
