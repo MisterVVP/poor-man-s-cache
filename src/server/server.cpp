@@ -187,8 +187,13 @@ HandleReqTask CacheServer::handleRequests()
                     continue;
                 }
 
-                auto processReqTask = processRequest(readResult.request.data(), fd);
-                requestsToProcess.emplace_back(std::move(processReqTask));
+                auto& connData = connManager->connections[fd];
+                while (!connData.pendingRequests.empty()) {
+                    auto req = std::move(connData.pendingRequests.front());
+                    connData.pendingRequests.pop_front();
+                    auto processReqTask = processRequest(req.get(), fd);
+                    requestsToProcess.emplace_back(std::move(processReqTask));
+                }
             }
 
             for (int i = 0; i < requestsToProcess.size(); ++i) {
@@ -209,44 +214,55 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
 {
     char buffer[READ_BUFFER_SIZE];
     buffer[0] = 0;
-    std::string request;
-    request.reserve(READ_BUFFER_SIZE);
     uint16_t readErrorsCounter = 0;
-    bool receivedLastBlock = false;
     uint_fast32_t read_attempts = 0;
-
-    while (!receivedLastBlock && read_attempts < READ_MAX_ATTEMPTS) {
+    bool parsed = false;
+    auto& connData = connManager->connections[client_fd];
+    while (read_attempts < READ_MAX_ATTEMPTS) {
         ssize_t bytes_read = co_await AsyncReadAwaiter(client_fd, buffer, sizeof(buffer));
         if (bytes_read == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
+                break;
+                //continue;
             } else if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
                 perror("Failed to read client request buffer: interruption signal received. Retrying…");
                 ++readErrorsCounter;
                 continue;
             }
-            std::string_view errMessage = "Failed to read client request buffer, client_fd = " + client_fd;
-            perror(errMessage.data());
-            co_return ReadRequestResult{{}, ReqReadOperationResult::Failure};
+            perror("Failed to read client request buffer");
+            co_return ReadRequestResult{ ReqReadOperationResult::Failure };
         }
 
         if (bytes_read == 0) {
-            co_return ReadRequestResult{{}, ReqReadOperationResult::AwaitingData};
+            co_return ReadRequestResult{ ReqReadOperationResult::AwaitingData };
         }
 
-        if (buffer[bytes_read - 1] == MSG_SEPARATOR) {
-            receivedLastBlock = true;
-            --bytes_read;
-        }
-        buffer[bytes_read] = '\0';
-        request.append(buffer);
+        connData.readBuffer.insert(connData.readBuffer.end(), buffer, buffer + bytes_read);
         ++read_attempts;
     }
 
-    if (receivedLastBlock) {
-        co_return ReadRequestResult{ std::move(request), ReqReadOperationResult::Success };
+    size_t start = 0;
+    for (size_t i = 0; i < connData.readBuffer.size(); ++i) {
+        if (connData.readBuffer[i] == MSG_SEPARATOR) {
+            size_t len = i - start;
+            auto req = std::make_unique<char[]>(len + 1);
+            memcpy(req.get(), connData.readBuffer.data() + start, len);
+            req[len] = '\0';
+            connData.pendingRequests.emplace_back(std::move(req));
+            parsed = true;
+            start = i + 1;
+        }
     }
-    co_return ReadRequestResult{{}, ReqReadOperationResult::Failure};
+
+    if (start > 0) {
+        connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + start);
+    }
+
+    if (parsed) {
+        co_return ReadRequestResult{ ReqReadOperationResult::Success };
+    }
+
+    co_return ReadRequestResult{ ReqReadOperationResult::AwaitingData };
 }
 
 AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {

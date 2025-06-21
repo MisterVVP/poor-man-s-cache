@@ -3,6 +3,9 @@
 #include <atomic>
 #include <coroutine>
 #include <unordered_map>
+#include <vector>
+#include <deque>
+#include <memory>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -17,6 +20,13 @@ namespace server {
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
+        std::vector<char> readBuffer;
+        std::deque<std::unique_ptr<char[]>> pendingRequests;
+
+        ConnectionData() = default;
+        ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
+            readBuffer.reserve(READ_BUFFER_SIZE);
+        }
     };
 
     class ConnManager {
@@ -106,7 +116,7 @@ namespace server {
                     if (client_fd >= 0) {
                         if (registerConnection(epoll_fd, client_fd) == -1) {
                             continue;
-                        };                      
+                        };
                     } else {
                         if (activeConnectionsCounter > 0) {
                             validateConnections();

@@ -6,6 +6,7 @@ g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L
 g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o ../test_gzip
 cd ..
 
+export NUM_ELEMENTS=10000000
 echo 'Running kvs tests...'
 
 ./kvs_test

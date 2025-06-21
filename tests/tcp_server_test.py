@@ -239,6 +239,30 @@ def run_get_tests(): return run_parallel("get", "GET tests")
 def run_del_tests(): return run_parallel("del", "DEL tests")
 def run_workflow_tests(): return run_parallel("workflow", "Workflow tests", requests_multiplier=3)
 
+async def pipeline_scenario():
+    reader, writer = await asyncio.open_connection(host, port)
+    writer.write(b"SET a 1\x1FSET b 2\x1FGET a\x1F")
+    await writer.drain()
+
+    responses = []
+    for _ in range(3):
+        resp = await reader.readuntil(ENCODED_SEPARATOR)
+        responses.append(resp.decode().rstrip(MSG_SEPARATOR))
+
+    writer.close()
+    await writer.wait_closed()
+    return responses
+
+def run_pipeline_test():
+    logger.info("Running pipeline test ...")
+    responses = asyncio.run(pipeline_scenario())
+    if responses == ["OK", "OK", "1", "OK", "(nil)", "OK"]:
+        print("Pipeline test passed")
+        return 0
+    else:
+        print(f"Pipeline test failed: {responses}")
+        return 1
+
 def main():
     if run_set_tests(): sys.exit(1)
     time.sleep(delay_sec)
@@ -249,10 +273,14 @@ def main():
     if run_del_tests(): sys.exit(1)
     time.sleep(delay_sec)
 
-    asyncio.run(run_preload()) 
+    asyncio.run(run_preload())
     time.sleep(delay_sec)
 
-    result = run_workflow_tests()
+    if run_workflow_tests():
+        sys.exit(1)
+    time.sleep(delay_sec)
+
+    result = run_pipeline_test()
     sys.exit(result)
 
 main()

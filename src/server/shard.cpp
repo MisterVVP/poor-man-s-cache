@@ -13,7 +13,7 @@ const char* ServerShard::processCommand(const Command& command)
 
         case CommandCode::DEL:
             opRes = keyValueStore->del(command.key.get(), command.hash);
-            return opRes ? OK : INTERNAL_ERROR;
+            return opRes ? OK : KEY_NOT_EXISTS;
         
         default:
             return INVALID_COMMAND_CODE;

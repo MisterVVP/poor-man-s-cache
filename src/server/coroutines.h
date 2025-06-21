@@ -15,7 +15,6 @@ namespace server {
     };
 
     struct ReadRequestResult {
-        std::string request;
         ReqReadOperationResult operationResult;
     };
 
