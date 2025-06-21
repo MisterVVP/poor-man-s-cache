@@ -63,8 +63,12 @@ sequenceDiagram
         Store-->>Shard: v1
         Shard-->>Server: v1
         Server->>Client: sendResponse v1
-    and Handle SET k2
-        ...
+    and Handle DEL k1
+        Server->>Shard: processRequest
+        Shard->>Store: del(k1)
+        Store-->>Shard: OK
+        Shard-->>Server: OK
+        Server->>Client: sendResponse OK
     end
 ```
 
