@@ -30,6 +30,7 @@ There are few testing scenarios supported right now:
 2. Multiple SET requests
 3. Multiple DEL requests
 4. (SET key, GET key, GET non_existent_key) workflow
+5. Pipelined sequence of commands over a single TCP connection
 
 Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>) / N  
 - T<sub>client</sub> - time spent to send all the requests by client + time to receive and verify the responses

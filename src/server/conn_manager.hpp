@@ -6,6 +6,7 @@
 #include <vector>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -52,8 +53,8 @@ namespace server {
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
                     auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd );
                     if (!success) {
-                        std::cerr << "Error saving connection info for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
-                        return -1;
+                        std::cerr << "Connection info already exists for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
+                        return 0;
                     }
                 } else {
                     perror("clock_gettime() failed when registering connection");
@@ -96,6 +97,9 @@ namespace server {
             };
 
             void closeConnection(int fd) noexcept {
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
+                    perror("Error when removing socket descriptor from epoll");
+                };
                 auto sdRes = shutdown(fd, SHUT_RDWR);
                 if (sdRes == -1) {
                     perror("Error when shutting down socket descriptor");

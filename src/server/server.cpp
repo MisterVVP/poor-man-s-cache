@@ -157,9 +157,11 @@ HandleReqTask CacheServer::handleRequests()
             numRequests += event_count;
             eventsPerBatch = event_count;
             for (int i = 0; i < event_count; ++i) {
+                const std::lock_guard<std::mutex> lock(conn_mutex);
                 auto client_fd = epoll_events[i].data.fd;
                 if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
-                    connManager->closeConnection(client_fd);
+                    // TBD may not need to close connection here
+                    //connManager->closeConnection(client_fd);
                     continue;
                 }
 
@@ -170,9 +172,9 @@ HandleReqTask CacheServer::handleRequests()
                     readers.emplace_back(std::move(asyncRead));
                 }
             }
-
             std::vector<ProcessRequestTask> requestsToProcess;
             for (int i = 0; i < readers.size(); ++i) {
+                const std::lock_guard<std::mutex> lock(conn_mutex);
                 auto fd = readers[i].client_fd;
                 #ifndef NDEBUG
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;

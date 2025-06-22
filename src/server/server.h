@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <thread>
 #include <vector>
@@ -72,6 +73,7 @@ namespace server {
             std::latch shutdownLatch{2};
             std::binary_semaphore metricsSemaphore{0};
             std::unique_ptr<ConnManager> connManager;
+            std::mutex conn_mutex;
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<uint_fast32_t> eventsPerBatch = 0;

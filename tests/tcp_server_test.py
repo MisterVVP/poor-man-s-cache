@@ -268,7 +268,7 @@ def main():
     time.sleep(delay_sec)
 
     if run_get_tests(): sys.exit(1)
-    time.sleep(delay_sec)
+    time.sleep(delay_sec * 2)
 
     if run_del_tests(): sys.exit(1)
     time.sleep(delay_sec)
