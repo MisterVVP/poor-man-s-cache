@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <deque>
-#include <memory>
+#include <string_view>
 #include <mutex>
 #include <sys/socket.h>
 #include <sys/epoll.h>
@@ -22,8 +22,8 @@ namespace server {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
         std::vector<char> readBuffer;
-        std::deque<std::unique_ptr<char[]>> pendingRequests;
-
+        std::deque<std::string_view> pendingRequests;
+        size_t bytesToErase = 0;
         ConnectionData() = default;
         ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
             readBuffer.reserve(READ_BUFFER_SIZE);

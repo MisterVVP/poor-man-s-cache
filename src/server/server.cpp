@@ -88,30 +88,39 @@ CacheServer::~CacheServer() {
     serverShards.clear();
 }
 
-ProcessRequestTask server::CacheServer::processRequest(char *requestData, int client_fd)
+ProcessRequestTask server::CacheServer::processRequest(std::string_view requestData, int client_fd)
 {
-    char* com_saveptr = nullptr;
-    char* request = strtok_r(requestData, " ", &com_saveptr);
-    const char* response;
-    if (!request) {
+    const char* response = nullptr;
+
+    auto firstSpace = requestData.find(' ');
+    if (firstSpace == std::string_view::npos) {
         ++numErrors;
         response = UNABLE_TO_PARSE_REQUEST_ERROR;
-    }
+    } else {
+        auto command = requestData.substr(0, firstSpace);
+        auto remainder = requestData.substr(firstSpace + 1);
 
-    char* key = strtok_r(nullptr, " ", &com_saveptr);
-    if (key) {
-        auto hash = hashFunc(key);
+        auto secondSpace = remainder.find(' ');
+        std::string_view key = remainder.substr(0, secondSpace);
+        std::string_view value;
+        if (secondSpace != std::string_view::npos) {
+            value = remainder.substr(secondSpace + 1);
+        }
+    
+        std::string keyStr(key);
+        auto hash = hashFunc(keyStr.c_str());
         auto shardId = hash % numShards;
         auto& shard = serverShards[shardId];
 
-        if (strcmp(request, GET_STR) == 0) {
-            Query query {QueryCode::GET, key, hash };
+        if (command == GET_STR) {
+            Query query{QueryCode::GET, keyStr.c_str(), hash};
             response = shard.processQuery(query);
         }
 
-        if (strcmp(request, SET_STR) == 0) {
-            if (com_saveptr) {
-                Command cmd {CommandCode::SET, key, com_saveptr, hash};
+        if (command == SET_STR) {
+            if (!value.empty()) {
+                std::string valueStr(value);
+                Command cmd{CommandCode::SET, keyStr.c_str(), valueStr.c_str(), hash};
                 response = shard.processCommand(cmd);
             } else {
                 ++numErrors;
@@ -119,8 +128,8 @@ ProcessRequestTask server::CacheServer::processRequest(char *requestData, int cl
             }
         }
 
-        if (strcmp(request, DEL_STR) == 0) {
-            Command cmd {CommandCode::DEL, key, nullptr, hash};
+        if (command == DEL_STR) {
+            Command cmd{CommandCode::DEL, keyStr.c_str(), nullptr, hash};
             response = shard.processCommand(cmd);
         }
     }
@@ -190,10 +199,14 @@ HandleReqTask CacheServer::handleRequests()
 
                 auto& connData = connManager->connections[fd];
                 while (!connData.pendingRequests.empty()) {
-                    auto req = std::move(connData.pendingRequests.front());
+                    auto req = connData.pendingRequests.front();
                     connData.pendingRequests.pop_front();
-                    auto processReqTask = processRequest(req.get(), fd);
+                    auto processReqTask = processRequest(req, fd);
                     requestsToProcess.emplace_back(std::move(processReqTask));
+                }
+                if (connData.bytesToErase > 0) {
+                    connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + connData.bytesToErase);
+                    connData.bytesToErase = 0;
                 }
             }
 
@@ -246,17 +259,16 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     for (size_t i = 0; i < connData.readBuffer.size(); ++i) {
         if (connData.readBuffer[i] == MSG_SEPARATOR) {
             size_t len = i - start;
-            auto req = std::make_unique<char[]>(len + 1);
-            memcpy(req.get(), connData.readBuffer.data() + start, len);
-            req[len] = '\0';
-            connData.pendingRequests.emplace_back(std::move(req));
+            connData.readBuffer[i] = '\0';
+            std::string_view req{connData.readBuffer.data() + start, len};
+            connData.pendingRequests.emplace_back(req);
             parsed = true;
             start = i + 1;
         }
     }
 
     if (start > 0) {
-        connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + start);
+        connData.bytesToErase += start;
     }
 
     if (parsed) {

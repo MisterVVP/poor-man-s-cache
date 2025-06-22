@@ -12,6 +12,7 @@
 #include <latch>
 #include <queue>
 #include <semaphore>
+#include <string_view>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -91,7 +92,7 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             AsyncReadTask readRequestAsync(int client_fd);
-            ProcessRequestTask processRequest(char* requestData, int client_fd);
+            ProcessRequestTask processRequest(std::string_view requestData, int client_fd);
             HandleReqTask handleRequests();
             AsyncSendTask sendResponse(int client_fd, const char* response);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
