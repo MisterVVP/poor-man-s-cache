@@ -70,9 +70,9 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
 
     connManager = std::make_unique<ConnManager>(epoll_fd);
 
-    #ifndef NDEBUG
+#ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards…" << std::endl;
-    #endif
+#endif
     serverShards.reserve(numShards);
     KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
     for (int i = 0; i < numShards; ++i) {
@@ -136,9 +136,9 @@ ProcessRequestTask server::CacheServer::processRequest(char *requestData, int cl
 HandleReqTask CacheServer::handleRequests()
 {
     while (!cancellationToken) {
-        #ifndef NDEBUG
+#ifndef NDEBUG
         auto start = std::chrono::high_resolution_clock::now();
-        #endif
+#endif
 
         int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
         if (event_count == -1) {
@@ -147,9 +147,9 @@ HandleReqTask CacheServer::handleRequests()
             }
             co_return event_count;
         } else if (event_count == 0) {
-            #ifndef NDEBUG
+#ifndef NDEBUG
             std::cout << "handleRequests finished without events to handle!" << std::endl;
-            #endif
+#endif
             co_yield event_count;
         } else {
             std::vector<AsyncReadTask> readers;
@@ -160,8 +160,7 @@ HandleReqTask CacheServer::handleRequests()
                 const std::lock_guard<std::mutex> lock(conn_mutex);
                 auto client_fd = epoll_events[i].data.fd;
                 if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
-                    // TBD may not need to close connection here
-                    //connManager->closeConnection(client_fd);
+                    connManager->closeConnection(client_fd);
                     continue;
                 }
 
@@ -176,9 +175,9 @@ HandleReqTask CacheServer::handleRequests()
             for (int i = 0; i < readers.size(); ++i) {
                 const std::lock_guard<std::mutex> lock(conn_mutex);
                 auto fd = readers[i].client_fd;
-                #ifndef NDEBUG
+#ifndef NDEBUG
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
-                #endif
+#endif
                 auto readResult = co_await readers[i];
                 if (readResult.operationResult == ReqReadOperationResult::Failure) {
                     ++numErrors;
@@ -202,11 +201,11 @@ HandleReqTask CacheServer::handleRequests()
                 co_await requestsToProcess[i];
             }
 
-            #ifndef NDEBUG
+#ifndef NDEBUG
             auto stop = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
             std::cout << "handleRequests interation finished in " << duration.count() << " ns ! event_count = " << event_count << std::endl;
-            #endif
+#endif
             co_yield event_count;
         }
     }
@@ -236,7 +235,8 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
         }
 
         if (bytes_read == 0) {
-            co_return ReadRequestResult{ ReqReadOperationResult::AwaitingData };
+            connManager->closeConnection(client_fd);
+            co_return ReadRequestResult{ ReqReadOperationResult::Failure };
         }
 
         connData.readBuffer.insert(connData.readBuffer.end(), buffer, buffer + bytes_read);

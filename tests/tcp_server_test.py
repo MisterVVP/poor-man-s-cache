@@ -172,6 +172,7 @@ async def worker_main_single_connection(start_idx, end_idx, task_type):
         return response.decode().rstrip(MSG_SEPARATOR)
 
     async def send_with_retry(command, expected_response, retries=1):
+        nonlocal reader, writer
         for attempt in range(retries + 1):
             try:
                 response = await send_command(command)
@@ -179,6 +180,11 @@ async def worker_main_single_connection(start_idx, end_idx, task_type):
                     return True
             except Exception as e:
                 logger.error(f"Exception during '{command}': {e}")
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                finally:
+                    reader, writer = await asyncio.open_connection(host, port)
             if attempt < retries:
                 await asyncio.sleep(delay_sec / 2)
         logger.error(f"Command failed after retries: {command}")

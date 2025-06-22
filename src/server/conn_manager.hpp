@@ -36,9 +36,9 @@ namespace server {
             int epoll_fd;
 
             int registerConnection(int epoll_fd, int client_fd) {
-                #ifndef NDEBUG
+#ifndef NDEBUG
                 std::cout << "Adding client_fd = " << client_fd << " to epoll_fd = " << epoll_fd << std::endl;
-                #endif
+#endif
                 setNonBlocking(client_fd);
                 epoll_event event{};
                 event.events = EPOLLIN | EPOLLET;
@@ -53,7 +53,9 @@ namespace server {
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
                     auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd );
                     if (!success) {
+#ifndef NDEBUG
                         std::cerr << "Connection info already exists for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
+#endif
                         return 0;
                     }
                 } else {
@@ -69,11 +71,10 @@ namespace server {
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &now) == 0) {
                     for (auto it = connections.begin(); it != connections.end();) {
                         auto diff = now - it->second.lastActivity;
+                        auto fd = it->first;
+                        ++it;
                         if (diff.tv_sec > MAX_CONN_LIFETIME_SEC) {
-                            closeConnection(it->first);
-                            it = connections.erase(it);
-                        } else {
-                            ++it;
+                            closeConnection(fd);
                         }
                     }
                 } else {
@@ -100,15 +101,13 @@ namespace server {
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
                     perror("Error when removing socket descriptor from epoll");
                 };
-                auto sdRes = shutdown(fd, SHUT_RDWR);
-                if (sdRes == -1) {
+                if(shutdown(fd, SHUT_RDWR) == -1) {
                     perror("Error when shutting down socket descriptor");
                 }
-                auto closeRes = close(fd);
-                if (closeRes == -1) {
+                if(close(fd) == -1) {
                     perror("Error when closing socket descriptor");
                 }
-
+                connections.erase(fd);
                 --activeConnectionsCounter;
             };
 

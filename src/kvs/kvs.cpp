@@ -39,9 +39,9 @@ inline void KeyValueStore::initializeTable(Bucket *table, uint_fast64_t size) {
 }
 
 inline void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size) {
-    #ifndef NDEBUG
+#ifndef NDEBUG
         std::cout << "Table cleanup started! size = " << size << std::endl;
-    #endif
+#endif
         for (uint_fast64_t i = 0; i < size; ++i) {
             for (int j = 0; j < BUCKET_SIZE; ++j) {
                 auto entryIdx = tableToDelete[i].entries[j];
@@ -50,9 +50,9 @@ inline void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size)
             }
         }
         delete[] tableToDelete;
-    #ifndef NDEBUG
+#ifndef NDEBUG
         std::cout << "Table cleanup finished!" << std::endl;
-    #endif
+#endif
     }
 
 
