@@ -100,8 +100,6 @@ async def send_command(command: str, conn_pool: ConnectionPool, buf_size=1024):
         else:
             await conn_pool.release((reader, writer))
 
-
-
 async def send_with_retry(command, expected_response, conn_pool, retries=1, delay=None):
     delay = delay or (delay_sec / 2)
     for attempt in range(retries + 1):
@@ -131,24 +129,6 @@ async def preload_json_files(conn_pool):
             sys.exit(1)
         logger.info(f"Stored {key}")
         await asyncio.sleep(delay_sec)
-
-def build_iteration_func(name):
-    async def workflow(x, pool):  # SET, GET, GET (miss)
-        return await send_with_retry(f"SET key{x} value{x}", "OK", pool) and \
-               await send_with_retry(f"GET key{x}", f"value{x}", pool) and \
-               await send_with_retry("GET non_existent_key", "(nil)", pool)
-
-    async def op(x, pool):        
-        if name == "set":
-            return await send_with_retry(f"SET key{x} value{x}", "OK", pool)
-        elif name == "get":
-            return await send_with_retry(f"GET key{x}", f"value{x}", pool)
-        elif name == "del":
-            return await send_with_retry(f"DEL key{x}", "OK", pool)
-        else:
-            raise ValueError(f"Invalid operation: {name}")
-
-    return workflow if name == "workflow" else op
 
 async def worker_main_single_connection(start_idx, end_idx, task_type):
     reader, writer = await asyncio.open_connection(host, port)
