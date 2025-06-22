@@ -230,7 +230,11 @@ def run_parallel(task_type, test_name, requests_multiplier=1, pipeline=False, ba
         )
         for i in range(num_processes)
     ]
-    logger.info(f"Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process ...")
+    pipelining_log_str = ""
+    if pipeline:
+        pipelining_log_str = f"Pipelining is enabled, batch_size = {batch_size}"
+
+    logger.info(f"Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process. {pipelining_log_str}")
     start = time.time()
     ctx = multiprocessing.get_context("fork")
 
@@ -261,24 +265,6 @@ def run_workflow_tests():
         batch_size=batch_size,
     )
 
-async def pipeline_scenario():
-    failures = 0
-    failures += await worker_main_single_connection(0, iterations_count, "set", True, batch_size)
-    failures += await worker_main_single_connection(0, iterations_count, "get", True, batch_size)
-    failures += await worker_main_single_connection(0, iterations_count, "del", True, batch_size)
-    failures += await worker_main_single_connection(0, iterations_count, "workflow", True, batch_size)
-    return failures
-
-def run_pipeline_test():
-    logger.info("Running pipeline test ...")
-    failures = asyncio.run(pipeline_scenario())
-    if failures == 0:
-        print("Pipeline test passed")
-        return 0
-    else:
-        print(f"Pipeline test failed: {failures} failures")
-        return 1
-
 def main():
     if run_set_tests(): sys.exit(1)
     time.sleep(delay_sec)
@@ -292,11 +278,7 @@ def main():
     asyncio.run(run_preload())
     time.sleep(delay_sec)
 
-    if run_workflow_tests():
-        sys.exit(1)
-    time.sleep(delay_sec)
-
-    result = run_pipeline_test()
+    result = run_workflow_tests()
     sys.exit(result)
 
 main()

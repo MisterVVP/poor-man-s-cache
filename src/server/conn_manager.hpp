@@ -98,6 +98,9 @@ namespace server {
             };
 
             void closeConnection(int fd) noexcept {
+                if(!connections.contains(fd)) {
+                    return;
+                }
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
                     perror("Error when removing socket descriptor from epoll");
                 };
