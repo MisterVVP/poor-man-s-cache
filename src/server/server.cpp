@@ -224,7 +224,6 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
         if (bytes_read == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
-                //continue;
             } else if (errno == EINTR && readErrorsCounter < READ_NUM_RETRY_ON_INT) {
                 perror("Failed to read client request buffer: interruption signal received. Retrying…");
                 ++readErrorsCounter;
