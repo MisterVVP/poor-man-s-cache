@@ -26,6 +26,18 @@ services:
       - cache_network
 {% endfor %}
 
+  tests-pipelined:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+    profiles:
+      - tests-pipelined
+    networks:
+      - cache_network
+    command: ["-p", "-b"]
+
 networks:
   cache_network:
     driver: bridge
