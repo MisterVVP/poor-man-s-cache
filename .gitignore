@@ -51,3 +51,5 @@ test_gzip
 .venv
 out
 callgrind.out.*
+prometheus-cpp/
+tests/__pycache__/
