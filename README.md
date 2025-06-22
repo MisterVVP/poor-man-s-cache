@@ -13,7 +13,6 @@ Another pet project to practice.
 ### Philosophy (or means to achieve goals)
 - Focus on performance, not readability or some 'patterns' and idioms. Prefer plain C-like code when necessary. 
 - Avoid excessive defensive programming and argument checking deep inside the server code. Validate the input from network, but do not validate anything after. For example: there is no point to validate pointers in kvs.get(ptr) method, because we should not have passed invalid pointer there! And if it was passed -> we should fix the 'outer' layer, not memory storage.
-- Use modern C++ techniques when necessary and when I want to learn more about them (e.g. coroutines are interesting to learn, std::string should be avoided for high load, std::unordered_map is a complete no-no).
 - Avoid using external libraries (e.g. boost), unless necessary. Exception: unit tests and non-core functionality (e.g. Prometheus metrics).
 - Solution should support only Linux, preferrably alpine or similar distribution. No Windows or Mac OS support... ever.
 - Solution should be container and (hopefully) orchestrator friendly
@@ -51,15 +50,15 @@ CI setup (free github hosted runner hardware) variations
 
 #### Test details results
 Local setup. 10 million requests per test suite. 24 logical threads.
-1. ~ 110 000 RPS for GET / SET / DEL tests,  ~ 140 000 RPS for  (SET key, GET key, GET non_existent_key) workflow test
-2. ~ 90 000 RPS for GET / SET / DEL tests, TBD
+1. > 100 000 RPS without pipelining, > 200 000 RPS with pipelining
+2. ~ 90 000 RPS without pipelining, TBD with pipelining
 3. TBD
 
 CI setup. 1 million requests total (4 processes and 250000 chunks per process)
-1. ~ 22 500 RPS for GET / SET / DEL tests ,  ~ 22 500 RPS for  (SET key, GET key, GET non_existent_key) workflow test
+~ 22 500 RPS (without pipelining), TBD with pipelining
 
 #### Goals
-Next step is 200k+ functional RPS on Ubuntu
+Next step is 500k+ functional RPS on Ubuntu (with our without pipelining)
 
 #### How Redis works with the same task
 Below are results that I got from using Redis.
@@ -295,7 +294,7 @@ done
 ```
 
 ## TODO
-- Implement requests pipelining -> this could be killer feature for performance in high throughput scenarios
+- Improve requests pipelining feature and server performance, focus on test cases with more than 10M requests
 - Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
