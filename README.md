@@ -55,7 +55,7 @@ Local setup. 10 million requests per test suite. 24 logical threads.
 3. TBD
 
 CI setup. 1 million requests total (4 processes and 250000 chunks per process)
-~ 22 500 RPS (without pipelining), TBD with pipelining
+~ 22 500 RPS (without pipelining), > 100 000 RPS with pipelining
 
 #### Goals
 Next step is 500k+ functional RPS on Ubuntu (with our without pipelining)
