@@ -67,6 +67,15 @@ Below are results that I got from using Redis.
 
 Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/apt/
 
+
+##### Our own tests
+```
+python3 tcp_server_test.py --redis -p -b 16
+```
+**Results**:  ~ 110 000 RPS for GET / SET / DEL tests  
+**Results with pipelining**:  ~ 500 000 RPS for GET / SET / DEL tests,  ~ 1 000 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
+
+##### Redis benchmark
 ```
 redis-benchmark -t set -r 1000000 -n 1000000 -d 12
 ```
@@ -75,7 +84,6 @@ redis-benchmark -t set -r 1000000 -n 1000000 -d 12
 **Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
 
 2. Docker on Ubuntu
-
 Run redis in docker
 ```
 docker compose -f docker-compose-local.yaml --profile redis build

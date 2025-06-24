@@ -5,6 +5,7 @@ import logging
 import asyncio
 import multiprocessing
 import argparse
+import redis
 
 # Logger config
 logger = logging.getLogger(__name__)
@@ -27,11 +28,14 @@ ENCODED_SEPARATOR = MSG_SEPARATOR.encode()
 
 parser = argparse.ArgumentParser(description="Cache server functional tests")
 parser.add_argument('-p', '--pipeline', action='store_true', help='Use pipelining for requests')
-parser.add_argument('-b', '--batch_size', type=int, default=max(1, iterations_count // 10),
-                    help='Batch size for pipelined requests')
+parser.add_argument('-b', '--batch_size', type=int, default=16, help='Batch size for pipelined requests')
+parser.add_argument('--redis', action='store_true', help='Use Redis RESP protocol instead of custom server')
+
 args, _ = parser.parse_known_args()
 pipelining_enabled = args.pipeline
 batch_size = args.batch_size
+use_redis = args.redis
+redis_port = 6379
 
 from connection_pool import ConnectionPool
 
@@ -108,6 +112,23 @@ async def preload_json_files(conn_pool):
             sys.exit(1)
         logger.info(f"Stored {key}")
         await asyncio.sleep(delay_sec)
+
+def preload_json_files_redis():
+    logger.info("Preloading JSON files for Redis...")
+    if not os.path.exists(data_folder):
+        logger.warning("Data folder not found. Skipping.")
+        return
+
+    client = redis.Redis(host=host, port=redis_port, decode_responses=True)
+    for file_name in filter(lambda f: f.endswith('.json'), os.listdir(data_folder)):
+        with open(os.path.join(data_folder, file_name), 'r', encoding='utf-8') as f:
+            content = f.read()
+        key = file_name.rsplit('.', 1)[0]
+        if not client.set(key, content):
+            logger.error(f"Failed storing {key}")
+            sys.exit(1)
+        logger.info(f"Stored {key}")
+        time.sleep(delay_sec)
 
 async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=False, batch_size=1):
     reader, writer = await asyncio.open_connection(host, port)
@@ -205,18 +226,93 @@ async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=
     await writer.wait_closed()
     return len(results) - sum(results)  # number of failures
 
+def redis_worker_main(start_idx, end_idx, task_type, pipeline=False, batch_size=1):
+    client = redis.Redis(host=host, port=redis_port, decode_responses=True)
+    results = []
+
+    if not pipeline:
+        for i in range(start_idx, end_idx):
+            if task_type == "set":
+                result = client.set(f"key{i}", f"value{i}")
+                results.append(bool(result))
+            elif task_type == "get":
+                value = client.get(f"key{i}")
+                results.append(value == f"value{i}")
+            elif task_type == "del":
+                result = client.delete(f"key{i}")
+                results.append(result == 1)
+            elif task_type == "workflow":
+                ok = client.set(f"key{i}", f"value{i}")
+                val = client.get(f"key{i}")
+                missing = client.get("non_existent_key")
+                results.append(ok and val == f"value{i}" and missing is None)
+            else:
+                raise ValueError("Unknown task_type")
+    else:
+        i = start_idx
+        while i < end_idx:
+            batch_end = min(i + batch_size, end_idx)
+            pipe = client.pipeline()
+            if task_type == "set":
+                for j in range(i, batch_end):
+                    pipe.set(f"key{j}", f"value{j}")
+            elif task_type == "get":
+                for j in range(i, batch_end):
+                    pipe.get(f"key{j}")
+            elif task_type == "del":
+                for j in range(i, batch_end):
+                    pipe.delete(f"key{j}")
+            elif task_type == "workflow":
+                for j in range(i, batch_end):
+                    pipe.set(f"key{j}", f"value{j}")
+                    pipe.get(f"key{j}")
+                    pipe.get("non_existent_key")
+            else:
+                raise ValueError("Unknown task_type")
+
+            responses = pipe.execute()
+            idx = 0
+            if task_type == "set":
+                for j in range(i, batch_end):
+                    results.append(bool(responses[idx]))
+                    idx += 1
+            elif task_type == "get":
+                for j in range(i, batch_end):
+                    results.append(responses[idx] == f"value{j}")
+                    idx += 1
+            elif task_type == "del":
+                for j in range(i, batch_end):
+                    results.append(responses[idx] == 1)
+                    idx += 1
+            elif task_type == "workflow":
+                for j in range(i, batch_end):
+                    ok = responses[idx]; idx += 1
+                    val = responses[idx]; idx += 1
+                    missing = responses[idx]; idx += 1
+                    results.append(ok and val == f"value{j}" and missing is None)
+            i = batch_end
+
+    return len(results) - sum(results)
+
+
 def run_worker(start_idx, end_idx, task_type, pipeline=False, batch_size=1):
+    if use_redis:
+        return redis_worker_main(start_idx, end_idx, task_type, pipeline, batch_size)
+
     return asyncio.run(
         worker_main_single_connection(start_idx, end_idx, task_type, pipeline, batch_size)
     )
 
 async def run_preload():
-    pool = ConnectionPool(host, port, pool_size)
-    await pool.initialize()
-    try:
-        await preload_json_files(pool)
-    finally:
-        await pool.close()
+    if use_redis:
+        preload_json_files_redis()
+    else:
+        pool = ConnectionPool(host, port, pool_size)
+        await pool.initialize()
+        try:
+            await preload_json_files(pool)
+        finally:
+            await pool.close()
 
 def run_parallel(task_type, test_name, requests_multiplier=1, pipeline=False, batch_size=1):
     chunk_size = iterations_count // num_processes
@@ -233,8 +329,10 @@ def run_parallel(task_type, test_name, requests_multiplier=1, pipeline=False, ba
     pipelining_log_str = ""
     if pipeline:
         pipelining_log_str = f"Pipelining is enabled, batch_size = {batch_size}"
-
-    logger.info(f"Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process. {pipelining_log_str}")
+    use_redis_str = ""
+    if use_redis:
+        use_redis_str = "[REDIS] "
+    logger.info(f"{use_redis_str}Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process. {pipelining_log_str}")
     start = time.time()
     ctx = multiprocessing.get_context("fork")
 

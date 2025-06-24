@@ -98,17 +98,23 @@ namespace server {
             };
 
             void closeConnection(int fd) noexcept {
-                if(!connections.contains(fd)) {
+                if (!connections.contains(fd)) {
                     return;
                 }
                 if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
+#ifndef NDEBUG
                     perror("Error when removing socket descriptor from epoll");
+#endif
                 };
-                if(shutdown(fd, SHUT_RDWR) == -1) {
+                if (shutdown(fd, SHUT_RDWR) == -1) {
+#ifndef NDEBUG
                     perror("Error when shutting down socket descriptor");
+#endif
                 }
-                if(close(fd) == -1) {
+                if (close(fd) == -1) {
+#ifndef NDEBUG
                     perror("Error when closing socket descriptor");
+#endif
                 }
                 connections.erase(fd);
                 --activeConnectionsCounter;

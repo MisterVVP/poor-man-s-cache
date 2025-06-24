@@ -1,6 +1,6 @@
 # [WARNING]
-# Deprecated tests version, spawns new connection on every request
-# It's recommended to use persistent connections when working with cache server
+# Each request opens a new connection to the cache server.
+# This approach is kept for reference; prefer persistent connections for better performance.
 
 import socket
 import logging
@@ -46,31 +46,28 @@ def calc_thread_pool_size():
 
 def send_command_to_custom_cache(command: str, bufSize: int):
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((host, port))
+        with socket.create_connection((host, port), timeout=5) as s:
+            s.settimeout(5)
             command += "\x1F"
-            s.sendall(command.encode('utf-8'))
-            if command.startswith("SET"):
-                response = s.recv(bufSize).decode('utf-8')
-                return response.strip().rstrip("\x1F")
-            else:
-                s.settimeout(15)
-                response = bytearray()
-                while True:
-                    try:
-                        chunk = s.recv(bufSize)
-                        if not chunk:
-                            break
-                        response.extend(chunk)
-                        if b'\x1F' in chunk:
-                            break
-                    except socket.timeout:
-                        logger.error("Socket read timeout")
-                        exit(1)
-                    except socket.error as e:
-                        logger.error(e)
-                        exit(1)
-                return response.decode('utf-8').strip().rstrip("\x1F")
+            s.sendall(command.encode("utf-8"))
+
+            response = bytearray()
+            while True:
+                try:
+                    chunk = s.recv(bufSize)
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+                    if b"\x1F" in chunk:
+                        break
+                except socket.timeout:
+                    logger.error("Socket read timeout")
+                    return ""
+                except socket.error as e:
+                    logger.error(e)
+                    return ""
+
+            return response.decode("utf-8").strip().rstrip("\x1F")
     except socket.error as e:
         return f"Socket error: {e}"
     except Exception as e:
