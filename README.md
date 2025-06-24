@@ -303,6 +303,7 @@ done
 
 ## TODO
 - Improve requests pipelining feature and server performance, focus on test cases with more than 10M requests
+- Ensure that tests from per_request_connection_test.py work again
 - Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
