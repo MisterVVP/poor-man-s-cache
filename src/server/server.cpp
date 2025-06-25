@@ -32,7 +32,7 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
     }
 
-    int qlen = 5;
+    int qlen = 2048;
     if (setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
         close(server_fd);
         throw std::system_error(errno, std::system_category(), "Failed to set TCP_FASTOPEN for server socket");
@@ -343,7 +343,7 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         while (!stopToken.stop_requested() && !cancellationToken) {
             auto events_processed = hrt.next_value();
             if (!events_processed) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::this_thread::sleep_for(PROCESS_REQ_DELAY);
             }
             // TODO: try to recover when events_processed = -1
         }

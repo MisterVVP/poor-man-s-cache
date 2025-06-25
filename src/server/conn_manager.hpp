@@ -137,7 +137,7 @@ namespace server {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;
                         } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            std::this_thread::sleep_for(ACCEPT_CONN_DELAY);
                         } else {
                             perror("Failed to accept connection");
                         }

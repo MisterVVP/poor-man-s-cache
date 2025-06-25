@@ -34,3 +34,9 @@ static constexpr unsigned int NUM_WORKERS = 4;
 
 /// @brief Max client connection lifetime
 static constexpr long MAX_CONN_LIFETIME_SEC = 300; // 5 min // TODO: make configurable
+
+/// @brief Amount of time to wait while busy looping to accept connections
+static constexpr std::chrono::nanoseconds ACCEPT_CONN_DELAY = std::chrono::nanoseconds(1);
+
+/// @brief Amount of time to wait while busy looping to process requests
+static constexpr std::chrono::nanoseconds PROCESS_REQ_DELAY = std::chrono::nanoseconds(1);
