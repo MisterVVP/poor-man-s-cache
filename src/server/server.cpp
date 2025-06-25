@@ -92,35 +92,35 @@ ProcessRequestTask server::CacheServer::processRequest(std::string_view requestD
 {
     const char* response = nullptr;
 
-    auto firstSpace = requestData.find(' ');
+    const auto firstSpace = requestData.find(' ');
     if (firstSpace == std::string_view::npos) {
         ++numErrors;
         response = UNABLE_TO_PARSE_REQUEST_ERROR;
     } else {
-        auto command = requestData.substr(0, firstSpace);
-        auto remainder = requestData.substr(firstSpace + 1);
+        const auto command = requestData.substr(0, firstSpace);
+        const auto remainder = requestData.substr(firstSpace + 1);
+        const auto secondSpace = remainder.find(' ');
 
-        auto secondSpace = remainder.find(' ');
-        std::string_view key = remainder.substr(0, secondSpace);
-        std::string_view value;
+        char* keyPtr = const_cast<char*>(remainder.data());
+        const char* valuePtr = nullptr;
+
         if (secondSpace != std::string_view::npos) {
-            value = remainder.substr(secondSpace + 1);
+            keyPtr[secondSpace] = '\0';
+            valuePtr = keyPtr + secondSpace + 1;
         }
-    
-        std::string keyStr(key);
-        auto hash = hashFunc(keyStr.c_str());
+
+        auto hash = hashFunc(keyPtr);
         auto shardId = hash % numShards;
         auto& shard = serverShards[shardId];
 
         if (command == GET_STR) {
-            Query query{QueryCode::GET, keyStr.c_str(), hash};
+            Query query{QueryCode::GET, keyPtr, hash};
             response = shard.processQuery(query);
         }
 
         if (command == SET_STR) {
-            if (!value.empty()) {
-                std::string valueStr(value);
-                Command cmd{CommandCode::SET, keyStr.c_str(), valueStr.c_str(), hash};
+            if (valuePtr) {
+                Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
                 response = shard.processCommand(cmd);
             } else {
                 ++numErrors;
@@ -129,7 +129,7 @@ ProcessRequestTask server::CacheServer::processRequest(std::string_view requestD
         }
 
         if (command == DEL_STR) {
-            Command cmd{CommandCode::DEL, keyStr.c_str(), nullptr, hash};
+            Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
             response = shard.processCommand(cmd);
         }
     }
