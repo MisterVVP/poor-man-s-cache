@@ -37,6 +37,7 @@ namespace kvs
 
     struct alignas(64) Entry {
         char *key = nullptr;
+        size_t kSize = 0;
         char *value = nullptr;
         size_t vSize = 0;
         bool compressed = false;
@@ -89,6 +90,7 @@ namespace kvs
                 delete[] entry.key;
                 delete[] entry.value;
                 entry.key = nullptr;
+                entry.kSize = 0;
                 entry.value = nullptr;
                 entry.vSize = 0;
                 entry.compressed = false;
@@ -156,11 +158,16 @@ namespace kvs
 
             bool set(const char *key, const char *value);
             bool set(const char *key, const char *value, uint_fast64_t hash);
+            bool set(const char *key, size_t kSize,
+                     const char *value, size_t vSize,
+                     uint_fast64_t hash);
 
             const char* get(const char *key);
             const char* get(const char *key, uint_fast64_t hash);
+            const char* get(const char *key, size_t kSize, uint_fast64_t hash);
 
             bool del(const char *key);
             bool del(const char *key, uint_fast64_t hash);
+            bool del(const char *key, size_t kSize, uint_fast64_t hash);
     };
 }

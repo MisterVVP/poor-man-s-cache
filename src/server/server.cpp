@@ -97,30 +97,34 @@ ProcessRequestTask server::CacheServer::processRequest(std::string_view requestD
         ++numErrors;
         response = UNABLE_TO_PARSE_REQUEST_ERROR;
     } else {
-        const auto command = requestData.substr(0, firstSpace);
-        const auto remainder = requestData.substr(firstSpace + 1);
-        const auto secondSpace = remainder.find(' ');
+        auto command = requestData.substr(0, firstSpace);
 
+        auto remainder = requestData.substr(firstSpace + 1);
+
+        auto secondSpace = remainder.find(' ');
         char* keyPtr = const_cast<char*>(remainder.data());
         const char* valuePtr = nullptr;
-
+        size_t keyLen = remainder.size();
+        size_t valueLen = 0;
         if (secondSpace != std::string_view::npos) {
+            keyLen = secondSpace;
             keyPtr[secondSpace] = '\0';
             valuePtr = keyPtr + secondSpace + 1;
+            valueLen = remainder.size() - secondSpace - 1;
         }
 
-        auto hash = hashFunc(keyPtr);
+        auto hash = hashFunc(keyPtr, keyLen);
         auto shardId = hash % numShards;
         auto& shard = serverShards[shardId];
 
         if (command == GET_STR) {
-            Query query{QueryCode::GET, keyPtr, hash};
+            Query query{QueryCode::GET, keyPtr, keyLen, hash};
             response = shard.processQuery(query);
         }
 
         if (command == SET_STR) {
             if (valuePtr) {
-                Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
+                Command cmd{CommandCode::SET, keyPtr, keyLen, valuePtr, valueLen, hash};
                 response = shard.processCommand(cmd);
             } else {
                 ++numErrors;
@@ -129,7 +133,7 @@ ProcessRequestTask server::CacheServer::processRequest(std::string_view requestD
         }
 
         if (command == DEL_STR) {
-            Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
+            Command cmd{CommandCode::DEL, keyPtr, keyLen, nullptr, 0, hash};
             response = shard.processCommand(cmd);
         }
     }

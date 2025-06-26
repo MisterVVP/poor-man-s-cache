@@ -8,11 +8,13 @@ const char* ServerShard::processCommand(const Command& command)
     switch (command.commandCode)
     {
         case CommandCode::SET:
-            opRes = keyValueStore->set(command.key.get(), command.value.get(), command.hash);
+            opRes = keyValueStore->set(command.key.get(), command.kSize,
+                                      command.value.get(), command.vSize,
+                                      command.hash);
             return opRes ? OK : INTERNAL_ERROR;
 
         case CommandCode::DEL:
-            opRes = keyValueStore->del(command.key.get(), command.hash);
+            opRes = keyValueStore->del(command.key.get(), command.kSize, command.hash);
             return opRes ? OK : KEY_NOT_EXISTS;
         
         default:
@@ -26,7 +28,7 @@ const char* ServerShard::processQuery(const Query& query)
     switch (query.queryCode)
     {
         case QueryCode::GET:
-            value = keyValueStore->get(query.key.get(), query.hash);
+            value = keyValueStore->get(query.key.get(), query.kSize, query.hash);
             return value ? value : NOTHING;
 
         default:
@@ -34,24 +36,25 @@ const char* ServerShard::processQuery(const Query& query)
     }
 }
 
-server::Query::Query(QueryCode code, const char *arg_key, uint_fast64_t hash): queryCode(code), hash(hash)
+server::Query::Query(QueryCode code, const char *arg_key, size_t keyLen, uint_fast64_t hash)
+    : queryCode(code), kSize(keyLen), hash(hash)
 {
-    auto kSize = strlen(arg_key) + 1;
-    key = std::make_unique<char[]>(kSize);
-    memcpy(key.get(), arg_key, kSize);
-    key.get()[kSize-1] = '\0';
+    key = std::make_unique<char[]>(keyLen + 1);
+    memcpy(key.get(), arg_key, keyLen);
+    key[keyLen] = '\0';
 }
 
-server::Command::Command(CommandCode code, const char *arg_key, const char *arg_value, uint_fast64_t hash): commandCode(code), hash(hash)
+server::Command::Command(CommandCode code, const char *arg_key, size_t keyLen,
+                         const char *arg_value, size_t valueLen,
+                         uint_fast64_t hash)
+    : commandCode(code), kSize(keyLen), vSize(valueLen), hash(hash)
 {
     if (arg_value) { // not every command has value, e.g. DEL key1
-        auto vSize = strlen(arg_value) + 1;
-        value = std::make_unique<char[]>(vSize);
-        memcpy(value.get(), arg_value, vSize);
-        value.get()[vSize-1] = '\0';
+        value = std::make_unique<char[]>(valueLen + 1);
+        memcpy(value.get(), arg_value, valueLen);
+        value[valueLen] = '\0';
     }
-    auto kSize = strlen(arg_key) + 1;
-    key = std::make_unique<char[]>(kSize);
-    memcpy(key.get(), arg_key, kSize);
-    key.get()[kSize-1] = '\0';
+    key = std::make_unique<char[]>(keyLen + 1);
+    memcpy(key.get(), arg_key, keyLen);
+    key[keyLen] = '\0';
 }

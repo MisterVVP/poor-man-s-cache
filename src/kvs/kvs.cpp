@@ -123,29 +123,38 @@ void KeyValueStore::migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, u
 }
 
 inline void KeyValueStore::copyEntry(Entry &dest, const Entry &src) {
-    auto kSize = strlen(src.key) + 1;
-    auto vSize = strlen(src.value) + 1;
+    auto kSize = src.kSize;
+    auto vSize = src.vSize;
     dest.key = new char[kSize];
     dest.value = new char[vSize];
     memcpy(dest.key, src.key, kSize);
     memcpy(dest.value, src.value, vSize);
+    dest.kSize = src.kSize;
     dest.vSize = src.vSize;
     dest.compressed = src.compressed;
 }
 
 bool KeyValueStore::set(const char *key, const char *value) {
-    auto primaryHash = hashFunc(key);
-    return set(key, value, primaryHash);
+    auto kSize = strlen(key) + 1;
+    auto vSize = strlen(value) + 1;
+    auto primaryHash = hashFunc(key, kSize - 1);
+    return set(key, kSize, value, vSize, primaryHash);
 }
 
 bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) {
+    auto kSize = strlen(key) + 1;
+    auto vSize = strlen(value) + 1;
+    return set(key, kSize, value, vSize, hash);
+}
+
+bool KeyValueStore::set(const char *key, size_t kSize,
+                        const char *value, size_t vSize,
+                        uint_fast64_t hash) {
     if (numEntries >= ((tableSize * RESIZE_THRESHOLD_PERCENTAGE) / 100) && !isResizing) {
         resize();
     }
 
     uint_fast64_t attempt = 0, idx;
-    auto kSize = strlen(key) + 1;
-    auto vSize = strlen(value) + 1;
 
     do {
         idx = calcIndex(hash, attempt++, tableSize);
@@ -154,7 +163,7 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
             if (entryIdx) {
                 auto entry = entryPool.get(entryIdx);
                 if (entry.key) {
-                    if (strcmp(entry.key, key) == 0) {
+                    if (entry.kSize == kSize && memcmp(entry.key, key, kSize) == 0) {
                         entryPool.deallocate(entryIdx);
                     } else {
                         continue;
@@ -178,6 +187,7 @@ uint_fast64_t KeyValueStore::insertEntry(const char *key, const char *value, siz
     auto& allocatedEntry = poolEntry.entry;
     allocatedEntry.key = new char[kSize];
     memcpy(allocatedEntry.key, key, kSize);
+    allocatedEntry.kSize = kSize;
 
     if (compressionEnabled && vSize >= MIN_SIZE_TO_COMPRESS) {
         auto compressed = GzipCompressor::Compress(value);
@@ -201,11 +211,17 @@ uint_fast64_t KeyValueStore::insertEntry(const char *key, const char *value, siz
 }
 
 const char* KeyValueStore::get(const char *key) {
-    auto primaryHash = hashFunc(key);
-    return get(key, primaryHash);
+    auto kSize = strlen(key) + 1;
+    auto primaryHash = hashFunc(key, kSize - 1);
+    return get(key, kSize, primaryHash);
 }
 
 const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
+    auto kSize = strlen(key) + 1;
+    return get(key, kSize, hash);
+}
+
+const char* KeyValueStore::get(const char *key, size_t kSize, uint_fast64_t hash) {
     uint_fast64_t attempt = 0, idx;
     do {
         idx = calcIndex(hash, attempt++, tableSize);
@@ -220,7 +236,7 @@ const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
                 continue;
             }
 
-            if (strcmp(entry.key, key) == 0) {
+            if (entry.kSize == kSize && memcmp(entry.key, key, kSize) == 0) {
                 return entry.compressed ? decompressEntry(entry) : entry.value;
             }
         }
@@ -236,15 +252,21 @@ inline const char* KeyValueStore::decompressEntry(const Entry &entry) {
 
 bool kvs::KeyValueStore::del(const char *key)
 {
-    auto primaryHash = hashFunc(key);
-    return del(key, primaryHash);
+    auto kSize = strlen(key) + 1;
+    auto primaryHash = hashFunc(key, kSize - 1);
+    return del(key, kSize, primaryHash);
 }
 
 bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 {
+    auto kSize = strlen(key) + 1;
+    return del(key, kSize, hash);
+}
+
+bool kvs::KeyValueStore::del(const char *key, size_t kSize, uint_fast64_t hash)
+{
     // TODO: consider shrinking in future
     uint_fast64_t attempt = 0, idx;
-    auto kSize = strlen(key) + 1;
 
     do {
         idx = calcIndex(hash, attempt++, tableSize);
@@ -259,7 +281,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
                 continue;
             }
 
-            if (strcmp(entry.key, key) == 0) {
+            if (entry.kSize == kSize && memcmp(entry.key, key, kSize) == 0) {
                 entryPool.deallocate(entryIdx);
                 return true;
             }
