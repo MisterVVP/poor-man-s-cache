@@ -5,7 +5,26 @@ import logging
 import asyncio
 import multiprocessing
 import argparse
-import redis
+parser = argparse.ArgumentParser(description="Cache server functional tests")
+parser.add_argument('-p', '--pipeline', action='store_true', help='Use pipelining for requests')
+parser.add_argument('-b', '--batch_size', type=int, default=16, help='Batch size for pipelined requests')
+parser.add_argument('--redis', action='store_true', help='Use Redis RESP protocol instead of custom server')
+
+args, _ = parser.parse_known_args()
+pipelining_enabled = args.pipeline
+batch_size = args.batch_size
+use_redis = args.redis
+redis_port = 6379
+
+redis = None
+if use_redis:
+    try:
+        import redis as redis_lib
+        redis = redis_lib
+    except ModuleNotFoundError as e:
+        logger = logging.getLogger(__name__)
+        logger.error("Redis library is required for --redis mode")
+        sys.exit(1)
 
 # Logger config
 logger = logging.getLogger(__name__)
@@ -25,18 +44,6 @@ pool_size = 1
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
 MSG_SEPARATOR = '\x1F'
 ENCODED_SEPARATOR = MSG_SEPARATOR.encode()
-
-parser = argparse.ArgumentParser(description="Cache server functional tests")
-parser.add_argument('-p', '--pipeline', action='store_true', help='Use pipelining for requests')
-parser.add_argument('-b', '--batch_size', type=int, default=16, help='Batch size for pipelined requests')
-parser.add_argument('--redis', action='store_true', help='Use Redis RESP protocol instead of custom server')
-
-args, _ = parser.parse_known_args()
-pipelining_enabled = args.pipeline
-batch_size = args.batch_size
-use_redis = args.redis
-redis_port = 6379
-
 from connection_pool import ConnectionPool
 
 async def send_command(command: str, conn_pool: ConnectionPool, buf_size=1024):

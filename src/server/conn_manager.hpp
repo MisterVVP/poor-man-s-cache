@@ -34,8 +34,10 @@ namespace server {
         private:
             std::atomic<bool> cancellationToken;
             int epoll_fd;
+            std::mutex& conn_mutex;
 
             int registerConnection(int epoll_fd, int client_fd) {
+                std::lock_guard<std::mutex> lock(conn_mutex);
 #ifndef NDEBUG
                 std::cout << "Adding client_fd = " << client_fd << " to epoll_fd = " << epoll_fd << std::endl;
 #endif
@@ -67,6 +69,7 @@ namespace server {
             };
 
             void validateConnections() {
+                std::lock_guard<std::mutex> lock(conn_mutex);
                 timespec now{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &now) == 0) {
                     for (auto it = connections.begin(); it != connections.end();) {
@@ -87,6 +90,7 @@ namespace server {
             std::unordered_map<int, ConnectionData> connections;
 
             bool updateActivity(int fd) {
+                std::lock_guard<std::mutex> lock(conn_mutex);
                 timespec time{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
                     connections[fd].lastActivity = time;
@@ -98,6 +102,7 @@ namespace server {
             };
 
             void closeConnection(int fd) noexcept {
+                std::lock_guard<std::mutex> lock(conn_mutex);
                 if (!connections.contains(fd)) {
                     return;
                 }
@@ -149,6 +154,6 @@ namespace server {
                 cancellationToken = true;
             }
 
-            ConnManager(int epoll_fd): epoll_fd(epoll_fd), cancellationToken(false), activeConnectionsCounter(0) {}
+            ConnManager(int epoll_fd, std::mutex& m): epoll_fd(epoll_fd), conn_mutex(m), cancellationToken(false), activeConnectionsCounter(0) {}
     };
 }

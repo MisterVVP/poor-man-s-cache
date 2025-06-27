@@ -7,7 +7,15 @@ import logging
 import sys
 import time
 import os
-import redis
+cache_type = os.environ.get('CACHE_TYPE', 'custom')  # "custom" or "redis"
+redis = None
+if cache_type == 'redis':
+    try:
+        import redis as redis_lib
+        redis = redis_lib
+    except ModuleNotFoundError as e:
+        logging.error("Redis library is required for redis mode")
+        sys.exit(1)
 from multiprocessing import Pool, cpu_count
 
 # configure logger
@@ -24,7 +32,6 @@ host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
 delay_sec = int(os.environ.get('TEST_DELAY_SEC', 1))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
-cache_type = os.environ.get('CACHE_TYPE', 'custom')  # "custom" or "redis"
 redis_password = os.environ.get('REDIS_PASSWORD', None)  # Only for Redis
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
 
