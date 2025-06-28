@@ -54,13 +54,15 @@ Local setup. 10 million requests per test suite, 96 test client processes forked
 
 ##### Local Ubuntu  
 ###### Without pipelining
-> 100 000 RPS.
+more than 100 000 RPS.
 ###### With pipelining
-> 1 500 000 RPS (GET/DEL), > 1 000 000 RPS (SET), ~ 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
+- more than 1 500 000 RPS (GET/DEL)
+- more than 1 000 000 RPS (SET)
+- around 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
 
 ##### Docker on Ubuntu  
 ###### Without pipelining
-~ 90 000 RPS
+around 90 000 RPS
 ###### With pipelining
 TBD  
 
@@ -70,12 +72,13 @@ TBD
 ##### CI setup.
 1 million requests total (4 processes and 250000 chunks per process)
 ###### Without pipelining
-~ 22 500 RPS
+around 22 500 RPS
 ###### With pipelining
-> 100 000 RPS
+more than 200 000 RPS (SET/GET/DEL)
+more than 400 000 RPS (SET key, GET key, GET non_existent_key) workflow 
 
 #### Goals
-Next step is > 10 000 000 functional RPS on Ubuntu (with our without pipelining)
+Next step is 10M+ functional RPS on Ubuntu (with our without pipelining)
 
 ### How Redis works with the same task
 Below are results that I got from using Redis.
@@ -88,21 +91,21 @@ Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install
 python3 ./tcp_server_test.py -p -b 100 --redis
 ```
 ###### Results
-~ 120 000 RPS for GET / SET / DEL tests  
+around 120 000 RPS for GET / SET / DEL tests  
 
 ###### Results with pipelining
-~ 650 000 RPS for SET tests, ~ 900 000 RPS for GET / DEL tests  
-~ 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests  
+around 650 000 RPS for SET tests, around 900 000 RPS for GET / DEL tests  
+around 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests  
 
 ##### Redis benchmark
 ```
 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
 ###### Results
-~ 120 000 RPS for GET / SET tests  
+around 120 000 RPS for GET / SET tests  
 
 ###### Results with pipelining
-~ 1 000 000 RPS for GET / SET tests
+around 1 000 000 RPS for GET / SET tests
 
 #### Docker on Ubuntu
 
@@ -118,7 +121,7 @@ docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 1
 ```
 
 ##### Results
-~ 110 000 RPS for GET / SET tests
+around 110 000 RPS for GET / SET tests
 
 #### Docker on Windows
 TBD
