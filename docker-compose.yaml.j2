@@ -20,6 +20,7 @@ services:
       service: tests-common
     environment:
       - CACHE_HOST=cache
+    command: ["tcp_server_test.py", "-p"]
     profiles:
       - tests
     networks:
@@ -36,7 +37,20 @@ services:
       - tests-pipelined
     networks:
       - cache_network
-    command: ["-p"]
+    command: ["tcp_server_test.py", "-p"]
+
+  tests-req-per-conn:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+      - TEST_ITERATIONS=100000
+    profiles:
+      - tests-req-per-conn
+    networks:
+      - cache_network
+    command: ["per_request_connection_test.py"]
 
 networks:
   cache_network:
