@@ -78,7 +78,6 @@ namespace server {
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<uint_fast32_t> eventsPerBatch = 0;
-            std::atomic<bool>& cancellationToken;
             std::atomic<bool> isRunning = false;
             std::jthread metricsUpdaterThread;
             std::jthread connManagerThread;
@@ -97,7 +96,7 @@ namespace server {
             AsyncSendTask sendResponse(int client_fd, const char* response);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
-            CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});
+            CacheServer(const ServerSettings settings = ServerSettings{});
             ~CacheServer();
 
             /// @brief Starts processing incoming requests

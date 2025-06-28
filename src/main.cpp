@@ -8,28 +8,6 @@
 using namespace server;
 
 int main() {
-    std::stop_source sSource;
-    std::stop_token sToken;
-    std::atomic<bool> cancellationToken{false};
-
-    static std::function<void(int)> signalHandler = [&cancellationToken, &sSource, &sToken](int signal) {
-        if (signal == SIGINT || signal == SIGTERM) {
-            cancellationToken = true;
-            if (sSource.stop_possible()) {
-                sSource.request_stop();
-            }
-        }
-    };
-
-    auto signalDispatcher = [] (int signal) {
-        if (signalHandler) {
-            signalHandler(signal);
-        }
-    };
-
-    signal(SIGINT, signalDispatcher); 
-    signal(SIGTERM, signalDispatcher);
-
     std::queue<CacheServerMetrics> serverChannel;
 
     auto metricsHost = getFromEnv<const char*>("METRICS_HOST", true);
@@ -46,8 +24,22 @@ int main() {
 
     ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression };
 
-    CacheServer cacheServer { cancellationToken, serverSettings };
+    CacheServer cacheServer { serverSettings };
 
+    static std::function<void(int)> signalHandler = [&cacheServer](int signal) {
+        if (signal == SIGINT || signal == SIGTERM) {
+            cacheServer.Stop();
+        }
+    };
+
+    auto signalDispatcher = [] (int signal) {
+        if (signalHandler) {
+            signalHandler(signal);
+        }
+    };
+
+    signal(SIGINT, signalDispatcher); 
+    signal(SIGTERM, signalDispatcher);
 
     auto metricsUpdaterThread = std::jthread(
         [&serverChannel, &metricsServer](std::stop_token stopToken)
@@ -66,7 +58,5 @@ int main() {
         }
     );
 
-    sSource = metricsUpdaterThread.get_stop_source();
-    sToken = metricsUpdaterThread.get_stop_token();
     return cacheServer.Start(serverChannel);
 }

@@ -2,8 +2,7 @@
 
 using namespace server;
 
-CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings settings):
-    cancellationToken(cToken), numShards(settings.numShards), port(settings.port)
+CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numShards), port(settings.port)
 {
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -81,11 +80,12 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
 }
 
 CacheServer::~CacheServer() {
-    Stop();
     if (server_fd >= 0) {
         close(server_fd);
     }
-    serverShards.clear();
+    if (epoll_fd >= 0) {
+        close(epoll_fd);
+    }
 }
 
 ProcessRequestTask server::CacheServer::processRequest(std::string_view requestData, int client_fd)
@@ -144,7 +144,7 @@ ProcessRequestTask server::CacheServer::processRequest(std::string_view requestD
 
 HandleReqTask CacheServer::handleRequests()
 {
-    while (!cancellationToken) {
+    while (isRunning) {
 #ifndef NDEBUG
         auto start = std::chrono::high_resolution_clock::now();
 #endif
@@ -347,13 +347,16 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
     int resultCode = 0;
 
     connManagerThread = std::jthread([this](std::stop_token stopToken) {
-        connManager->acceptConnections(server_fd);
+        std::cout << "Connection manager thread is running!" << std::endl;
+        connManager->acceptConnections(server_fd, stopToken);
         shutdownLatch.count_down();
+        std::cout << "Exiting connection manager thread..." << std::endl;
     });
 
     reqHandlerThread = std::jthread([this](std::stop_token stopToken) {
+        std::cout << "Requests handler thread is running!" << std::endl;
         auto hrt = handleRequests();
-        while (!stopToken.stop_requested() && !cancellationToken) {
+        while (!stopToken.stop_requested()) {
             auto events_processed = hrt.next_value();
             if (!events_processed) {
                 std::this_thread::sleep_for(PROCESS_REQ_DELAY);
@@ -361,12 +364,10 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
             // TODO: try to recover when events_processed = -1
         }
         shutdownLatch.count_down();
+        std::cout << "Exiting requests handler thread..." << std::endl;
     });
 
-    shutdownLatch.arrive_and_wait();
-
-    Stop();
-    
+    shutdownLatch.wait();   
     return resultCode;
 }
 
@@ -377,18 +378,10 @@ void CacheServer::Stop() noexcept
     }
 
     std::cout << "Stopping server…\n";
-    connManager->stop();
     isRunning        = false;
-    cancellationToken = true;
-
-    if (epoll_fd >= 0) {
-        close(epoll_fd);
-    }
 
     for (auto* t : { &metricsUpdaterThread, &connManagerThread, &reqHandlerThread }) {
-        if (t->joinable()) {
-            t->request_stop();
-        }
+        t->request_stop();
     }
 
     std::cout << "Server stopped.\n";

@@ -32,7 +32,6 @@ namespace server {
 
     class ConnManager {
         private:
-            std::atomic<bool> cancellationToken;
             int epoll_fd;
             std::mutex conn_mutex;
 
@@ -125,7 +124,7 @@ namespace server {
                 --activeConnectionsCounter;
             };
 
-            void acceptConnections(int server_fd) {
+            void acceptConnections(int server_fd, std::stop_token stopToken) {
                 sockaddr_in client_address;
                 socklen_t client_len = sizeof(client_address);
                 do {
@@ -147,13 +146,9 @@ namespace server {
                             perror("Failed to accept connection");
                         }
                     }
-                } while (!cancellationToken);
+                } while (!stopToken.stop_requested());
             }
 
-            void stop() {
-                cancellationToken = true;
-            }
-
-            ConnManager(int epoll_fd): epoll_fd(epoll_fd), cancellationToken(false), activeConnectionsCounter(0) {}
+            ConnManager(int epoll_fd): epoll_fd(epoll_fd), activeConnectionsCounter(0) {}
     };
 }
