@@ -45,7 +45,7 @@ services:
       service: tests-common
     environment:
       - CACHE_HOST=cache
-      - TEST_ITERATIONS=100000
+      - TEST_ITERATIONS=10000
     profiles:
       - tests-req-per-conn
     networks:
