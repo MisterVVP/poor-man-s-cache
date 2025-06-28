@@ -166,7 +166,6 @@ HandleReqTask CacheServer::handleRequests()
             numRequests += event_count;
             eventsPerBatch = event_count;
             for (int i = 0; i < event_count; ++i) {
-                const std::lock_guard<std::mutex> lock(conn_mutex);
                 auto client_fd = epoll_events[i].data.fd;
                 if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
                     connManager->closeConnection(client_fd);
@@ -182,7 +181,7 @@ HandleReqTask CacheServer::handleRequests()
             }
             std::vector<ProcessRequestTask> requestsToProcess;
             for (int i = 0; i < readers.size(); ++i) {
-                const std::lock_guard<std::mutex> lock(conn_mutex);
+                const std::lock_guard<std::mutex> lock(req_handle_mutex);
                 auto fd = readers[i].client_fd;
 #ifndef NDEBUG
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
@@ -310,6 +309,20 @@ AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
         }
 
         totalSent += bytesSent;
+
+        while (bytesSent > 0 && iov_idx < 2) {
+            if (static_cast<size_t>(bytesSent) >= iov[iov_idx].iov_len) {
+                bytesSent -= iov[iov_idx].iov_len;
+                ++iov_idx;
+            } else {
+                iov[iov_idx].iov_base = static_cast<char*>(iov[iov_idx].iov_base) + bytesSent;
+                iov[iov_idx].iov_len -= bytesSent;
+                bytesSent = 0;
+            }
+        }
+
+        msg.msg_iov = &iov[iov_idx];
+        msg.msg_iovlen = 2 - iov_idx;
     }
 }
 
