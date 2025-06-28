@@ -69,6 +69,7 @@ def send_command_to_custom_cache(command: str, bufSize: int):
                         break
                 except socket.timeout:
                     logger.error("Socket read timeout")
+                    exit(1)
                     return ""
                 except socket.error as e:
                     logger.error(e)
