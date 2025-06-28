@@ -20,7 +20,7 @@ services:
       service: tests-common
     environment:
       - CACHE_HOST=cache
-    command: ["tcp_server_test.py", "-p"]
+    command: ["tcp_server_test.py"]
     profiles:
       - tests
     networks:
