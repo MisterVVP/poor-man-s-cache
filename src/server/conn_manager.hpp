@@ -34,7 +34,7 @@ namespace server {
         private:
             std::atomic<bool> cancellationToken;
             int epoll_fd;
-            std::mutex& conn_mutex;
+            std::mutex conn_mutex;
 
             int registerConnection(int epoll_fd, int client_fd) {
                 std::lock_guard<std::mutex> lock(conn_mutex);
@@ -154,6 +154,6 @@ namespace server {
                 cancellationToken = true;
             }
 
-            ConnManager(int epoll_fd, std::mutex& m): epoll_fd(epoll_fd), conn_mutex(m), cancellationToken(false), activeConnectionsCounter(0) {}
+            ConnManager(int epoll_fd): epoll_fd(epoll_fd), cancellationToken(false), activeConnectionsCounter(0) {}
     };
 }

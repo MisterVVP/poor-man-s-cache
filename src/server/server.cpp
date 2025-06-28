@@ -68,7 +68,7 @@ CacheServer::CacheServer(std::atomic<bool>& cToken, const ServerSettings setting
         throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
     }
 
-    connManager = std::make_unique<ConnManager>(epoll_fd, conn_mutex);
+    connManager = std::make_unique<ConnManager>(epoll_fd);
 
 #ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards…" << std::endl;
@@ -181,7 +181,7 @@ HandleReqTask CacheServer::handleRequests()
             }
             std::vector<ProcessRequestTask> requestsToProcess;
             for (int i = 0; i < readers.size(); ++i) {
-                const std::lock_guard<std::mutex> lock(conn_mutex);
+                const std::lock_guard<std::mutex> lock(req_handle_mutex);
                 auto fd = readers[i].client_fd;
 #ifndef NDEBUG
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
