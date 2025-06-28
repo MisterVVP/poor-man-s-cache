@@ -24,12 +24,17 @@ Another pet project to practice.
 #### Testing method
 Local python script which is leveraging multiprocessing to send requests to the running server and await response from server.
 
+Example:
+```
+export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
+```
+
 There are few testing scenarios supported right now:
 1. Multiple GET requests
 2. Multiple SET requests
 3. Multiple DEL requests
 4. (SET key, GET key, GET non_existent_key) workflow
-5. Pipelined sequence of commands over a single TCP connection
+5. Single request per single connection test (not recommended)
 
 Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>) / N  
 - T<sub>client</sub> - time spent to send all the requests by client + time to receive and verify the responses
@@ -49,8 +54,8 @@ CI setup (free github hosted runner hardware) variations
 1. Default
 
 #### Test details results
-Local setup. 10 million requests per test suite. 24 logical threads.
-1. > 100 000 RPS without pipelining, > 200 000 RPS with pipelining
+Local setup. 10 million requests per test suite, 96 test client processes forked
+1. **Without pipelining:** > 100 000 RPS. **With pipelining** > 1 500 000 RPS (GET/DEL), > 1 000 000 RPS (SET), ~ 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow
 2. ~ 90 000 RPS without pipelining, TBD with pipelining
 3. TBD
 
@@ -58,7 +63,7 @@ CI setup. 1 million requests total (4 processes and 250000 chunks per process)
 ~ 22 500 RPS (without pipelining), > 100 000 RPS with pipelining
 
 #### Goals
-Next step is 500k+ functional RPS on Ubuntu (with our without pipelining)
+Next step is > 10 000 000 functional RPS on Ubuntu (with our without pipelining)
 
 #### How Redis works with the same task
 Below are results that I got from using Redis.
@@ -70,17 +75,20 @@ Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install
 
 ##### Our own tests
 ```
-python3 tcp_server_test.py --redis -p -b 16
+python3 ./tcp_server_test.py -p -b 100 --redis
 ```
-**Results**:  ~ 110 000 RPS for GET / SET / DEL tests  
-**Results with pipelining**:  ~ 500 000 RPS for GET / SET / DEL tests,  ~ 1 000 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
+
+**Results**:  ~ 120 000 RPS for GET / SET / DEL tests  
+**Results with pipelining**
+- ~ 650 000 RPS for SET tests, ~ 900 000 RPS for GET / DEL tests
+- ~ 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
 
 ##### Redis benchmark
 ```
-redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
 
-**Results**:  ~ 110 000 RPS for GET / SET tests  
+**Results**:  ~ 120 000 RPS for GET / SET tests  
 **Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
 
 2. Docker on Ubuntu
@@ -92,7 +100,7 @@ docker compose -f docker-compose-local.yaml --profile redis up
 
 Run official redis-benchmark tool
 ```
-docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
 
 **Results**:  ~ 110 000 RPS for GET / SET tests
@@ -187,8 +195,9 @@ cd tests && \
 virtualenv .venv && \
 source .venv/bin/activate && \
 pip install -r requirements.txt && \
-python3 ./tcp_server_test.py
+export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
 ```
+
 > [!TIP]
 > You can change the number of request sequences in tests via export TEST_ITERATIONS=100000
 
@@ -201,7 +210,7 @@ valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose .
 
 Run python tests, e.g. from tests folder:
 ```
-python3 ./tcp_server_test.py
+python3 ./tcp_server_test.py -p -b 100
 ```
 
 #### Profiling (callgrind)
