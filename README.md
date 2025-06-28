@@ -1,7 +1,5 @@
 # poor-man-s-cache
-
-When you got no money to buy enterprise tooling and no desire to contribute to open source - build your own thing.
-Another pet project to practice.
+High performance and minimalist cache server.
 
 ![main](https://github.com/MisterVVP/poor-man-s-cache/actions/workflows/main.yml/badge.svg?branch=main)
 
@@ -42,56 +40,72 @@ Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>)
 - N - total number of requests 
 
 #### Test setups
-
-Local setup (all with high end processor and half gbit internet) variations.
 Lunix kernel settings used as much as possible for both local and docker setups can be found in local_server_setup.bash
 
-1. Ubuntu
-2. Docker on Ubuntu
-3. Docker on Windows
+##### Local setup
+- Ubuntu (with high end processor and half gbit internet).
+- Docker on Ubuntu or Windows (with high end processor and half gbit internet)
 
-CI setup (free github hosted runner hardware) variations
-1. Default
+##### CI setup 
+Free github hosted runner hardware
 
 #### Test details results
 Local setup. 10 million requests per test suite, 96 test client processes forked
-1. **Without pipelining:** > 100 000 RPS. **With pipelining** > 1 500 000 RPS (GET/DEL), > 1 000 000 RPS (SET), ~ 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow
-2. ~ 90 000 RPS without pipelining, TBD with pipelining
-3. TBD
 
-CI setup. 1 million requests total (4 processes and 250000 chunks per process)
-~ 22 500 RPS (without pipelining), > 100 000 RPS with pipelining
+##### Local Ubuntu  
+###### Without pipelining
+> 100 000 RPS.
+###### With pipelining
+> 1 500 000 RPS (GET/DEL), > 1 000 000 RPS (SET), ~ 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
+
+##### Docker on Ubuntu  
+###### Without pipelining
+~ 90 000 RPS
+###### With pipelining
+TBD  
+
+##### Docker on Windows
+- TBD
+
+##### CI setup.
+1 million requests total (4 processes and 250000 chunks per process)
+###### Without pipelining
+~ 22 500 RPS
+###### With pipelining
+> 100 000 RPS
 
 #### Goals
 Next step is > 10 000 000 functional RPS on Ubuntu (with our without pipelining)
 
-#### How Redis works with the same task
+### How Redis works with the same task
 Below are results that I got from using Redis.
 
-1. Ubuntu
-
+#### Ubuntu (with high end processor and half gbit internet)
 Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/apt/
-
 
 ##### Our own tests
 ```
 python3 ./tcp_server_test.py -p -b 100 --redis
 ```
+###### Results
+~ 120 000 RPS for GET / SET / DEL tests  
 
-**Results**:  ~ 120 000 RPS for GET / SET / DEL tests  
-**Results with pipelining**
-- ~ 650 000 RPS for SET tests, ~ 900 000 RPS for GET / DEL tests
-- ~ 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
+###### Results with pipelining
+~ 650 000 RPS for SET tests, ~ 900 000 RPS for GET / DEL tests  
+~ 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests  
 
 ##### Redis benchmark
 ```
 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
+###### Results
+~ 120 000 RPS for GET / SET tests  
 
-**Results**:  ~ 120 000 RPS for GET / SET tests  
-**Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
+###### Results with pipelining
+~ 1 000 000 RPS for GET / SET tests
 
-2. Docker on Ubuntu
+#### Docker on Ubuntu
+
 Run redis in docker
 ```
 docker compose -f docker-compose-local.yaml --profile redis build
@@ -103,11 +117,11 @@ Run official redis-benchmark tool
 docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
 
-**Results**:  ~ 110 000 RPS for GET / SET tests
+##### Results
+~ 110 000 RPS for GET / SET tests
 
-3. Docker on Windows
-
-TODO: not verified
+#### Docker on Windows
+TBD
 
 ### Performance tests
 TODO. Server performance (client agnostic) should be calculated on server. Can introduce PERF command into the protocol
@@ -311,8 +325,6 @@ done
 ```
 
 ## TODO
-- Improve requests pipelining feature and server performance, focus on test cases with more than 10M requests
-- Ensure that tests from per_request_connection_test.py work again
 - Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
