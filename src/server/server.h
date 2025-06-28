@@ -92,8 +92,10 @@ namespace server {
 
             AsyncReadTask readRequestAsync(int client_fd);
             ProcessRequestTask processRequest(std::string_view requestData, int client_fd);
+            const char* processRequestSync(std::string_view requestData);
             HandleReqTask handleRequests();
             AsyncSendTask sendResponse(int client_fd, const char* response);
+            void sendResponses(int client_fd, const std::vector<const char*>& responses);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
             CacheServer(const ServerSettings settings = ServerSettings{});

@@ -1,7 +1,5 @@
 # poor-man-s-cache
-
-When you got no money to buy enterprise tooling and no desire to contribute to open source - build your own thing.
-Another pet project to practice.
+High performance and minimalist cache server.
 
 ![main](https://github.com/MisterVVP/poor-man-s-cache/actions/workflows/main.yml/badge.svg?branch=main)
 
@@ -24,12 +22,17 @@ Another pet project to practice.
 #### Testing method
 Local python script which is leveraging multiprocessing to send requests to the running server and await response from server.
 
+Example:
+```
+export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
+```
+
 There are few testing scenarios supported right now:
 1. Multiple GET requests
 2. Multiple SET requests
 3. Multiple DEL requests
 4. (SET key, GET key, GET non_existent_key) workflow
-5. Pipelined sequence of commands over a single TCP connection
+5. Single request per single connection test (not recommended)
 
 Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>) / N  
 - T<sub>client</sub> - time spent to send all the requests by client + time to receive and verify the responses
@@ -37,53 +40,75 @@ Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>)
 - N - total number of requests 
 
 #### Test setups
-
-Local setup (all with high end processor and half gbit internet) variations.
 Lunix kernel settings used as much as possible for both local and docker setups can be found in local_server_setup.bash
 
-1. Ubuntu
-2. Docker on Ubuntu
-3. Docker on Windows
+##### Local setup
+- Ubuntu (with high end processor and half gbit internet).
+- Docker on Ubuntu or Windows (with high end processor and half gbit internet)
 
-CI setup (free github hosted runner hardware) variations
-1. Default
+##### CI setup 
+Free github hosted runner hardware
 
 #### Test details results
-Local setup. 10 million requests per test suite. 24 logical threads.
-1. > 100 000 RPS without pipelining, > 200 000 RPS with pipelining
-2. ~ 90 000 RPS without pipelining, TBD with pipelining
-3. TBD
+Local setup. 10 million requests per test suite, 96 test client processes forked
 
-CI setup. 1 million requests total (4 processes and 250000 chunks per process)
-~ 22 500 RPS (without pipelining), > 100 000 RPS with pipelining
+##### Local Ubuntu  
+###### Without pipelining
+more than 100 000 RPS.
+###### With pipelining
+- more than 1 500 000 RPS (GET/DEL)
+- more than 1 000 000 RPS (SET)
+- around 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
+
+##### Docker on Ubuntu  
+###### Without pipelining
+around 90 000 RPS
+###### With pipelining
+TBD  
+
+##### Docker on Windows
+- TBD
+
+##### CI setup.
+1 million requests total (4 processes and 250000 chunks per process)
+###### Without pipelining
+around 22 500 RPS
+###### With pipelining
+more than 200 000 RPS (SET/GET/DEL)
+more than 400 000 RPS (SET key, GET key, GET non_existent_key) workflow 
 
 #### Goals
-Next step is 500k+ functional RPS on Ubuntu (with our without pipelining)
+Next step is 10M+ functional RPS on Ubuntu (with our without pipelining)
 
-#### How Redis works with the same task
+### How Redis works with the same task
 Below are results that I got from using Redis.
 
-1. Ubuntu
-
+#### Ubuntu (with high end processor and half gbit internet)
 Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/apt/
-
 
 ##### Our own tests
 ```
-python3 tcp_server_test.py --redis -p -b 16
+python3 ./tcp_server_test.py -p -b 100 --redis
 ```
-**Results**:  ~ 110 000 RPS for GET / SET / DEL tests  
-**Results with pipelining**:  ~ 500 000 RPS for GET / SET / DEL tests,  ~ 1 000 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
+###### Results
+around 120 000 RPS for GET / SET / DEL tests  
+
+###### Results with pipelining
+around 650 000 RPS for SET tests, around 900 000 RPS for GET / DEL tests  
+around 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests  
 
 ##### Redis benchmark
 ```
-redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
+###### Results
+around 120 000 RPS for GET / SET tests  
 
-**Results**:  ~ 110 000 RPS for GET / SET tests  
-**Results with pipelining**:  ~ 1 000 000 RPS for GET / SET tests
+###### Results with pipelining
+around 1 000 000 RPS for GET / SET tests
 
-2. Docker on Ubuntu
+#### Docker on Ubuntu
+
 Run redis in docker
 ```
 docker compose -f docker-compose-local.yaml --profile redis build
@@ -92,14 +117,14 @@ docker compose -f docker-compose-local.yaml --profile redis up
 
 Run official redis-benchmark tool
 ```
-docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12
+docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
 ```
 
-**Results**:  ~ 110 000 RPS for GET / SET tests
+##### Results
+around 110 000 RPS for GET / SET tests
 
-3. Docker on Windows
-
-TODO: not verified
+#### Docker on Windows
+TBD
 
 ### Performance tests
 TODO. Server performance (client agnostic) should be calculated on server. Can introduce PERF command into the protocol
@@ -187,8 +212,9 @@ cd tests && \
 virtualenv .venv && \
 source .venv/bin/activate && \
 pip install -r requirements.txt && \
-python3 ./tcp_server_test.py
+export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
 ```
+
 > [!TIP]
 > You can change the number of request sequences in tests via export TEST_ITERATIONS=100000
 
@@ -201,7 +227,7 @@ valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose .
 
 Run python tests, e.g. from tests folder:
 ```
-python3 ./tcp_server_test.py
+python3 ./tcp_server_test.py -p -b 100
 ```
 
 #### Profiling (callgrind)
@@ -302,8 +328,6 @@ done
 ```
 
 ## TODO
-- Improve requests pipelining feature and server performance, focus on test cases with more than 10M requests
-- Ensure that tests from per_request_connection_test.py work again
 - Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI

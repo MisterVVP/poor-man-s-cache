@@ -8,6 +8,7 @@ on:
     - main
     - dev*
     - release/*
+    - codex/*
 
 env:
   DOCKER_IMAGE_NAME: my-image

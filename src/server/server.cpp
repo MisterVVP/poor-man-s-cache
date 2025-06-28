@@ -1,4 +1,5 @@
 #include "server.h"
+#include <unordered_map>
 
 using namespace server;
 
@@ -142,6 +143,56 @@ ProcessRequestTask server::CacheServer::processRequest(std::string_view requestD
     co_await srt;
 }
 
+const char* CacheServer::processRequestSync(std::string_view requestData)
+{
+    const char* response = nullptr;
+
+    const auto firstSpace = requestData.find(' ');
+    if (firstSpace == std::string_view::npos) {
+        ++numErrors;
+        return UNABLE_TO_PARSE_REQUEST_ERROR;
+    }
+
+    const auto command = requestData.substr(0, firstSpace);
+    const auto remainder = requestData.substr(firstSpace + 1);
+    const auto secondSpace = remainder.find(' ');
+
+    char* keyPtr = const_cast<char*>(remainder.data());
+    const char* valuePtr = nullptr;
+
+    if (secondSpace != std::string_view::npos) {
+        keyPtr[secondSpace] = '\0';
+        valuePtr = keyPtr + secondSpace + 1;
+    }
+
+    auto hash = hashFunc(keyPtr);
+    auto shardId = hash % numShards;
+    auto& shard = serverShards[shardId];
+
+    if (command == GET_STR) {
+        Query query{QueryCode::GET, keyPtr, hash};
+        response = shard.processQuery(query);
+    } else if (command == SET_STR) {
+        if (valuePtr) {
+            Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
+            response = shard.processCommand(cmd);
+        } else {
+            ++numErrors;
+            response = INVALID_COMMAND_FORMAT;
+        }
+    } else if (command == DEL_STR) {
+        Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
+        response = shard.processCommand(cmd);
+    }
+
+    if (!response) {
+        ++numErrors;
+        response = UNKNOWN_COMMAND;
+    }
+
+    return response;
+}
+
 HandleReqTask CacheServer::handleRequests()
 {
     while (isRunning) {
@@ -179,7 +230,7 @@ HandleReqTask CacheServer::handleRequests()
                     readers.emplace_back(std::move(asyncRead));
                 }
             }
-            std::vector<ProcessRequestTask> requestsToProcess;
+            std::unordered_map<int, std::vector<const char*>> responsesPerConn;
             for (int i = 0; i < readers.size(); ++i) {
                 const std::lock_guard<std::mutex> lock(req_handle_mutex);
                 auto fd = readers[i].client_fd;
@@ -197,11 +248,12 @@ HandleReqTask CacheServer::handleRequests()
                 }
 
                 auto& connData = connManager->connections[fd];
+                auto& responses = responsesPerConn[fd];
                 while (!connData.pendingRequests.empty()) {
                     auto req = connData.pendingRequests.front();
                     connData.pendingRequests.pop_front();
-                    auto processReqTask = processRequest(req, fd);
-                    requestsToProcess.emplace_back(std::move(processReqTask));
+                    auto resp = processRequestSync(req);
+                    responses.push_back(resp);
                 }
                 if (connData.bytesToErase > 0) {
                     connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + connData.bytesToErase);
@@ -209,8 +261,10 @@ HandleReqTask CacheServer::handleRequests()
                 }
             }
 
-            for (int i = 0; i < requestsToProcess.size(); ++i) {
-                co_await requestsToProcess[i];
+            for (auto& [fd, responses] : responsesPerConn) {
+                if (!responses.empty()) {
+                    sendResponses(fd, responses);
+                }
             }
 
 #ifndef NDEBUG
@@ -323,6 +377,58 @@ AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
 
         msg.msg_iov = &iov[iov_idx];
         msg.msg_iovlen = 2 - iov_idx;
+    }
+}
+
+void CacheServer::sendResponses(int client_fd, const std::vector<const char*>& responses) {
+    std::vector<iovec> iov(responses.size() * 2);
+    std::vector<char> separators(responses.size(), MSG_SEPARATOR);
+
+    size_t totalRequired = 0;
+    for (size_t i = 0; i < responses.size(); ++i) {
+        auto len = strlen(responses[i]);
+        iov[2 * i].iov_base = const_cast<char*>(responses[i]);
+        iov[2 * i].iov_len = len;
+        iov[2 * i + 1].iov_base = &separators[i];
+        iov[2 * i + 1].iov_len = 1;
+        totalRequired += len + 1;
+    }
+
+    size_t totalSent = 0;
+    size_t iov_idx = 0;
+
+    msghdr msg{};
+    msg.msg_iov = iov.data();
+    msg.msg_iovlen = iov.size();
+
+    while (totalSent < totalRequired) {
+        auto bytesSent = sendmsg(client_fd, &msg, 0);
+
+        if (bytesSent == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            } else {
+                perror("Error when sending data back to client");
+                ++numErrors;
+                break;
+            }
+        }
+
+        totalSent += bytesSent;
+
+        while (bytesSent > 0 && iov_idx < iov.size()) {
+            if (static_cast<size_t>(bytesSent) >= iov[iov_idx].iov_len) {
+                bytesSent -= iov[iov_idx].iov_len;
+                ++iov_idx;
+            } else {
+                iov[iov_idx].iov_base = static_cast<char*>(iov[iov_idx].iov_base) + bytesSent;
+                iov[iov_idx].iov_len -= bytesSent;
+                bytesSent = 0;
+            }
+        }
+
+        msg.msg_iov = &iov[iov_idx];
+        msg.msg_iovlen = iov.size() - iov_idx;
     }
 }
 
