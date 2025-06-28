@@ -9,6 +9,7 @@ namespace server {
 
     static constexpr const char* OK = "OK";
     static constexpr const char* NOTHING = "(nil)";
+    static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
     static constexpr const char* INTERNAL_ERROR = "ERROR: Internal error";
     static constexpr const char* INVALID_COMMAND_CODE = "ERROR: Invalid command code";
     static constexpr const char* INVALID_QUERY_CODE = "ERROR: Invalid query code";

@@ -5,12 +5,14 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <thread>
 #include <vector>
 #include <latch>
 #include <queue>
 #include <semaphore>
+#include <string_view>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -72,10 +74,10 @@ namespace server {
             std::latch shutdownLatch{2};
             std::binary_semaphore metricsSemaphore{0};
             std::unique_ptr<ConnManager> connManager;
+            std::mutex req_handle_mutex;
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<uint_fast32_t> eventsPerBatch = 0;
-            std::atomic<bool>& cancellationToken;
             std::atomic<bool> isRunning = false;
             std::jthread metricsUpdaterThread;
             std::jthread connManagerThread;
@@ -89,12 +91,12 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             AsyncReadTask readRequestAsync(int client_fd);
-            ProcessRequestTask processRequest(char* requestData, int client_fd);
+            ProcessRequestTask processRequest(std::string_view requestData, int client_fd);
             HandleReqTask handleRequests();
             AsyncSendTask sendResponse(int client_fd, const char* response);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
-            CacheServer(std::atomic<bool>& cToken, const ServerSettings settings = ServerSettings{});
+            CacheServer(const ServerSettings settings = ServerSettings{});
             ~CacheServer();
 
             /// @brief Starts processing incoming requests

@@ -4,6 +4,7 @@
 #include <queue>
 #include <bitset>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <omp.h>
 

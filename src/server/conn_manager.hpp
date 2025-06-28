@@ -3,6 +3,10 @@
 #include <atomic>
 #include <coroutine>
 #include <unordered_map>
+#include <vector>
+#include <deque>
+#include <string_view>
+#include <mutex>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -17,17 +21,25 @@ namespace server {
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
+        std::vector<char> readBuffer;
+        std::deque<std::string_view> pendingRequests;
+        size_t bytesToErase = 0;
+        ConnectionData() = default;
+        ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
+            readBuffer.reserve(READ_BUFFER_SIZE);
+        }
     };
 
     class ConnManager {
         private:
-            std::atomic<bool> cancellationToken;
             int epoll_fd;
+            std::mutex conn_mutex;
 
             int registerConnection(int epoll_fd, int client_fd) {
-                #ifndef NDEBUG
+                std::lock_guard<std::mutex> lock(conn_mutex);
+#ifndef NDEBUG
                 std::cout << "Adding client_fd = " << client_fd << " to epoll_fd = " << epoll_fd << std::endl;
-                #endif
+#endif
                 setNonBlocking(client_fd);
                 epoll_event event{};
                 event.events = EPOLLIN | EPOLLET;
@@ -42,8 +54,10 @@ namespace server {
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
                     auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd );
                     if (!success) {
-                        std::cerr << "Error saving connection info for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
-                        return -1;
+#ifndef NDEBUG
+                        std::cerr << "Connection info already exists for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
+#endif
+                        return 0;
                     }
                 } else {
                     perror("clock_gettime() failed when registering connection");
@@ -54,15 +68,15 @@ namespace server {
             };
 
             void validateConnections() {
+                std::lock_guard<std::mutex> lock(conn_mutex);
                 timespec now{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &now) == 0) {
                     for (auto it = connections.begin(); it != connections.end();) {
                         auto diff = now - it->second.lastActivity;
+                        auto fd = it->first;
+                        ++it;
                         if (diff.tv_sec > MAX_CONN_LIFETIME_SEC) {
-                            closeConnection(it->first);
-                            it = connections.erase(it);
-                        } else {
-                            ++it;
+                            closeConnection(fd);
                         }
                     }
                 } else {
@@ -75,6 +89,7 @@ namespace server {
             std::unordered_map<int, ConnectionData> connections;
 
             bool updateActivity(int fd) {
+                std::lock_guard<std::mutex> lock(conn_mutex);
                 timespec time{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
                     connections[fd].lastActivity = time;
@@ -86,19 +101,30 @@ namespace server {
             };
 
             void closeConnection(int fd) noexcept {
-                auto sdRes = shutdown(fd, SHUT_RDWR);
-                if (sdRes == -1) {
+                std::lock_guard<std::mutex> lock(conn_mutex);
+                if (!connections.contains(fd)) {
+                    return;
+                }
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, nullptr) == -1) {
+#ifndef NDEBUG
+                    perror("Error when removing socket descriptor from epoll");
+#endif
+                };
+                if (shutdown(fd, SHUT_RDWR) == -1) {
+#ifndef NDEBUG
                     perror("Error when shutting down socket descriptor");
+#endif
                 }
-                auto closeRes = close(fd);
-                if (closeRes == -1) {
+                if (close(fd) == -1) {
+#ifndef NDEBUG
                     perror("Error when closing socket descriptor");
+#endif
                 }
-
+                connections.erase(fd);
                 --activeConnectionsCounter;
             };
 
-            void acceptConnections(int server_fd) {
+            void acceptConnections(int server_fd, std::stop_token stopToken) {
                 sockaddr_in client_address;
                 socklen_t client_len = sizeof(client_address);
                 do {
@@ -106,7 +132,7 @@ namespace server {
                     if (client_fd >= 0) {
                         if (registerConnection(epoll_fd, client_fd) == -1) {
                             continue;
-                        };                      
+                        };
                     } else {
                         if (activeConnectionsCounter > 0) {
                             validateConnections();
@@ -115,18 +141,14 @@ namespace server {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;
                         } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            std::this_thread::sleep_for(ACCEPT_CONN_DELAY);
                         } else {
                             perror("Failed to accept connection");
                         }
                     }
-                } while (!cancellationToken);
+                } while (!stopToken.stop_requested());
             }
 
-            void stop() {
-                cancellationToken = true;
-            }
-
-            ConnManager(int epoll_fd): epoll_fd(epoll_fd), cancellationToken(false), activeConnectionsCounter(0) {}
+            ConnManager(int epoll_fd): epoll_fd(epoll_fd), activeConnectionsCounter(0) {}
     };
 }
