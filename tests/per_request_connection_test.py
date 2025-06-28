@@ -204,10 +204,10 @@ def delete_iteration(x):
         return False
 
 def run_load_tests():
-    return run_parallel(test_iteration, "load tests", requests_multiplier=3)
+    return run_parallel(test_iteration, "Workflow tests", requests_multiplier=3)
 
 def delete_everything():
-    return run_parallel(delete_iteration, "deletion tests", requests_multiplier=3)
+    return run_parallel(delete_iteration, "Deletion tests", requests_multiplier=3)
 
 if __name__ == "__main__":
     logger.info("Sending large JSON data from files ...\n")
