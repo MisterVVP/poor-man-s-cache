@@ -45,3 +45,9 @@ jobs:
 
     - name: Stop cache server
       run: docker compose --profile main down
+
+    - name: Run valgrind memory check
+      run: |
+        docker build -f Dockerfile.debug . -t cache-debug:latest
+        docker run --rm --entrypoint /valgrind.bash cache-debug:latest
+      timeout-minutes: 5
