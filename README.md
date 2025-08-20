@@ -346,7 +346,7 @@ done
 - Continue reading https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/coroutines-c++20/
 
 ## Questions / Ideas
-- Store value size and increase memory usage? size_t will require extra 80 Mb per 10M records, however it'll eliminate many strelen() calls.
+- add support for RESP protocol?
 
 
 ## Good articles and guidelines
