@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# Load required environment variables and limit test iterations
+source "$(dirname "$0")/.env"
+export TEST_ITERATIONS=1000
+
 valgrind --leak-check=full --error-exitcode=1 /app/poor-man-s-cache &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
