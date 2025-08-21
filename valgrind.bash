@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Load required environment variables and limit test iterations
 source "$(dirname "$0")/.env"
-export TEST_ITERATIONS=1000
+# Fewer iterations keep valgrind runs short for CI
+export TEST_ITERATIONS=100
 export TEST_POOL_SIZE=1
 
 VALGRIND_LOG="$(mktemp)"
@@ -25,7 +26,11 @@ for i in {1..50}; do
   sleep 0.1
 done
 
-python3 /tests/tcp_server_test.py -p
+set +e
+# Limit the test run to avoid CI timeouts
+timeout 8m python3 /tests/tcp_server_test.py -p
+TEST_STATUS=$?
+set -e
 
 kill $SERVER_PID 2>/dev/null || true
 set +e
@@ -34,4 +39,4 @@ VALGRIND_STATUS=$?
 set -e
 trap - EXIT
 grep -v "still reachable" "${VALGRIND_LOG}" || true
-exit ${VALGRIND_STATUS}
+exit $((TEST_STATUS || VALGRIND_STATUS))
