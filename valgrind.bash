@@ -17,9 +17,11 @@ for i in {1..50}; do
   sleep 0.1
 done
 
-for i in $(seq 1 10000); do
-  printf "SET key$i value$i\x1F" | nc localhost 9001 >/dev/null || true
-done
+{
+  for i in $(seq 1 10000); do
+    printf "SET key$i value$i\x1F"
+  done
+} | nc localhost 9001 >/dev/null || true
 
 kill $SERVER_PID 2>/dev/null || true
 wait $SERVER_PID
