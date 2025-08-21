@@ -21,10 +21,12 @@ RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$B
 
 FROM alpine:latest
 
-RUN apk update && apk upgrade && apk add libstdc++ valgrind bash netcat-openbsd
+RUN apk update && apk upgrade && apk add libstdc++ valgrind bash netcat-openbsd python3
 COPY ./sockmon.bash /sockmon.bash
 COPY ./valgrind.bash /valgrind.bash
 COPY .env /.env
+COPY tests /tests
+
 COPY --from=build /app/build/src/poor-man-s-cache /app/poor-man-s-cache
 COPY --from=build /usr/local/include/prometheus/ /usr/local/include/prometheus/
 COPY --from=build /usr/local/lib/ /usr/local/lib/
