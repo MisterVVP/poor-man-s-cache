@@ -6,7 +6,14 @@ source "$(dirname "$0")/.env"
 export TEST_ITERATIONS=1000
 export TEST_POOL_SIZE=1
 
-valgrind --leak-check=full --error-exitcode=1 /app/poor-man-s-cache &
+VALGRIND_LOG="$(mktemp)"
+valgrind \
+  --leak-check=full \
+  --show-leak-kinds=definite,indirect,possible \
+  --errors-for-leak-kinds=definite,indirect,possible \
+  --error-exitcode=1 \
+  --log-file="${VALGRIND_LOG}" \
+  /app/poor-man-s-cache &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
 
@@ -21,5 +28,10 @@ done
 python3 /tests/tcp_server_test.py -p
 
 kill $SERVER_PID 2>/dev/null || true
+set +e
 wait $SERVER_PID
+VALGRIND_STATUS=$?
+set -e
 trap - EXIT
+grep -v "still reachable" "${VALGRIND_LOG}" || true
+exit ${VALGRIND_STATUS}
