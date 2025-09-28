@@ -1,4 +1,4 @@
-#include "hash.h"
+#include "hash.hpp"
 
 
 uint_fast64_t hashFunc(const char *key) {

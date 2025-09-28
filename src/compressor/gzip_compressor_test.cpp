@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <zlib.h>
-#include "gzip_compressor.h"
+#include "gzip_compressor.hpp"
 
 // Test compression and decompression of a normal string
 TEST(GzipCompressorTest, CompressDecompress) {

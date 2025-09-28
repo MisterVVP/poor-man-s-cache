@@ -19,14 +19,14 @@
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include "../hash/hash.h"
-#include "../non_copyable.h"
-#include "sockutils.h"
+#include "../hash/hash.hpp"
+#include "../non_copyable.hpp"
+#include "sockutils.hpp"
 #include "conn_manager.hpp"
-#include "shard.h"
-#include "protocol.h"
+#include "shard.hpp"
+#include "protocol.hpp"
 #include "constants.hpp"
-#include "coroutines.h"
+#include "coroutines.hpp"
 
 namespace server {
 

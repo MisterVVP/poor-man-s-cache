@@ -1,4 +1,4 @@
-#include "gzip_compressor.h"
+#include "gzip_compressor.hpp"
 
 CompressResult GzipCompressor::Compress(const char* input) {
     if (!input || *input == '\0') return { nullptr, 0, INVALID_INPUT };

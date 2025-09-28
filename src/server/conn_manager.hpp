@@ -10,11 +10,11 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
-#include "../kvs/kvs.h"
-#include "../utils/time.h"
-#include "../non_copyable.h"
-#include "coroutines.h"
-#include "sockutils.h"
+#include "../kvs/kvs.hpp"
+#include "../utils/time.hpp"
+#include "../non_copyable.hpp"
+#include "coroutines.hpp"
+#include "sockutils.hpp"
 #include "constants.hpp"
 
 namespace server {
@@ -152,3 +152,4 @@ namespace server {
             ConnManager(int epoll_fd): epoll_fd(epoll_fd), activeConnectionsCounter(0) {}
     };
 }
+

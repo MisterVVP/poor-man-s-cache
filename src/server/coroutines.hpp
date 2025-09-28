@@ -4,7 +4,7 @@
 #include <coroutine>
 #include <optional>
 #include <sys/socket.h>
-#include "../non_copyable.h"
+#include "../non_copyable.hpp"
 
 namespace server {
     /// @brief ReadRequest result codes

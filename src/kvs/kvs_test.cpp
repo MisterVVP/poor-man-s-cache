@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <filesystem>
 #include <fstream>
-#include "kvs.h"
+#include "kvs.hpp"
 #include "../env.hpp"
 
 using namespace kvs;

@@ -1,4 +1,4 @@
-#include "primegen.h"
+#include "primegen.hpp"
 
 void Primegen::initGenerator()
 {

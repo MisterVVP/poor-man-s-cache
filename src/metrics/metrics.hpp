@@ -6,7 +6,7 @@
 #include <prometheus/counter.h>
 #include <prometheus/histogram.h>
 #include <prometheus/gauge.h>
-#include "../server/server.h"
+#include "../server/server.hpp"
 
 namespace metrics
 {

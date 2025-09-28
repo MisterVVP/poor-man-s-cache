@@ -37,8 +37,9 @@ class GzipCompressor {
         /// @return Pointer to compressed string on success, nullptr on error
         static CompressResult Compress(const char* input);
 
-        /// @brief Performs gzip decompression for the input string, you are responsible to delete[] the memory or capture it with smart pointer! 
+        /// @brief Performs gzip decompression for the input string, you are responsible to delete[] the memory or capture it with smart pointer!
         /// @param input Compressed string
         /// @return Pointer to decompressed string on success, nullptr on error
         static DecompressResult Decompress(const char* input, size_t input_size);
 };
+
