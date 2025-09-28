@@ -1,4 +1,4 @@
-#include "kvs.h"
+#include "kvs.hpp"
 
 using namespace kvs;
 

@@ -12,10 +12,10 @@
 #include <algorithm>
 #include <future>
 #include <atomic>
-#include "../primegen/primegen.h"
-#include "../hash/hash.h"
-#include "../non_copyable.h"
-#include "../compressor/gzip_compressor.h"
+#include "../primegen/primegen.hpp"
+#include "../hash/hash.hpp"
+#include "../non_copyable.hpp"
+#include "../compressor/gzip_compressor.hpp"
 
 #ifndef NDEBUG
 #include <chrono>

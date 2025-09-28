@@ -1,8 +1,8 @@
 #include <thread>
 #include <iostream>
 #include <signal.h>
-#include "metrics/metrics.h"
-#include "server/server.h"
+#include "metrics/metrics.hpp"
+#include "server/server.hpp"
 #include "env.hpp"
 
 using namespace server;

@@ -1,4 +1,4 @@
-#include "time.h"
+#include "time.hpp"
 
 timespec operator+(const timespec &lhs, const timespec &rhs) {
     timespec result;

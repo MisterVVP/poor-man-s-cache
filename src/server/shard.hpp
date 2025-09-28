@@ -1,11 +1,11 @@
 #pragma once
 #include <cstdint>
 #include <functional>
-#include "../non_copyable.h"
-#include "../kvs/kvs.h"
+#include "../non_copyable.hpp"
+#include "../kvs/kvs.hpp"
 #include "conn_manager.hpp"
 #include "constants.hpp"
-#include "protocol.h"
+#include "protocol.hpp"
 
 
 namespace server {
