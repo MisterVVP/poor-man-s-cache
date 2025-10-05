@@ -198,6 +198,32 @@ Run unit tests:
 ```
 ./run-all-tests.bash
 ```
+
+### Static analysis (CodeQL)
+
+The repository is scanned with GitHub CodeQL. The workflow builds the project with GCC 14 and a locally installed copy of `prometheus-cpp`. To reproduce the same environment locally, use the following commands (they require sudo privileges):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+sudo apt-get update
+sudo apt-get install -y gcc-14 g++-14 cmake ninja-build pkg-config zlib1g-dev libgtest-dev
+
+cmake -S prometheus-cpp -B prometheus-cpp/_build -G Ninja \
+  -DBUILD_SHARED_LIBS=ON \
+  -DENABLE_TESTING=OFF \
+  -DENABLE_PUSH=OFF \
+  -DENABLE_COMPRESSION=OFF \
+  -DENABLE_LOGGING=OFF
+cmake --build prometheus-cpp/_build --parallel
+cmake --install prometheus-cpp/_build --prefix "$(pwd)/prometheus-cpp/_install"
+
+CMAKE_PREFIX_PATH="$(pwd)/prometheus-cpp/_install" cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --parallel
+```
+
+Running the steps above ensures the CodeQL build matches the CI configuration and that the necessary dependencies are present before launching a local CodeQL analysis.
 > [!TIP]
 > Use Ctrl+C to send SIGTERM
 
