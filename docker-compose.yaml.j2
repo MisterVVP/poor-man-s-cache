@@ -27,6 +27,20 @@ services:
       - cache_network
 {% endfor %}
 
+  client-integration:
+    build:
+      context: .
+      dockerfile: tests/client_integration/Dockerfile
+    environment:
+      - CACHE_HOST=cache
+      - CACHE_PORT=9001
+    depends_on:
+      - cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
+
   tests-pipelined:
     extends:
       file: common-compose-config.yaml

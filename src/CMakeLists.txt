@@ -24,3 +24,7 @@ if(PROMETHEUS_CPP_ENABLE_PULL)
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
+
+add_library(pmc_cache_client INTERFACE)
+target_include_directories(pmc_cache_client INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(pmc_cache_client INTERFACE FILE_SET HEADERS BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} FILES client/cache_client.hpp)
