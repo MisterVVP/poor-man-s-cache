@@ -201,7 +201,7 @@ Run unit tests:
 
 ### Static analysis (CodeQL)
 
-The repository is scanned with GitHub CodeQL. The workflow builds the project with GCC 14 and a locally installed copy of `prometheus-cpp`. To reproduce the same environment locally, use the following commands (they require sudo privileges):
+The repository is scanned with GitHub CodeQL for C++, Python, and GitHub Actions sources. The C++ analysis path builds the project with GCC 14 and a locally installed copy of `prometheus-cpp`. To reproduce the same environment locally, use the following commands (they require sudo privileges):
 
 ```bash
 sudo apt-get update

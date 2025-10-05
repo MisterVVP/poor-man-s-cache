@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["cpp"]
+        language: ["cpp", "python", "actions"]
 
     steps:
       - name: Checkout repository
@@ -29,6 +29,7 @@ jobs:
           submodules: recursive
 
       - name: Install build dependencies
+        if: matrix.language == 'cpp'
         run: |
           sudo apt-get update
           sudo apt-get install -y software-properties-common
@@ -39,6 +40,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140
 
       - name: Fetch prometheus-cpp dependency
+        if: matrix.language == 'cpp'
         run: |
           if [ ! -d prometheus-cpp ]; then
             git clone --depth 1 https://github.com/jupp0r/prometheus-cpp.git prometheus-cpp
@@ -46,6 +48,7 @@ jobs:
           git -C prometheus-cpp submodule update --init --recursive
 
       - name: Build prometheus-cpp dependency
+        if: matrix.language == 'cpp'
         env:
           CC: gcc-14
           CXX: g++-14
@@ -63,14 +66,23 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
+          build-mode: manual
+
+      - name: Set up Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Configure project
+        if: matrix.language == 'cpp'
         env:
           CMAKE_PREFIX_PATH: "${{ github.workspace }}/prometheus-cpp/_install"
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
       - name: Build project
+        if: matrix.language == 'cpp'
         run: cmake --build build --config Release --parallel
 
       - name: Perform CodeQL Analysis
