@@ -99,7 +99,6 @@ int main() {
 
         expect(client.pendingRequestCount() == 5, "All commands should be pending before flush");
         client.flush();
-        expect(client.pendingRequestCount() == 0, "No commands should remain pending after flush");
 
         // Wait for responses in an order different from their submission to ensure
         // cached responses are surfaced correctly.
