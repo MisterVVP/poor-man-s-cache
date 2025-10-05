@@ -38,6 +38,13 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140
 
+      - name: Fetch prometheus-cpp dependency
+        run: |
+          if [ ! -d prometheus-cpp ]; then
+            git clone --depth 1 https://github.com/jupp0r/prometheus-cpp.git prometheus-cpp
+          fi
+          git -C prometheus-cpp submodule update --init --recursive
+
       - name: Build prometheus-cpp dependency
         env:
           CC: gcc-14
@@ -59,8 +66,6 @@ jobs:
 
       - name: Configure project
         env:
-          CC: gcc-14
-          CXX: g++-14
           CMAKE_PREFIX_PATH: "${{ github.workspace }}/prometheus-cpp/_install"
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

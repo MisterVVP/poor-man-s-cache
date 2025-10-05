@@ -210,7 +210,10 @@ sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
 sudo apt-get update
 sudo apt-get install -y gcc-14 g++-14 cmake ninja-build pkg-config zlib1g-dev libgtest-dev
 
-git submodule update --init --recursive
+if [ ! -d prometheus-cpp ]; then
+  git clone https://github.com/jupp0r/prometheus-cpp.git prometheus-cpp
+fi
+git -C prometheus-cpp submodule update --init --recursive
 
 cmake -S prometheus-cpp -B prometheus-cpp/_build -G Ninja \
   -DBUILD_SHARED_LIBS=ON \
