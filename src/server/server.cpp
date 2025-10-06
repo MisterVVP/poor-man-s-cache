@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include <iterator>
 #include <unordered_map>
 
 using namespace server;
@@ -376,7 +377,7 @@ AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
         }
 
         msg.msg_iov = &iov[iov_idx];
-        msg.msg_iovlen = iov.size() - iov_idx;
+        msg.msg_iovlen = std::size(iov) - iov_idx;
     }
 }
 
