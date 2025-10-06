@@ -30,7 +30,11 @@ jobs:
 
     - name: Start cache server
       run: docker compose --profile main up --detach
-      
+
+    - name: Run client tests
+      run: docker compose --profile client-tests up
+      timeout-minutes: 5
+
     - name: Run load and functional tests
       run: docker compose --profile tests up
       timeout-minutes: 10
