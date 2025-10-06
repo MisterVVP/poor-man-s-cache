@@ -34,8 +34,6 @@ services:
     environment:
       - CACHE_HOST=cache
       - CACHE_PORT=9001
-    depends_on:
-      - cache
     profiles:
       - tests
     networks:
