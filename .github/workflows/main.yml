@@ -33,15 +33,15 @@ jobs:
       
     - name: Run load and functional tests
       run: docker compose --profile tests up
-      timeout-minutes: 15
+      timeout-minutes: 10
 
     - name: Run load and functional tests (pipelined mode enabled)
       run: docker compose --profile tests-pipelined up
-      timeout-minutes: 10
+      timeout-minutes: 5
 
     - name: Run load and functional tests (request-per-connection clients)
       run: docker compose --profile tests-req-per-conn up
-      timeout-minutes: 15
+      timeout-minutes: 10
 
     - name: Stop cache server
       run: docker compose --profile main down
