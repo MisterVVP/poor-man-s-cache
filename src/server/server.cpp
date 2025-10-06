@@ -376,7 +376,7 @@ AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
         }
 
         msg.msg_iov = &iov[iov_idx];
-        msg.msg_iovlen = 2 - iov_idx;
+        msg.msg_iovlen = iov.size() - iov_idx;
     }
 }
 
