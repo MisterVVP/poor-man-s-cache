@@ -10,6 +10,7 @@ services:
       service: cache-common
     profiles:
       - main
+      - tests
     networks:
       - cache_network
 

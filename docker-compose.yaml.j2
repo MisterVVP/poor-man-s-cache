@@ -10,6 +10,9 @@ services:
       service: cache-common
     profiles:
       - main
+      - tests
+      - tests-pipelined
+      - tests-req-per-conn
     networks:
       - cache_network
 
@@ -26,6 +29,20 @@ services:
     networks:
       - cache_network
 {% endfor %}
+
+  client-integration:
+    build:
+      context: .
+      dockerfile: tests/client_integration/Dockerfile
+    environment:
+      - CACHE_HOST=cache
+      - CACHE_PORT=9001
+    depends_on:
+      - cache
+    profiles:
+      - tests
+    networks:
+      - cache_network
 
   tests-pipelined:
     extends:
