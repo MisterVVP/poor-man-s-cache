@@ -6,10 +6,8 @@
 #include <cstdint>
 #include <cerrno>
 #include <deque>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,9 +17,23 @@
 #include <utility>
 #include <vector>
 
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
+#ifdef _WIN32
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
+#    include <winsock2.h>
+#    include <ws2tcpip.h>
+#    ifdef _MSC_VER
+#        pragma comment(lib, "Ws2_32.lib")
+#    endif
+#else
+#    include <netdb.h>
+#    include <netinet/in.h>
+#    include <netinet/tcp.h>
+#    include <sys/socket.h>
+#    include <sys/types.h>
+#    include <unistd.h>
+#endif
 
 namespace pmc {
 
@@ -94,6 +106,8 @@ public:
             return;
         }
 
+        ensureWinsockInitialized();
+
         const auto portStr = std::to_string(options_.port);
 
         addrinfo hints{};
@@ -106,60 +120,59 @@ public:
             throw std::system_error(gaiErr, std::generic_category(), "Failed to resolve cache server host");
         }
 
-        int fd = -1;
         int lastErrno = 0;
         for (addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
             int socketType = rp->ai_socktype;
 #ifdef SOCK_CLOEXEC
             socketType |= SOCK_CLOEXEC;
 #endif
-            fd = ::socket(rp->ai_family, socketType, rp->ai_protocol);
-            if (fd == -1) {
-                lastErrno = errno;
+            SocketHandle fd = ::socket(rp->ai_family, socketType, rp->ai_protocol);
+            if (fd == INVALID_SOCKET_HANDLE) {
+                lastErrno = lastSocketError();
                 continue;
             }
 
 #ifdef SO_NOSIGPIPE
             int enable = 1;
-            ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enable, sizeof(enable));
+            ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, reinterpret_cast<const char*>(&enable), sizeof(enable));
 #endif
 
             int flag = 1;
-            ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+            ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
 
             if (options_.sendTimeout.count() > 0) {
-                const auto tv = toTimeVal(options_.sendTimeout);
-                ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+                setSocketTimeout(fd, SO_SNDTIMEO, options_.sendTimeout);
             }
 
             if (options_.receiveTimeout.count() > 0) {
-                const auto tv = toTimeVal(options_.receiveTimeout);
-                ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                setSocketTimeout(fd, SO_RCVTIMEO, options_.receiveTimeout);
             }
 
-            if (::connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+            if (connectSocket(fd, rp->ai_addr, rp->ai_addrlen) == 0) {
                 socketFd_ = fd;
+                lastErrno = 0;
                 break;
             }
 
-            lastErrno = errno;
-            ::close(fd);
-            fd = -1;
+            lastErrno = lastSocketError();
+            closeSocket(fd);
         }
 
         ::freeaddrinfo(result);
 
-        if (fd == -1 || !connected()) {
-            throw std::system_error(lastErrno == 0 ? errno : lastErrno, std::system_category(),
-                                    "Failed to connect to cache server");
+        if (!connected()) {
+            if (lastErrno == 0) {
+                lastErrno = lastSocketError();
+            }
+            throw std::system_error(lastErrno, std::system_category(), "Failed to connect to cache server");
         }
     }
 
     /// Closes the socket connection.
     void close() noexcept {
-        if (socketFd_ != -1) {
-            ::close(socketFd_);
-            socketFd_ = -1;
+        if (socketFd_ != INVALID_SOCKET_HANDLE) {
+            closeSocket(socketFd_);
+            socketFd_ = INVALID_SOCKET_HANDLE;
         }
         pendingRequests_.clear();
         completedResponses_.clear();
@@ -169,7 +182,7 @@ public:
         nextRequestId_ = 1;
     }
 
-    [[nodiscard]] bool connected() const noexcept { return socketFd_ != -1; }
+    [[nodiscard]] bool connected() const noexcept { return socketFd_ != INVALID_SOCKET_HANDLE; }
 
     RequestId enqueueGet(std::string_view key) {
         return enqueue(RequestType::Get, key, {});
@@ -189,14 +202,27 @@ public:
 
         while (sendOffset_ < sendBuffer_.size()) {
             const auto remaining = sendBuffer_.size() - sendOffset_;
-            const auto* dataPtr = sendBuffer_.data() + sendOffset_;
-            const auto sent = ::send(socketFd_, dataPtr, remaining, sendFlags());
-            if (sent == -1) {
-                if (errno == EINTR) {
+            const char* dataPtr = sendBuffer_.data() + sendOffset_;
+#ifdef _WIN32
+            const auto chunk = static_cast<int>(std::min<std::size_t>(remaining, std::numeric_limits<int>::max()));
+            const auto sent = ::send(socketFd_, dataPtr, chunk, sendFlags());
+            if (sent == SOCKET_ERROR) {
+                const int errorCode = lastSocketError();
+                if (isInterrupted(errorCode)) {
                     continue;
                 }
-                throw std::system_error(errno, std::system_category(), "Failed to send data to cache server");
+                throw std::system_error(errorCode, std::system_category(), "Failed to send data to cache server");
             }
+#else
+            const auto sent = ::send(socketFd_, dataPtr, remaining, sendFlags());
+            if (sent == -1) {
+                const int errorCode = lastSocketError();
+                if (isInterrupted(errorCode)) {
+                    continue;
+                }
+                throw std::system_error(errorCode, std::system_category(), "Failed to send data to cache server");
+            }
+#endif
             sendOffset_ += static_cast<std::size_t>(sent);
         }
 
@@ -220,13 +246,25 @@ public:
             }
 
             char buffer[4096];
-            const auto received = ::recv(socketFd_, buffer, sizeof(buffer), 0);
-            if (received == -1) {
-                if (errno == EINTR) {
+#ifdef _WIN32
+            const auto received = ::recv(socketFd_, buffer, static_cast<int>(sizeof(buffer)), 0);
+            if (received == SOCKET_ERROR) {
+                const int errorCode = lastSocketError();
+                if (isInterrupted(errorCode)) {
                     continue;
                 }
-                throw std::system_error(errno, std::system_category(), "Failed to receive data from cache server");
+                throw std::system_error(errorCode, std::system_category(), "Failed to receive data from cache server");
             }
+#else
+            const auto received = ::recv(socketFd_, buffer, sizeof(buffer), 0);
+            if (received == -1) {
+                const int errorCode = lastSocketError();
+                if (isInterrupted(errorCode)) {
+                    continue;
+                }
+                throw std::system_error(errorCode, std::system_category(), "Failed to receive data from cache server");
+            }
+#endif
 
             if (received == 0) {
                 throw std::runtime_error("Connection closed by cache server");
@@ -283,8 +321,22 @@ private:
     static constexpr std::string_view NOTHING = "(nil)";
     static constexpr std::string_view KEY_NOT_EXISTS = "ERROR: Key does not exist";
 
+    using SocketHandle =
+#ifdef _WIN32
+        SOCKET;
+#else
+        int;
+#endif
+
+    static constexpr SocketHandle INVALID_SOCKET_HANDLE =
+#ifdef _WIN32
+        INVALID_SOCKET;
+#else
+        -1;
+#endif
+
     Options options_{};
-    int socketFd_{-1};
+    SocketHandle socketFd_{INVALID_SOCKET_HANDLE};
     std::deque<PendingRequest> pendingRequests_{};
     std::unordered_map<RequestId, Response> completedResponses_{};
     std::string sendBuffer_{};
@@ -298,18 +350,87 @@ private:
         }
     }
 
+    static void ensureWinsockInitialized() {
+#ifdef _WIN32
+        static const WinsockInitializer initializer{};
+#endif
+    }
+
+#ifndef _WIN32
     static timeval toTimeVal(std::chrono::milliseconds duration) {
         timeval tv{};
         tv.tv_sec = static_cast<long>(duration.count() / 1000);
         tv.tv_usec = static_cast<long>((duration.count() % 1000) * 1000);
         return tv;
     }
+#endif
 
     static int sendFlags() {
 #ifdef MSG_NOSIGNAL
         return MSG_NOSIGNAL;
 #else
         return 0;
+#endif
+    }
+
+#ifdef _WIN32
+    class WinsockInitializer {
+    public:
+        WinsockInitializer() {
+            WSADATA data;
+            const int result = ::WSAStartup(MAKEWORD(2, 2), &data);
+            if (result != 0) {
+                throw std::system_error(result, std::system_category(), "WSAStartup failed");
+            }
+        }
+
+        ~WinsockInitializer() { ::WSACleanup(); }
+    };
+#endif
+
+    static void closeSocket(SocketHandle socket) noexcept {
+#ifdef _WIN32
+        if (socket != INVALID_SOCKET_HANDLE) {
+            ::closesocket(socket);
+        }
+#else
+        if (socket != INVALID_SOCKET_HANDLE) {
+            ::close(socket);
+        }
+#endif
+    }
+
+    static int connectSocket(SocketHandle socket, const sockaddr* address, socklen_t length) noexcept {
+#ifdef _WIN32
+        return ::connect(socket, address, static_cast<int>(length));
+#else
+        return ::connect(socket, address, length);
+#endif
+    }
+
+    static int lastSocketError() noexcept {
+#ifdef _WIN32
+        return ::WSAGetLastError();
+#else
+        return errno;
+#endif
+    }
+
+    static bool isInterrupted(int errorCode) noexcept {
+#ifdef _WIN32
+        return errorCode == WSAEINTR;
+#else
+        return errorCode == EINTR;
+#endif
+    }
+
+    static void setSocketTimeout(SocketHandle socket, int option, std::chrono::milliseconds timeout) noexcept {
+#ifdef _WIN32
+        const auto clamped = static_cast<DWORD>(std::min<std::chrono::milliseconds::rep>(timeout.count(), std::numeric_limits<DWORD>::max()));
+        ::setsockopt(socket, SOL_SOCKET, option, reinterpret_cast<const char*>(&clamped), sizeof(clamped));
+#else
+        const auto tv = toTimeVal(timeout);
+        ::setsockopt(socket, SOL_SOCKET, option, &tv, sizeof(tv));
 #endif
     }
 
@@ -431,7 +552,7 @@ private:
 
     void moveFrom(CacheClient&& other) noexcept {
         options_ = std::move(other.options_);
-        socketFd_ = std::exchange(other.socketFd_, -1);
+        socketFd_ = std::exchange(other.socketFd_, INVALID_SOCKET_HANDLE);
         pendingRequests_ = std::move(other.pendingRequests_);
         completedResponses_ = std::move(other.completedResponses_);
         sendBuffer_ = std::move(other.sendBuffer_);
