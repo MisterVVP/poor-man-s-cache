@@ -92,7 +92,7 @@ namespace server {
 
             AsyncReadTask readRequestAsync(int client_fd);
             ProcessRequestTask processRequest(const RequestView& request, int client_fd);
-            ResponsePacket processRequestSync(const RequestView& request);
+            ResponsePacket processRequestSync(const RequestView& request, ConnectionData& connData);
             HandleReqTask handleRequests();
             AsyncSendTask sendResponse(int client_fd, const ResponsePacket& response);
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);

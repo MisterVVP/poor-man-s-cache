@@ -45,6 +45,17 @@ TEST(RespProtocolTest, ParseRespCommandSet)
     ASSERT_STREQ(parts.value, "value");
 }
 
+TEST(RespProtocolTest, ParseRespCommandMulti)
+{
+    std::string payload = "*1\r\n$5\r\nMULTI\r\n";
+    RespCommandParts parts{};
+    ASSERT_TRUE(parseRespCommand(payload, parts));
+    ASSERT_EQ(parts.argc, 1u);
+    ASSERT_STREQ(parts.command, MULTI_STR);
+    ASSERT_EQ(parts.key, nullptr);
+    ASSERT_EQ(parts.value, nullptr);
+}
+
 TEST(RespProtocolTest, MakeRespSimpleString)
 {
     auto response = makeRespSimpleString(OK);
@@ -63,6 +74,35 @@ TEST(RespProtocolTest, MakeRespBulkString)
     ASSERT_NE(response.owned, nullptr);
     std::string serialized(response.data, response.size);
     ASSERT_EQ(serialized, "$5\r\nhello\r\n");
+}
+
+TEST(RespProtocolTest, MakeRespInteger)
+{
+    auto positive = makeRespInteger(1);
+    ASSERT_EQ(positive.protocol, RequestProtocol::RESP);
+    ASSERT_NE(positive.owned, nullptr);
+    std::string serializedPos(positive.data, positive.size);
+    ASSERT_EQ(serializedPos, ":1\r\n");
+
+    auto negative = makeRespInteger(-1);
+    ASSERT_EQ(negative.protocol, RequestProtocol::RESP);
+    ASSERT_NE(negative.owned, nullptr);
+    std::string serializedNeg(negative.data, negative.size);
+    ASSERT_EQ(serializedNeg, ":-1\r\n");
+}
+
+TEST(RespProtocolTest, MakeRespArray)
+{
+    std::vector<ResponsePacket> elements;
+    elements.emplace_back(makeRespSimpleString(OK));
+    elements.emplace_back(makeRespInteger(1));
+    elements.emplace_back(makeRespBulkString("value"));
+
+    auto response = makeRespArray(elements);
+    ASSERT_EQ(response.protocol, RequestProtocol::RESP);
+    ASSERT_NE(response.owned, nullptr);
+    std::string serialized(response.data, response.size);
+    ASSERT_EQ(serialized, "*3\r\n+OK\r\n:1\r\n$5\r\nvalue\r\n");
 }
 
 TEST(RespProtocolTest, MakeRespNullBulkString)

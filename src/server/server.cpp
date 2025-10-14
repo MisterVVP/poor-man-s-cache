@@ -91,12 +91,16 @@ CacheServer::~CacheServer() {
 
 ProcessRequestTask server::CacheServer::processRequest(const RequestView& request, int client_fd)
 {
-    auto response = processRequestSync(request);
+    auto connIt = connManager->connections.find(client_fd);
+    if (connIt == connManager->connections.end()) {
+        co_return;
+    }
+    auto response = processRequestSync(request, connIt->second);
     auto sendTask = sendResponse(client_fd, response);
     co_await sendTask;
 }
 
-ResponsePacket CacheServer::processRequestSync(const RequestView& request)
+ResponsePacket CacheServer::processRequestSync(const RequestView& request, ConnectionData& connData)
 {
     auto handleGet = [&](char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
         auto hash = hashFunc(keyPtr);
@@ -123,7 +127,13 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request)
         Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
         const char* result = shard.processCommand(cmd);
         if (protocol == RequestProtocol::RESP) {
-            return result == OK ? makeRespSimpleString(result) : makeRespError(result);
+            if (result == OK) {
+                return makeRespInteger(1);
+            }
+            if (result == KEY_NOT_EXISTS) {
+                return makeRespInteger(0);
+            }
+            return makeRespError(result);
         }
         return makeCustomResponse(result);
     };
@@ -135,12 +145,59 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request)
             return makeErrorResponse(RequestProtocol::RESP, UNABLE_TO_PARSE_REQUEST_ERROR);
         }
 
+        auto queueOrReturn = [&](ResponsePacket&& response) -> ResponsePacket {
+            if (connData.inTransaction) {
+                connData.transactionQueue.push_back(std::move(response));
+                return makeRespSimpleString(QUEUED);
+            }
+            return std::move(response);
+        };
+
+        if (std::strcmp(parts.command, MULTI_STR) == 0) {
+            if (parts.argc != 1) {
+                ++numErrors;
+                return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            connData.inTransaction = true;
+            connData.transactionQueue.clear();
+            return makeRespSimpleString(OK);
+        }
+
+        if (std::strcmp(parts.command, DISCARD_STR) == 0) {
+            if (parts.argc != 1) {
+                ++numErrors;
+                return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            if (!connData.inTransaction) {
+                ++numErrors;
+                return makeRespError("DISCARD without MULTI");
+            }
+            connData.inTransaction = false;
+            connData.transactionQueue.clear();
+            return makeRespSimpleString(OK);
+        }
+
+        if (std::strcmp(parts.command, EXEC_STR) == 0) {
+            if (parts.argc != 1) {
+                ++numErrors;
+                return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            if (!connData.inTransaction) {
+                ++numErrors;
+                return makeRespError("EXEC without MULTI");
+            }
+            auto response = makeRespArray(connData.transactionQueue);
+            connData.transactionQueue.clear();
+            connData.inTransaction = false;
+            return response;
+        }
+
         if (std::strcmp(parts.command, GET_STR) == 0) {
             if (parts.argc != 2) {
                 ++numErrors;
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
             }
-            return handleGet(parts.key, RequestProtocol::RESP);
+            return queueOrReturn(handleGet(parts.key, RequestProtocol::RESP));
         }
 
         if (std::strcmp(parts.command, SET_STR) == 0) {
@@ -148,7 +205,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request)
                 ++numErrors;
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
             }
-            return handleSet(parts.key, parts.value, RequestProtocol::RESP);
+            return queueOrReturn(handleSet(parts.key, parts.value, RequestProtocol::RESP));
         }
 
         if (std::strcmp(parts.command, DEL_STR) == 0) {
@@ -156,7 +213,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request)
                 ++numErrors;
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
             }
-            return handleDel(parts.key, RequestProtocol::RESP);
+            return queueOrReturn(handleDel(parts.key, RequestProtocol::RESP));
         }
 
         ++numErrors;
@@ -264,7 +321,7 @@ HandleReqTask CacheServer::handleRequests()
                 while (!connData.pendingRequests.empty()) {
                     auto req = connData.pendingRequests.front();
                     connData.pendingRequests.pop_front();
-                    responses.emplace_back(processRequestSync(req));
+                    responses.emplace_back(processRequestSync(req, connData));
                 }
                 if (connData.bytesToErase > 0) {
                     connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + connData.bytesToErase);

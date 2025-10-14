@@ -120,7 +120,7 @@ bool parseRespCommand(std::string_view payload, RespCommandParts& parts)
     };
 
     size_t elements = 0;
-    if (!read_num(elements) || elements < 2 || elements > 3) return false;
+    if (!read_num(elements) || elements < 1 || elements > 3) return false;
 
     for (size_t i = 0; i < elements; ++i) {
         if (idx >= end || data[idx] != RESP_BULK_PREFIX) return false;
@@ -142,7 +142,10 @@ bool parseRespCommand(std::string_view payload, RespCommandParts& parts)
     }
 
     parts.argc = elements;
-    return parts.command && parts.key;
+    if (!parts.command) return false;
+    if (elements >= 2 && !parts.key) return false;
+    if (elements == 3 && !parts.value) return false;
+    return true;
 }
 
 ResponsePacket makeCustomResponse(const char* message)
@@ -174,6 +177,36 @@ ResponsePacket makeRespSimpleString(const char* message)
     return response;
 }
 
+ResponsePacket makeRespInteger(int64_t value)
+{
+    ResponsePacket response{};
+    response.protocol = RequestProtocol::RESP;
+
+    uint64_t magnitude = value < 0 ? static_cast<uint64_t>(-(value + 1)) + 1 : static_cast<uint64_t>(value);
+    char digitsBuf[20];
+    const unsigned digits = u64_to_ascii(magnitude, digitsBuf);
+
+    const bool negative = value < 0;
+    const size_t total = 1 + (negative ? 1 : 0) + digits + 2;
+    auto buffer = std::unique_ptr<char[]>(new char[total]);
+    char* out = buffer.get();
+
+    out[0] = RESP_INTEGER_PREFIX;
+    size_t offset = 1;
+    if (negative) {
+        out[offset++] = '-';
+    }
+    if (digits) std::memcpy(out + offset, digitsBuf, digits);
+    offset += digits;
+    out[offset++] = RESP_CR;
+    out[offset++] = RESP_LF;
+
+    response.size  = total;
+    response.data  = out;
+    response.owned = std::move(buffer);
+    return response;
+}
+
 ResponsePacket makeRespBulkString(const char* value)
 {
     ResponsePacket response{};
@@ -200,6 +233,41 @@ ResponsePacket makeRespBulkString(const char* value)
     if (len) std::memcpy(out + 3 + digits, value, len);
     out[3 + digits + len] = RESP_CR;
     out[4 + digits + len] = RESP_LF;
+
+    response.size  = total;
+    response.data  = out;
+    response.owned = std::move(buffer);
+    return response;
+}
+
+ResponsePacket makeRespArray(const std::vector<ResponsePacket>& elements)
+{
+    ResponsePacket response{};
+    response.protocol = RequestProtocol::RESP;
+
+    char lenBuf[20];
+    const unsigned digits = u64_to_ascii(elements.size(), lenBuf);
+
+    size_t total = 1 + digits + 2;
+    for (const auto& element : elements) {
+        total += element.size;
+    }
+
+    auto buffer = std::unique_ptr<char[]>(new char[total]);
+    char* out = buffer.get();
+
+    out[0] = RESP_ARRAY_PREFIX;
+    if (digits) std::memcpy(out + 1, lenBuf, digits);
+    size_t offset = 1 + digits;
+    out[offset++] = RESP_CR;
+    out[offset++] = RESP_LF;
+
+    for (const auto& element : elements) {
+        if (element.size) {
+            std::memcpy(out + offset, element.data, element.size);
+        }
+        offset += element.size;
+    }
 
     response.size  = total;
     response.data  = out;

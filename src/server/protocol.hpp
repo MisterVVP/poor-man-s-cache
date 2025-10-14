@@ -14,11 +14,13 @@ namespace server {
     inline constexpr char RESP_ARRAY_PREFIX = '*';
     inline constexpr char RESP_SIMPLE_PREFIX = '+';
     inline constexpr char RESP_BULK_PREFIX = '$';
+    inline constexpr char RESP_INTEGER_PREFIX = ':';
     inline constexpr char RESP_CR = '\r';
     inline constexpr char RESP_LF = '\n';
     inline constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
     inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
     static constexpr const char* OK = "OK";
+    static constexpr const char* QUEUED = "QUEUED";
     static constexpr const char* NOTHING = "(nil)";
     static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
     static constexpr const char* INTERNAL_ERROR = "ERROR: Internal error";
@@ -31,6 +33,9 @@ namespace server {
     static constexpr const char* GET_STR = "GET";
     static constexpr const char* SET_STR = "SET";
     static constexpr const char* DEL_STR = "DEL";
+    static constexpr const char* MULTI_STR = "MULTI";
+    static constexpr const char* EXEC_STR = "EXEC";
+    static constexpr const char* DISCARD_STR = "DISCARD";
 
     /// @brief Query codes, 0: Reserved, 1: GET
     enum QueryCode : uint_fast8_t {
@@ -91,7 +96,9 @@ namespace server {
 
     ResponsePacket makeCustomResponse(const char* message);
     ResponsePacket makeRespSimpleString(const char* message);
+    ResponsePacket makeRespInteger(int64_t value);
     ResponsePacket makeRespBulkString(const char* value);
+    ResponsePacket makeRespArray(const std::vector<ResponsePacket>& elements);
     ResponsePacket makeRespError(const char* message);
     ResponsePacket makeErrorResponse(RequestProtocol protocol, const char* message);
 }

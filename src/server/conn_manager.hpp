@@ -25,6 +25,8 @@ namespace server {
         std::vector<char> readBuffer;
         std::deque<RequestView> pendingRequests;
         size_t bytesToErase = 0;
+        bool inTransaction = false;
+        std::vector<ResponsePacket> transactionQueue;
         ConnectionData() = default;
         ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
             readBuffer.reserve(READ_BUFFER_SIZE);
