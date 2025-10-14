@@ -1,19 +1,12 @@
 #include "protocol.hpp"
 
 namespace server {
-namespace {
-    constexpr char RESP_SIMPLE_PREFIX = '+';
-    constexpr char RESP_BULK_PREFIX = '$';
-    constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
-    constexpr char RESP_NULL_BULK[] = "$-1\r\n";
-}
-
 RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t start)
 {
     size_t idx = start;
     const size_t end = buffer.size();
 
-    if (idx >= end || buffer[idx] != '*') {
+    if (idx >= end || buffer[idx] != RESP_ARRAY_PREFIX) {
         return {RespParseStatus::Error, 0};
     }
 
@@ -23,12 +16,12 @@ RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t s
 
     while (idx < end) {
         const char c = buffer[idx];
-        if (c == '\r') {
+        if (c == RESP_CR) {
             if (idx + 1 >= end) {
                 return {RespParseStatus::Incomplete, 0};
             }
 
-            if (buffer[idx + 1] != '\n' || !hasDigits) {
+            if (buffer[idx + 1] != RESP_LF || !hasDigits) {
                 return {RespParseStatus::Error, 0};
             }
 
@@ -64,12 +57,12 @@ RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t s
 
         while (idx < end) {
             const char c = buffer[idx];
-            if (c == '\r') {
+            if (c == RESP_CR) {
                 if (idx + 1 >= end) {
                     return {RespParseStatus::Incomplete, 0};
                 }
 
-                if (buffer[idx + 1] != '\n' || !lenDigits) {
+                if (buffer[idx + 1] != RESP_LF || !lenDigits) {
                     return {RespParseStatus::Error, 0};
                 }
 
@@ -100,7 +93,7 @@ RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t s
             return {RespParseStatus::Incomplete, 0};
         }
 
-        if (buffer[idx] != '\r' || buffer[idx + 1] != '\n') {
+        if (buffer[idx] != RESP_CR || buffer[idx + 1] != RESP_LF) {
             return {RespParseStatus::Error, 0};
         }
 
@@ -112,7 +105,7 @@ RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t s
 
 bool parseRespCommand(std::string_view payload, RespCommandParts& parts)
 {
-    if (payload.empty() || payload.front() != '*') {
+    if (payload.empty() || payload.front() != RESP_ARRAY_PREFIX) {
         return false;
     }
 
@@ -130,8 +123,8 @@ bool parseRespCommand(std::string_view payload, RespCommandParts& parts)
 
         while (idx < end) {
             const char c = data[idx];
-            if (c == '\r') {
-                if (idx + 1 >= end || data[idx + 1] != '\n' || !hasDigits) {
+            if (c == RESP_CR) {
+                if (idx + 1 >= end || data[idx + 1] != RESP_LF || !hasDigits) {
                     return false;
                 }
 
@@ -172,7 +165,7 @@ bool parseRespCommand(std::string_view payload, RespCommandParts& parts)
         char* startPtr = data + idx;
         idx += len;
 
-        if (idx + 1 >= end || data[idx] != '\r' || data[idx + 1] != '\n') {
+        if (idx + 1 >= end || data[idx] != RESP_CR || data[idx + 1] != RESP_LF) {
             return false;
         }
 
@@ -212,8 +205,8 @@ ResponsePacket makeRespSimpleString(const char* message)
     if (len > 0) {
         std::memcpy(buffer.get() + 1, message, len);
     }
-    buffer[len + 1] = '\r';
-    buffer[len + 2] = '\n';
+    buffer[len + 1] = RESP_CR;
+    buffer[len + 2] = RESP_LF;
 
     response.size = len + 3;
     response.data = buffer.get();
@@ -245,13 +238,13 @@ ResponsePacket makeRespBulkString(const char* value)
     if (digits > 0) {
         std::memcpy(out + 1, lenBuf, digits);
     }
-    out[1 + digits] = '\r';
-    out[2 + digits] = '\n';
+    out[1 + digits] = RESP_CR;
+    out[2 + digits] = RESP_LF;
     if (len > 0) {
         std::memcpy(out + 3 + digits, value, len);
     }
-    out[3 + digits + len] = '\r';
-    out[4 + digits + len] = '\n';
+    out[3 + digits + len] = RESP_CR;
+    out[4 + digits + len] = RESP_LF;
 
     response.size = total;
     response.data = buffer.get();
@@ -275,8 +268,8 @@ ResponsePacket makeRespError(const char* message)
     if (msgLen > 0) {
         std::memcpy(out + prefixLen, message, msgLen);
     }
-    out[prefixLen + msgLen] = '\r';
-    out[prefixLen + msgLen + 1] = '\n';
+    out[prefixLen + msgLen] = RESP_CR;
+    out[prefixLen + msgLen + 1] = RESP_LF;
 
     response.size = prefixLen + msgLen + 2;
     response.data = buffer.get();

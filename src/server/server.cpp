@@ -328,7 +328,7 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
             continue;
         }
 
-        if (current == '*') {
+        if (current == RESP_ARRAY_PREFIX) {
             auto parseResult = parseRespMessageLength(connData.readBuffer, start);
             if (parseResult.status == RespParseStatus::Incomplete) {
                 break;
@@ -336,6 +336,9 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
 
             if (parseResult.status == RespParseStatus::Error) {
                 ++numErrors;
+                connData.pendingRequests.clear();
+                connData.readBuffer.clear();
+                connData.bytesToErase = 0;
                 co_return ReadRequestResult{ ReqReadOperationResult::Failure };
             }
 
