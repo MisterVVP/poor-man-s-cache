@@ -16,13 +16,14 @@
 #include "coroutines.hpp"
 #include "sockutils.hpp"
 #include "constants.hpp"
+#include "protocol.hpp"
 
 namespace server {
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
         std::vector<char> readBuffer;
-        std::deque<std::string_view> pendingRequests;
+        std::deque<RequestView> pendingRequests;
         size_t bytesToErase = 0;
         ConnectionData() = default;
         ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {

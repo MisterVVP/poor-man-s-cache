@@ -1,5 +1,4 @@
 #include "server.hpp"
-#include <iterator>
 #include <unordered_map>
 
 using namespace server;
@@ -90,74 +89,94 @@ CacheServer::~CacheServer() {
     }
 }
 
-ProcessRequestTask server::CacheServer::processRequest(std::string_view requestData, int client_fd)
+ProcessRequestTask server::CacheServer::processRequest(const RequestView& request, int client_fd)
 {
-    const char* response = nullptr;
-
-    const auto firstSpace = requestData.find(' ');
-    if (firstSpace == std::string_view::npos) {
-        ++numErrors;
-        response = UNABLE_TO_PARSE_REQUEST_ERROR;
-    } else {
-        const auto command = requestData.substr(0, firstSpace);
-        const auto remainder = requestData.substr(firstSpace + 1);
-        const auto secondSpace = remainder.find(' ');
-
-        char* keyPtr = const_cast<char*>(remainder.data());
-        const char* valuePtr = nullptr;
-
-        if (secondSpace != std::string_view::npos) {
-            keyPtr[secondSpace] = '\0';
-            valuePtr = keyPtr + secondSpace + 1;
-        }
-
-        auto hash = hashFunc(keyPtr);
-        auto shardId = hash % numShards;
-        auto& shard = serverShards[shardId];
-
-        if (command == GET_STR) {
-            Query query{QueryCode::GET, keyPtr, hash};
-            response = shard.processQuery(query);
-        }
-
-        if (command == SET_STR) {
-            if (valuePtr) {
-                Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
-                response = shard.processCommand(cmd);
-            } else {
-                ++numErrors;
-                response = INVALID_COMMAND_FORMAT;
-            }
-        }
-
-        if (command == DEL_STR) {
-            Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
-            response = shard.processCommand(cmd);
-        }
-    }
-
-    if (!response) {
-        ++numErrors;
-        response = UNKNOWN_COMMAND;
-    }
-    auto srt = sendResponse(client_fd, response);
-    co_await srt;
+    auto response = processRequestSync(request);
+    auto sendTask = sendResponse(client_fd, response);
+    co_await sendTask;
 }
 
-const char* CacheServer::processRequestSync(std::string_view requestData)
+ResponsePacket CacheServer::processRequestSync(const RequestView& request)
 {
-    const char* response = nullptr;
+    auto handleGet = [&](char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
+        auto hash = hashFunc(keyPtr);
+        auto& shard = serverShards[hash % numShards];
+        Query query{QueryCode::GET, keyPtr, hash};
+        const char* result = shard.processQuery(query);
+        return protocol == RequestProtocol::RESP ? makeRespBulkString(result) : makeCustomResponse(result);
+    };
 
-    const auto firstSpace = requestData.find(' ');
-    if (firstSpace == std::string_view::npos) {
+    auto handleSet = [&](char* keyPtr, const char* valuePtr, RequestProtocol protocol) -> ResponsePacket {
+        auto hash = hashFunc(keyPtr);
+        auto& shard = serverShards[hash % numShards];
+        Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
+        const char* result = shard.processCommand(cmd);
+        if (protocol == RequestProtocol::RESP) {
+            return result == OK ? makeRespSimpleString(result) : makeRespError(result);
+        }
+        return makeCustomResponse(result);
+    };
+
+    auto handleDel = [&](char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
+        auto hash = hashFunc(keyPtr);
+        auto& shard = serverShards[hash % numShards];
+        Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
+        const char* result = shard.processCommand(cmd);
+        if (protocol == RequestProtocol::RESP) {
+            return result == OK ? makeRespSimpleString(result) : makeRespError(result);
+        }
+        return makeCustomResponse(result);
+    };
+
+    if (request.protocol == RequestProtocol::RESP) {
+        RespCommandParts parts{};
+        if (!parseRespCommand(request.payload, parts)) {
+            ++numErrors;
+            return makeErrorResponse(RequestProtocol::RESP, UNABLE_TO_PARSE_REQUEST_ERROR);
+        }
+
+        if (std::strcmp(parts.command, GET_STR) == 0) {
+            if (parts.argc != 2) {
+                ++numErrors;
+                return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            return handleGet(parts.key, RequestProtocol::RESP);
+        }
+
+        if (std::strcmp(parts.command, SET_STR) == 0) {
+            if (parts.argc != 3 || parts.value == nullptr) {
+                ++numErrors;
+                return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            return handleSet(parts.key, parts.value, RequestProtocol::RESP);
+        }
+
+        if (std::strcmp(parts.command, DEL_STR) == 0) {
+            if (parts.argc != 2) {
+                ++numErrors;
+                return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            return handleDel(parts.key, RequestProtocol::RESP);
+        }
+
         ++numErrors;
-        return UNABLE_TO_PARSE_REQUEST_ERROR;
+        return makeErrorResponse(RequestProtocol::RESP, UNKNOWN_COMMAND);
     }
 
-    const auto command = requestData.substr(0, firstSpace);
-    const auto remainder = requestData.substr(firstSpace + 1);
-    const auto secondSpace = remainder.find(' ');
+    const auto firstSpace = request.payload.find(' ');
+    if (firstSpace == std::string_view::npos) {
+        ++numErrors;
+        return makeErrorResponse(RequestProtocol::Custom, UNABLE_TO_PARSE_REQUEST_ERROR);
+    }
 
+    const auto command = request.payload.substr(0, firstSpace);
+    const auto remainder = request.payload.substr(firstSpace + 1);
+    if (remainder.empty()) {
+        ++numErrors;
+        return makeErrorResponse(RequestProtocol::Custom, INVALID_COMMAND_FORMAT);
+    }
+
+    const auto secondSpace = remainder.find(' ');
     char* keyPtr = const_cast<char*>(remainder.data());
     const char* valuePtr = nullptr;
 
@@ -166,32 +185,24 @@ const char* CacheServer::processRequestSync(std::string_view requestData)
         valuePtr = keyPtr + secondSpace + 1;
     }
 
-    auto hash = hashFunc(keyPtr);
-    auto shardId = hash % numShards;
-    auto& shard = serverShards[shardId];
-
     if (command == GET_STR) {
-        Query query{QueryCode::GET, keyPtr, hash};
-        response = shard.processQuery(query);
-    } else if (command == SET_STR) {
-        if (valuePtr) {
-            Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
-            response = shard.processCommand(cmd);
-        } else {
+        return handleGet(keyPtr, RequestProtocol::Custom);
+    }
+
+    if (command == SET_STR) {
+        if (!valuePtr) {
             ++numErrors;
-            response = INVALID_COMMAND_FORMAT;
+            return makeErrorResponse(RequestProtocol::Custom, INVALID_COMMAND_FORMAT);
         }
-    } else if (command == DEL_STR) {
-        Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
-        response = shard.processCommand(cmd);
+        return handleSet(keyPtr, valuePtr, RequestProtocol::Custom);
     }
 
-    if (!response) {
-        ++numErrors;
-        response = UNKNOWN_COMMAND;
+    if (command == DEL_STR) {
+        return handleDel(keyPtr, RequestProtocol::Custom);
     }
 
-    return response;
+    ++numErrors;
+    return makeErrorResponse(RequestProtocol::Custom, UNKNOWN_COMMAND);
 }
 
 HandleReqTask CacheServer::handleRequests()
@@ -231,7 +242,7 @@ HandleReqTask CacheServer::handleRequests()
                     readers.emplace_back(std::move(asyncRead));
                 }
             }
-            std::unordered_map<int, std::vector<const char*>> responsesPerConn;
+            std::unordered_map<int, std::vector<ResponsePacket>> responsesPerConn;
             for (int i = 0; i < readers.size(); ++i) {
                 const std::lock_guard<std::mutex> lock(req_handle_mutex);
                 auto fd = readers[i].client_fd;
@@ -253,8 +264,7 @@ HandleReqTask CacheServer::handleRequests()
                 while (!connData.pendingRequests.empty()) {
                     auto req = connData.pendingRequests.front();
                     connData.pendingRequests.pop_front();
-                    auto resp = processRequestSync(req);
-                    responses.push_back(resp);
+                    responses.emplace_back(processRequestSync(req));
                 }
                 if (connData.bytesToErase > 0) {
                     connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + connData.bytesToErase);
@@ -310,15 +320,47 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     }
 
     size_t start = 0;
-    for (size_t i = 0; i < connData.readBuffer.size(); ++i) {
-        if (connData.readBuffer[i] == MSG_SEPARATOR) {
-            size_t len = i - start;
-            connData.readBuffer[i] = '\0';
-            std::string_view req{connData.readBuffer.data() + start, len};
-            connData.pendingRequests.emplace_back(req);
-            parsed = true;
-            start = i + 1;
+    while (start < connData.readBuffer.size()) {
+        char current = connData.readBuffer[start];
+
+        if (current == MSG_SEPARATOR) {
+            ++start;
+            continue;
         }
+
+        if (current == '*') {
+            auto parseResult = parseRespMessageLength(connData.readBuffer, start);
+            if (parseResult.status == RespParseStatus::Incomplete) {
+                break;
+            }
+
+            if (parseResult.status == RespParseStatus::Error) {
+                ++numErrors;
+                co_return ReadRequestResult{ ReqReadOperationResult::Failure };
+            }
+
+            std::string_view req{connData.readBuffer.data() + start, parseResult.length};
+            connData.pendingRequests.emplace_back(RequestView{req, RequestProtocol::RESP});
+            parsed = true;
+            start += parseResult.length;
+            continue;
+        }
+
+        size_t pos = start;
+        while (pos < connData.readBuffer.size() && connData.readBuffer[pos] != MSG_SEPARATOR) {
+            ++pos;
+        }
+
+        if (pos >= connData.readBuffer.size()) {
+            break;
+        }
+
+        size_t len = pos - start;
+        connData.readBuffer[pos] = '\0';
+        std::string_view req{connData.readBuffer.data() + start, len};
+        connData.pendingRequests.emplace_back(RequestView{req, RequestProtocol::Custom});
+        parsed = true;
+        start = pos + 1;
     }
 
     if (start > 0) {
@@ -331,24 +373,23 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
 
     co_return ReadRequestResult{ ReqReadOperationResult::AwaitingData };
 }
-
-AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
-    const auto responseSize = strlen(response);
+AsyncSendTask CacheServer::sendResponse(int client_fd, const ResponsePacket& response) {
     char sep = MSG_SEPARATOR;
     struct iovec iov[2];
 
-    iov[0].iov_base = const_cast<char*>(response);
-    iov[0].iov_len  = responseSize;
+    iov[0].iov_base = const_cast<char*>(response.data);
+    iov[0].iov_len  = response.size;
     iov[1].iov_base = &sep;
     iov[1].iov_len  = 1;
 
-    size_t totalRequired = responseSize + 1;
+    const size_t iovCount = response.protocol == RequestProtocol::Custom ? 2 : 1;
+    size_t totalRequired = response.size + (iovCount == 2 ? 1 : 0);
     size_t totalSent = 0;
-    int iov_idx = 0;
-    
+    size_t iov_idx = 0;
+
     struct msghdr msg{};
     msg.msg_iov    = iov;
-    msg.msg_iovlen = 2;
+    msg.msg_iovlen = iovCount;
 
     while (totalSent < totalRequired) {
         auto bytesSent = co_await AsyncSendAwaiter(client_fd, &msg);
@@ -365,7 +406,7 @@ AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
 
         totalSent += bytesSent;
 
-        while (bytesSent > 0 && iov_idx < 2) {
+        while (bytesSent > 0 && iov_idx < iovCount) {
             if (static_cast<size_t>(bytesSent) >= iov[iov_idx].iov_len) {
                 bytesSent -= iov[iov_idx].iov_len;
                 ++iov_idx;
@@ -377,22 +418,32 @@ AsyncSendTask CacheServer::sendResponse(int client_fd, const char* response) {
         }
 
         msg.msg_iov = &iov[iov_idx];
-        msg.msg_iovlen = std::size(iov) - iov_idx;
+        msg.msg_iovlen = iovCount - iov_idx;
     }
 }
 
-void CacheServer::sendResponses(int client_fd, const std::vector<const char*>& responses) {
-    std::vector<iovec> iov(responses.size() * 2);
-    std::vector<char> separators(responses.size(), MSG_SEPARATOR);
+void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>& responses) {
+    std::vector<iovec> iov;
+    iov.reserve(responses.size() * 2);
+    std::vector<char> separators;
+    separators.reserve(responses.size());
 
     size_t totalRequired = 0;
-    for (size_t i = 0; i < responses.size(); ++i) {
-        auto len = strlen(responses[i]);
-        iov[2 * i].iov_base = const_cast<char*>(responses[i]);
-        iov[2 * i].iov_len = len;
-        iov[2 * i + 1].iov_base = &separators[i];
-        iov[2 * i + 1].iov_len = 1;
-        totalRequired += len + 1;
+    for (const auto& response : responses) {
+        iovec dataVec{};
+        dataVec.iov_base = const_cast<char*>(response.data);
+        dataVec.iov_len = response.size;
+        iov.push_back(dataVec);
+        totalRequired += response.size;
+
+        if (response.protocol == RequestProtocol::Custom) {
+            separators.push_back(MSG_SEPARATOR);
+            iovec sepVec{};
+            sepVec.iov_base = reinterpret_cast<void*>(&separators.back());
+            sepVec.iov_len = 1;
+            iov.push_back(sepVec);
+            totalRequired += 1;
+        }
     }
 
     size_t totalSent = 0;

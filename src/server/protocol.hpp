@@ -1,5 +1,11 @@
 #pragma once
 #include <cstdint>
+#include <cctype>
+#include <charconv>
+#include <cstring>
+#include <memory>
+#include <string_view>
+#include <vector>
 
 namespace server {
 
@@ -30,4 +36,54 @@ namespace server {
         SET = 1,
         DEL = 2,
     };
+
+    enum class RequestProtocol : uint_fast8_t {
+        Custom = 0,
+        RESP = 1,
+    };
+
+    struct ResponsePacket {
+        RequestProtocol protocol = RequestProtocol::Custom;
+        const char* data = nullptr;
+        size_t size = 0;
+        std::unique_ptr<char[]> owned;
+
+        ResponsePacket() = default;
+        ResponsePacket(ResponsePacket&&) noexcept = default;
+        ResponsePacket& operator=(ResponsePacket&&) noexcept = default;
+        ResponsePacket(const ResponsePacket&) = delete;
+        ResponsePacket& operator=(const ResponsePacket&) = delete;
+    };
+
+    struct RequestView {
+        std::string_view payload{};
+        RequestProtocol protocol = RequestProtocol::Custom;
+    };
+
+    struct RespCommandParts {
+        char* command = nullptr;
+        char* key = nullptr;
+        char* value = nullptr;
+        size_t argc = 0;
+    };
+
+    enum class RespParseStatus : uint8_t {
+        Incomplete = 0,
+        Complete,
+        Error,
+    };
+
+    struct RespParseResult {
+        RespParseStatus status;
+        size_t length;
+    };
+
+    RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t start);
+    bool parseRespCommand(std::string_view payload, RespCommandParts& parts);
+
+    ResponsePacket makeCustomResponse(const char* message);
+    ResponsePacket makeRespSimpleString(const char* message);
+    ResponsePacket makeRespBulkString(const char* value);
+    ResponsePacket makeRespError(const char* message);
+    ResponsePacket makeErrorResponse(RequestProtocol protocol, const char* message);
 }

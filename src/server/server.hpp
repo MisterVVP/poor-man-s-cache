@@ -91,11 +91,11 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             AsyncReadTask readRequestAsync(int client_fd);
-            ProcessRequestTask processRequest(std::string_view requestData, int client_fd);
-            const char* processRequestSync(std::string_view requestData);
+            ProcessRequestTask processRequest(const RequestView& request, int client_fd);
+            ResponsePacket processRequestSync(const RequestView& request);
             HandleReqTask handleRequests();
-            AsyncSendTask sendResponse(int client_fd, const char* response);
-            void sendResponses(int client_fd, const std::vector<const char*>& responses);
+            AsyncSendTask sendResponse(int client_fd, const ResponsePacket& response);
+            void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
             CacheServer(const ServerSettings settings = ServerSettings{});
