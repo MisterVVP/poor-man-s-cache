@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstddef>
 #include <cctype>
 #include <charconv>
 #include <cstring>
