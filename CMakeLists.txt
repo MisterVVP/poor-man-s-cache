@@ -25,10 +25,6 @@ endif ()
 find_package(prometheus-cpp CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
-if (WIN32)
-    add_compile_definitions(BOOST_ALL_NO_LIB)
-endif ()
-
 if(NOT DEFINED prometheus-cpp_VERSION)
   message(FATAL_ERROR "prometheus-cpp_VERSION is not defined")
 endif()
