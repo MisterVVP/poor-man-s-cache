@@ -9,11 +9,16 @@ parser = argparse.ArgumentParser(description="Cache server functional tests")
 parser.add_argument('-p', '--pipeline', action='store_true', help='Use pipelining for requests')
 parser.add_argument('-b', '--batch_size', type=int, default=16, help='Batch size for pipelined requests')
 parser.add_argument('--redis', action='store_true', help='Use Redis RESP protocol instead of custom server')
+parser.add_argument('--resp', action='store_true', help='Use RESP protocol when talking to cache server')
 
 args, _ = parser.parse_known_args()
 pipelining_enabled = args.pipeline
 batch_size = args.batch_size
 use_redis = args.redis
+use_resp = args.resp
+
+if use_redis and use_resp:
+    parser.error("--redis and --resp modes are mutually exclusive")
 redis_port = 6379
 
 redis = None
@@ -44,36 +49,112 @@ pool_size = 1
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
 MSG_SEPARATOR = '\x1F'
 ENCODED_SEPARATOR = MSG_SEPARATOR.encode()
+RESP_LINE_TERMINATOR = b"\r\n"
 from connection_pool import ConnectionPool
+
+
+def split_command_parts(command: str):
+    """Split command into RESP-friendly parts while preserving value payload."""
+    first_space = command.find(' ')
+    if first_space == -1:
+        return [command]
+
+    command_name = command[:first_space]
+    remainder = command[first_space + 1 :]
+    second_space = remainder.find(' ')
+
+    if second_space == -1:
+        return [command_name, remainder]
+
+    key = remainder[:second_space]
+    value = remainder[second_space + 1 :]
+    return [command_name, key, value]
+
+
+def encode_resp_command(command: str) -> bytes:
+    parts = split_command_parts(command)
+    encoded = bytearray()
+    encoded.extend(f"*{len(parts)}\r\n".encode())
+    for part in parts:
+        part_bytes = part.encode()
+        encoded.extend(f"${len(part_bytes)}\r\n".encode())
+        encoded.extend(part_bytes)
+        encoded.extend(RESP_LINE_TERMINATOR)
+    return bytes(encoded)
+
+
+async def read_resp_response(reader: asyncio.StreamReader) -> str:
+    try:
+        first_line = await reader.readuntil(RESP_LINE_TERMINATOR)
+    except asyncio.IncompleteReadError as exc:
+        raise ConnectionError("Incomplete RESP response from server") from exc
+
+    if not first_line:
+        raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+
+    prefix = first_line[:1]
+    payload = first_line[1:-2]
+
+    if prefix == b'+':
+        return payload.decode()
+
+    if prefix == b'$':
+        length = int(payload)
+        if length == -1:
+            return "(nil)"
+        try:
+            data = await reader.readexactly(length)
+            terminator = await reader.readexactly(2)
+        except asyncio.IncompleteReadError as exc:
+            raise ConnectionError("Incomplete RESP bulk string from server") from exc
+        if terminator != RESP_LINE_TERMINATOR:
+            raise ValueError("Invalid RESP terminator for bulk string")
+        return data.decode()
+
+    if prefix == b'-':
+        message = payload.decode()
+        raise ValueError(f"Server returned error: {message}")
+
+    if prefix == b':':
+        return payload.decode()
+
+    raise ValueError("Unsupported RESP response type received from server")
+
+
+async def _send_single_command(command: str, reader, writer, buf_size=1024):
+    if use_resp:
+        writer.write(encode_resp_command(command))
+        await writer.drain()
+        return await read_resp_response(reader)
+
+    command_with_sep = command + MSG_SEPARATOR
+    writer.write(command_with_sep.encode())
+    await writer.drain()
+
+    response = bytearray()
+    if command.startswith(("SET", "DEL")):
+        response = await reader.readuntil(ENCODED_SEPARATOR)
+        if not response:
+            raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+    else:
+        while True:
+            chunk = await reader.read(buf_size)
+            if not chunk:
+                raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+            response.extend(chunk)
+            if ENCODED_SEPARATOR in chunk:
+                break
+
+    return response.decode().rstrip(MSG_SEPARATOR)
 
 async def send_command(command: str, conn_pool: ConnectionPool, buf_size=1024):
     reader, writer = await conn_pool.acquire()
     discard_connection = False
 
     try:
-        command += MSG_SEPARATOR
-        writer.write(command.encode())
-        await writer.drain()
+        return await _send_single_command(command, reader, writer, buf_size)
 
-        response = bytearray()
-        if command.startswith(("SET", "DEL")):
-            response = await reader.readuntil(ENCODED_SEPARATOR)
-            if not response:
-                discard_connection = True
-                raise ConnectionError("Server closed connection (EOF) unexpectedly.")
-        else:
-            while True:
-                chunk = await reader.read(buf_size)
-                if not chunk:
-                    discard_connection = True
-                    raise ConnectionError("Server closed connection (EOF) unexpectedly.")
-                response.extend(chunk)
-                if ENCODED_SEPARATOR in chunk:
-                    break
-
-        return response.decode().rstrip(MSG_SEPARATOR)
-
-    except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
+    except (BrokenPipeError, ConnectionResetError, ConnectionError, asyncio.IncompleteReadError) as e:
         discard_connection = True
         logger.warning(f"Connection error, discarding connection: {e}")
         raise
@@ -141,22 +222,7 @@ async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=
     reader, writer = await asyncio.open_connection(host, port)
 
     async def send_command(command: str):
-        command += MSG_SEPARATOR
-        writer.write(command.encode())
-        await writer.drain()
-
-        response = bytearray()
-        if command.startswith(("SET", "DEL")):
-            response = await reader.readuntil(ENCODED_SEPARATOR)
-        else:
-            while True:
-                chunk = await reader.read(8096)
-                if not chunk:
-                    break
-                response.extend(chunk)
-                if ENCODED_SEPARATOR in chunk:
-                    break
-        return response.decode().rstrip(MSG_SEPARATOR)
+        return await _send_single_command(command, reader, writer, buf_size=8096)
 
     async def send_with_retry(command, expected_response, retries=1):
         nonlocal reader, writer
@@ -222,11 +288,30 @@ async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=
                 else:
                     raise ValueError("Unknown task_type")
 
-            writer.write(MSG_SEPARATOR.join(commands).encode() + ENCODED_SEPARATOR)
+            if use_resp:
+                payload = b"".join(encode_resp_command(cmd) for cmd in commands)
+            else:
+                payload = MSG_SEPARATOR.join(commands).encode() + ENCODED_SEPARATOR
+
+            writer.write(payload)
             await writer.drain()
             for exp in expected:
-                resp = await reader.readuntil(ENCODED_SEPARATOR)
-                results.append(resp.decode().rstrip(MSG_SEPARATOR) == exp)
+                if use_resp:
+                    try:
+                        resp = await read_resp_response(reader)
+                    except Exception as exc:
+                        logger.error(f"RESP pipeline read failed: {exc}")
+                        results.append(False)
+                        continue
+                    results.append(resp == exp)
+                else:
+                    try:
+                        resp = await reader.readuntil(ENCODED_SEPARATOR)
+                    except Exception as exc:
+                        logger.error(f"Pipeline read failed: {exc}")
+                        results.append(False)
+                        continue
+                    results.append(resp.decode().rstrip(MSG_SEPARATOR) == exp)
             i = batch_end
 
     writer.close()
@@ -339,6 +424,8 @@ def run_parallel(task_type, test_name, requests_multiplier=1, pipeline=False, ba
     use_redis_str = ""
     if use_redis:
         use_redis_str = "[REDIS] "
+    elif use_resp:
+        use_redis_str = "[RESP] "
     logger.info(f"{use_redis_str}Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process. {pipelining_log_str}")
     start = time.time()
     ctx = multiprocessing.get_context("fork")
