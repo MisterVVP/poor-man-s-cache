@@ -16,8 +16,8 @@ namespace server {
     inline constexpr char RESP_BULK_PREFIX = '$';
     inline constexpr char RESP_CR = '\r';
     inline constexpr char RESP_LF = '\n';
-    inline constexpr const char* RESP_ERROR_PREFIX = "-ERR ";
-    inline constexpr const char* RESP_NULL_BULK = "$-1\r\n";
+    inline constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
+    inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
     static constexpr const char* OK = "OK";
     static constexpr const char* NOTHING = "(nil)";
     static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
