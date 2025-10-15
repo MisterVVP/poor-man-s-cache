@@ -7,6 +7,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+#include <array>
+#include <utility>
 
 namespace server {
 
@@ -19,6 +21,7 @@ namespace server {
     inline constexpr char RESP_LF = '\n';
     inline constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
     inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
+    inline constexpr std::size_t RESP_INLINE_CAPACITY = 128;
     static constexpr const char* OK = "OK";
     static constexpr const char* QUEUED = "QUEUED";
     static constexpr const char* NOTHING = "(nil)";
@@ -60,12 +63,18 @@ namespace server {
         const char* data = nullptr;
         size_t size = 0;
         std::unique_ptr<char[]> owned;
+        std::array<char, RESP_INLINE_CAPACITY> inlineStorage{};
+        bool usesInline = false;
 
         ResponsePacket() = default;
-        ResponsePacket(ResponsePacket&&) noexcept = default;
-        ResponsePacket& operator=(ResponsePacket&&) noexcept = default;
+        ResponsePacket(ResponsePacket&& other) noexcept { *this = std::move(other); }
+        ResponsePacket& operator=(ResponsePacket&& other) noexcept;
         ResponsePacket(const ResponsePacket&) = delete;
         ResponsePacket& operator=(const ResponsePacket&) = delete;
+
+        char* tryUseInline(size_t required) noexcept;
+        void setOwnedBuffer(std::unique_ptr<char[]> buffer, size_t length) noexcept;
+        void setStaticData(const char* ptr, size_t length) noexcept;
     };
 
     struct RequestView {

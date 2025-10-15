@@ -61,7 +61,7 @@ TEST(RespProtocolTest, MakeRespSimpleString)
     auto response = makeRespSimpleString(OK);
     ASSERT_EQ(response.protocol, RequestProtocol::RESP);
     ASSERT_EQ(response.size, 5u);
-    ASSERT_NE(response.owned, nullptr);
+    ASSERT_TRUE(response.owned || response.usesInline);
     std::string serialized(response.data, response.size);
     ASSERT_EQ(serialized, "+OK\r\n");
 }
@@ -71,7 +71,7 @@ TEST(RespProtocolTest, MakeRespBulkString)
     auto response = makeRespBulkString("hello");
     ASSERT_EQ(response.protocol, RequestProtocol::RESP);
     ASSERT_EQ(response.size, 11u);
-    ASSERT_NE(response.owned, nullptr);
+    ASSERT_TRUE(response.owned || response.usesInline);
     std::string serialized(response.data, response.size);
     ASSERT_EQ(serialized, "$5\r\nhello\r\n");
 }
@@ -80,13 +80,13 @@ TEST(RespProtocolTest, MakeRespInteger)
 {
     auto positive = makeRespInteger(1);
     ASSERT_EQ(positive.protocol, RequestProtocol::RESP);
-    ASSERT_NE(positive.owned, nullptr);
+    ASSERT_TRUE(positive.owned || positive.usesInline);
     std::string serializedPos(positive.data, positive.size);
     ASSERT_EQ(serializedPos, ":1\r\n");
 
     auto negative = makeRespInteger(-1);
     ASSERT_EQ(negative.protocol, RequestProtocol::RESP);
-    ASSERT_NE(negative.owned, nullptr);
+    ASSERT_TRUE(negative.owned || negative.usesInline);
     std::string serializedNeg(negative.data, negative.size);
     ASSERT_EQ(serializedNeg, ":-1\r\n");
 }
@@ -100,7 +100,7 @@ TEST(RespProtocolTest, MakeRespArray)
 
     auto response = makeRespArray(elements);
     ASSERT_EQ(response.protocol, RequestProtocol::RESP);
-    ASSERT_NE(response.owned, nullptr);
+    ASSERT_TRUE(response.owned || response.usesInline);
     std::string serialized(response.data, response.size);
     ASSERT_EQ(serialized, "*3\r\n+OK\r\n:1\r\n$5\r\nvalue\r\n");
 }
@@ -124,7 +124,7 @@ TEST(RespProtocolTest, ErrorResponseMatchesProtocol)
 
     auto respError = makeErrorResponse(RequestProtocol::RESP, UNKNOWN_COMMAND);
     ASSERT_EQ(respError.protocol, RequestProtocol::RESP);
-    ASSERT_NE(respError.owned, nullptr);
+    ASSERT_TRUE(respError.owned || respError.usesInline);
     std::string serialized(respError.data, respError.size);
     ASSERT_EQ(serialized, "-ERR ERROR: Unknown command\r\n");
 }
