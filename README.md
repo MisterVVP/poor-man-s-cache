@@ -376,10 +376,6 @@ done
 - Read http://www.kegel.com/c10k.html
 - Continue reading https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/coroutines-c++20/
 
-## Questions / Ideas
-- add support for RESP protocol?
-
-
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
 - https://idea.popcount.org/2017-02-20-epoll-is-fundamentally-broken-12/
