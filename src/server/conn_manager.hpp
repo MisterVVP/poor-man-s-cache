@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <deque>
+#include <string>
 #include <string_view>
 #include <mutex>
 #include <memory>
@@ -20,7 +21,19 @@
 #include "protocol.hpp"
 
 namespace server {
-    struct RespTransactionState;
+    struct RespTransactionState {
+        enum class CommandType : uint8_t { Get, Set, Del };
+
+        struct QueuedCommand {
+            CommandType type = CommandType::Get;
+            std::string key;
+            std::string value;
+        };
+
+        bool active = false;
+        bool aborted = false;
+        std::vector<QueuedCommand> queue;
+    };
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;

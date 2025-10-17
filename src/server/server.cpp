@@ -3,22 +3,6 @@
 #include <string>
 #include <vector>
 
-namespace server {
-    struct RespTransactionState {
-        enum class CommandType : uint8_t { Get, Set, Del };
-
-        struct QueuedCommand {
-            CommandType type = CommandType::Get;
-            std::string key;
-            std::string value;
-        };
-
-        bool active = false;
-        bool aborted = false;
-        std::vector<QueuedCommand> queue;
-    };
-}
-
 using namespace server;
 
 ConnectionData::~ConnectionData() = default;
