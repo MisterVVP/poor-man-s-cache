@@ -1,28 +1,88 @@
 #include "protocol.hpp"
+#include <array>
+#include <limits>
+
+namespace {
+    using server::RESP_INLINE_CAPACITY;
+
+    constexpr uint16_t RESP_INLINE_INVALID = std::numeric_limits<uint16_t>::max();
+    constexpr size_t RESP_INLINE_SLOTS = 256;
+
+    struct RespInlineArena {
+        std::array<std::array<char, RESP_INLINE_CAPACITY>, RESP_INLINE_SLOTS> buffers{};
+        std::array<bool, RESP_INLINE_SLOTS> used{};
+
+        char* acquire(uint16_t& index, size_t required) noexcept {
+            if (required > RESP_INLINE_CAPACITY) {
+                index = RESP_INLINE_INVALID;
+                return nullptr;
+            }
+            for (uint16_t i = 0; i < RESP_INLINE_SLOTS; ++i) {
+                if (!used[i]) {
+                    used[i] = true;
+                    index = i;
+                    return buffers[i].data();
+                }
+            }
+            index = RESP_INLINE_INVALID;
+            return nullptr;
+        }
+
+        void release(uint16_t index) noexcept {
+            if (index < RESP_INLINE_SLOTS) {
+                used[index] = false;
+            }
+        }
+
+        char* pointer(uint16_t index) noexcept {
+            if (index < RESP_INLINE_SLOTS) {
+                return buffers[index].data();
+            }
+            return nullptr;
+        }
+    };
+
+    thread_local RespInlineArena g_respInlineArena;
+}
 
 namespace server {
 
 char* ResponsePacket::tryUseInline(size_t required) noexcept {
-    if (required > RESP_INLINE_CAPACITY) {
-        usesInline = false;
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+    owned.reset();
+    data = nullptr;
+    size = 0;
+
+    uint16_t index = RESP_INLINE_INVALID;
+    char* slot = g_respInlineArena.acquire(index, required);
+    if (!slot) {
         return nullptr;
     }
-    usesInline = true;
-    owned.reset();
+
+    inlineIndex = index;
+    data = slot;
     size = required;
-    data = inlineStorage.data();
-    return inlineStorage.data();
+    return slot;
 }
 
 void ResponsePacket::setOwnedBuffer(std::unique_ptr<char[]> buffer, size_t length) noexcept {
-    usesInline = false;
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
     owned = std::move(buffer);
+    data = owned ? owned.get() : nullptr;
     size = length;
-    data = owned.get();
 }
 
 void ResponsePacket::setStaticData(const char* ptr, size_t length) noexcept {
-    usesInline = false;
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
     owned.reset();
     data = ptr;
     size = length;
@@ -33,30 +93,42 @@ ResponsePacket& ResponsePacket::operator=(ResponsePacket&& other) noexcept {
         return *this;
     }
 
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+
     protocol = other.protocol;
     size = other.size;
-    usesInline = other.usesInline;
-    const char* staticPtr = other.data;
-
-    if (usesInline) {
-        inlineStorage = other.inlineStorage;
-        data = inlineStorage.data();
+    if (other.inlineIndex != RESP_INLINE_INVALID) {
+        inlineIndex = other.inlineIndex;
+        data = g_respInlineArena.pointer(inlineIndex);
         owned.reset();
     } else {
+        inlineIndex = RESP_INLINE_INVALID;
         owned = std::move(other.owned);
         if (owned) {
             data = owned.get();
         } else {
-            data = staticPtr;
+            data = other.data;
         }
     }
 
     other.data = nullptr;
     other.size = 0;
-    other.usesInline = false;
+    other.inlineIndex = RESP_INLINE_INVALID;
     other.owned.reset();
 
     return *this;
+}
+
+ResponsePacket::~ResponsePacket() noexcept {
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+    data = nullptr;
+    size = 0;
 }
 
 static inline bool is_digit(char c) noexcept {

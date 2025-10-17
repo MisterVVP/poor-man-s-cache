@@ -7,8 +7,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
-#include <array>
 #include <utility>
+#include <limits>
 
 namespace server {
 
@@ -23,7 +23,6 @@ namespace server {
     inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
     inline constexpr std::size_t RESP_INLINE_CAPACITY = 128;
     static constexpr const char* OK = "OK";
-    static constexpr const char* QUEUED = "QUEUED";
     static constexpr const char* NOTHING = "(nil)";
     static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
     static constexpr const char* INTERNAL_ERROR = "ERROR: Internal error";
@@ -36,10 +35,6 @@ namespace server {
     static constexpr const char* GET_STR = "GET";
     static constexpr const char* SET_STR = "SET";
     static constexpr const char* DEL_STR = "DEL";
-    static constexpr const char* MULTI_STR = "MULTI";
-    static constexpr const char* EXEC_STR = "EXEC";
-    static constexpr const char* DISCARD_STR = "DISCARD";
-
     /// @brief Query codes, 0: Reserved, 1: GET
     enum QueryCode : uint_fast8_t {
         UnknownQuery = 0,
@@ -63,18 +58,20 @@ namespace server {
         const char* data = nullptr;
         size_t size = 0;
         std::unique_ptr<char[]> owned;
-        std::array<char, RESP_INLINE_CAPACITY> inlineStorage{};
-        bool usesInline = false;
+        uint16_t inlineIndex = std::numeric_limits<uint16_t>::max();
 
         ResponsePacket() = default;
         ResponsePacket(ResponsePacket&& other) noexcept { *this = std::move(other); }
         ResponsePacket& operator=(ResponsePacket&& other) noexcept;
         ResponsePacket(const ResponsePacket&) = delete;
         ResponsePacket& operator=(const ResponsePacket&) = delete;
+        ~ResponsePacket() noexcept;
 
         char* tryUseInline(size_t required) noexcept;
         void setOwnedBuffer(std::unique_ptr<char[]> buffer, size_t length) noexcept;
         void setStaticData(const char* ptr, size_t length) noexcept;
+
+        bool usesInlineStorage() const noexcept { return inlineIndex != std::numeric_limits<uint16_t>::max(); }
     };
 
     struct RequestView {
