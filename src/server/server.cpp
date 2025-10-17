@@ -167,8 +167,8 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             tx.queue.emplace_back();
             auto& queued = tx.queue.back();
             queued.type = type;
-            queued.key = key ? key : "";
-            queued.value = value ? value : "";
+            queued.key = tx.persistString(key);
+            queued.value = tx.persistString(value);
             return makeRespSimpleString(QUEUED_STR);
         };
 
@@ -188,7 +188,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             }
             tx.active = true;
             tx.aborted = false;
-            tx.queue.clear();
+            tx.clearQueue();
             return makeRespSimpleString(OK);
         }
 
@@ -198,7 +198,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
                 return makeRespError(RESP_ERR_DISCARD_NO_MULTI);
             }
             auto& tx = *connData.respTransaction;
-            tx.queue.clear();
+            tx.clearQueue();
             tx.active = false;
             tx.aborted = false;
             return makeRespSimpleString(OK);
@@ -211,7 +211,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             }
             auto& tx = *connData.respTransaction;
             if (tx.aborted) {
-                tx.queue.clear();
+                tx.clearQueue();
                 tx.active = false;
                 tx.aborted = false;
                 ++numErrors;
@@ -222,17 +222,17 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             for (auto& queued : tx.queue) {
                 switch (queued.type) {
                     case RespTransactionState::CommandType::Get:
-                        results.emplace_back(handleGet(queued.key.c_str(), RequestProtocol::RESP));
+                        results.emplace_back(handleGet(queued.key, RequestProtocol::RESP));
                         break;
                     case RespTransactionState::CommandType::Set:
-                        results.emplace_back(handleSet(queued.key.c_str(), queued.value.c_str(), RequestProtocol::RESP));
+                        results.emplace_back(handleSet(queued.key, queued.value, RequestProtocol::RESP));
                         break;
                     case RespTransactionState::CommandType::Del:
-                        results.emplace_back(handleDel(queued.key.c_str(), RequestProtocol::RESP));
+                        results.emplace_back(handleDel(queued.key, RequestProtocol::RESP));
                         break;
                 }
             }
-            tx.queue.clear();
+            tx.clearQueue();
             tx.active = false;
             tx.aborted = false;
             return makeRespArray(results);

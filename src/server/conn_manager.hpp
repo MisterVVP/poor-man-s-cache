@@ -5,10 +5,10 @@
 #include <unordered_map>
 #include <vector>
 #include <deque>
-#include <string>
 #include <string_view>
 #include <mutex>
 #include <memory>
+#include <cstring>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -26,13 +26,33 @@ namespace server {
 
         struct QueuedCommand {
             CommandType type = CommandType::Get;
-            std::string key;
-            std::string value;
+            const char* key = nullptr;
+            const char* value = nullptr;
         };
+
+        const char* persistString(const char* input) {
+            if (!input || !*input) {
+                static constexpr char EMPTY[] = "";
+                return EMPTY;
+            }
+
+            const size_t length = std::strlen(input);
+            auto buffer = std::unique_ptr<char[]>(new char[length + 1]);
+            std::memcpy(buffer.get(), input, length + 1);
+            const char* result = buffer.get();
+            storage.emplace_back(std::move(buffer));
+            return result;
+        }
+
+        void clearQueue() {
+            queue.clear();
+            storage.clear();
+        }
 
         bool active = false;
         bool aborted = false;
         std::vector<QueuedCommand> queue;
+        std::vector<std::unique_ptr<char[]>> storage;
     };
     struct ConnectionData {
         timespec lastActivity {0, 0};
