@@ -50,9 +50,21 @@ TEST(RespProtocolTest, MakeRespSimpleString)
     auto response = makeRespSimpleString(OK);
     ASSERT_EQ(response.protocol, RequestProtocol::RESP);
     ASSERT_EQ(response.size, 5u);
-    ASSERT_TRUE(response.owned || response.usesInlineStorage());
+    ASSERT_EQ(response.owned, nullptr);
+    ASSERT_FALSE(response.usesInlineStorage());
     std::string serialized(response.data, response.size);
     ASSERT_EQ(serialized, "+OK\r\n");
+}
+
+TEST(RespProtocolTest, MakeRespSimpleStringReusesStaticStorage)
+{
+    auto first = makeRespSimpleString(OK);
+    auto second = makeRespSimpleString(OK);
+    ASSERT_EQ(first.data, second.data);
+    ASSERT_EQ(first.owned, nullptr);
+    ASSERT_EQ(second.owned, nullptr);
+    ASSERT_FALSE(first.usesInlineStorage());
+    ASSERT_FALSE(second.usesInlineStorage());
 }
 
 TEST(RespProtocolTest, InlineCapacityConfiguration)
@@ -62,7 +74,8 @@ TEST(RespProtocolTest, InlineCapacityConfiguration)
     ASSERT_EQ(respInlineCapacity(), 64u);
     {
         auto response = makeRespSimpleString(OK);
-        ASSERT_TRUE(response.owned || response.usesInlineStorage());
+        ASSERT_EQ(response.owned, nullptr);
+        ASSERT_FALSE(response.usesInlineStorage());
     }
     setRespInlineCapacity(original);
 }
@@ -125,9 +138,23 @@ TEST(RespProtocolTest, ErrorResponseMatchesProtocol)
 
     auto respError = makeErrorResponse(RequestProtocol::RESP, UNKNOWN_COMMAND);
     ASSERT_EQ(respError.protocol, RequestProtocol::RESP);
-    ASSERT_TRUE(respError.owned || respError.usesInlineStorage());
+    ASSERT_EQ(respError.owned, nullptr);
+    ASSERT_FALSE(respError.usesInlineStorage());
     std::string serialized(respError.data, respError.size);
     ASSERT_EQ(serialized, "-ERR ERROR: Unknown command\r\n");
+}
+
+TEST(RespProtocolTest, MakeRespErrorReusesStaticStorage)
+{
+    auto first = makeRespError(RESP_ERR_EXEC_NO_MULTI);
+    auto second = makeRespError(RESP_ERR_EXEC_NO_MULTI);
+    ASSERT_EQ(first.data, second.data);
+    ASSERT_EQ(first.owned, nullptr);
+    ASSERT_EQ(second.owned, nullptr);
+    ASSERT_FALSE(first.usesInlineStorage());
+    ASSERT_FALSE(second.usesInlineStorage());
+    std::string serialized(first.data, first.size);
+    ASSERT_EQ(serialized, "-ERR ERR EXEC without MULTI\r\n");
 }
 
 TEST(CustomProtocolTest, MakeCustomResponse)

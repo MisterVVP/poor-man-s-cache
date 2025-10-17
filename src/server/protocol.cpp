@@ -8,6 +8,54 @@ namespace {
     constexpr uint16_t RESP_INLINE_INVALID = std::numeric_limits<uint16_t>::max();
     constexpr size_t RESP_INLINE_SLOTS = 256;
 
+    struct StaticResponseData {
+        const char* message;
+        const char* payload;
+        std::size_t size;
+    };
+
+    constexpr char RESP_OK_SIMPLE[] = "+OK\r\n";
+    constexpr char RESP_QUEUED_SIMPLE[] = "+QUEUED\r\n";
+
+    constexpr char RESP_ERR_MULTI_NESTED_PAYLOAD[] = "-ERR ERR MULTI calls can not be nested\r\n";
+    constexpr char RESP_ERR_EXEC_NO_MULTI_PAYLOAD[] = "-ERR ERR EXEC without MULTI\r\n";
+    constexpr char RESP_ERR_DISCARD_NO_MULTI_PAYLOAD[] = "-ERR ERR DISCARD without MULTI\r\n";
+    constexpr char RESP_ERR_EXEC_ABORTED_PAYLOAD[] = "-ERR EXECABORT Transaction discarded because of previous errors.\r\n";
+    constexpr char RESP_ERR_INTERNAL_ERROR_PAYLOAD[] = "-ERR ERROR: Internal error\r\n";
+    constexpr char RESP_ERR_INVALID_COMMAND_CODE_PAYLOAD[] = "-ERR ERROR: Invalid command code\r\n";
+    constexpr char RESP_ERR_INVALID_QUERY_CODE_PAYLOAD[] = "-ERR ERROR: Invalid query code\r\n";
+    constexpr char RESP_ERR_UNKNOWN_COMMAND_PAYLOAD[] = "-ERR ERROR: Unknown command\r\n";
+    constexpr char RESP_ERR_UNABLE_TO_PARSE_PAYLOAD[] = "-ERR ERROR: Unable to parse request\r\n";
+    constexpr char RESP_ERR_INVALID_COMMAND_FORMAT_PAYLOAD[] = "-ERR ERROR: Invalid command format\r\n";
+
+    constexpr StaticResponseData SIMPLE_STRING_RESPONSES[] = {
+        {server::OK, RESP_OK_SIMPLE, sizeof(RESP_OK_SIMPLE) - 1},
+        {server::QUEUED_STR, RESP_QUEUED_SIMPLE, sizeof(RESP_QUEUED_SIMPLE) - 1},
+    };
+
+    constexpr StaticResponseData ERROR_RESPONSES[] = {
+        {server::RESP_ERR_MULTI_NESTED, RESP_ERR_MULTI_NESTED_PAYLOAD, sizeof(RESP_ERR_MULTI_NESTED_PAYLOAD) - 1},
+        {server::RESP_ERR_EXEC_NO_MULTI, RESP_ERR_EXEC_NO_MULTI_PAYLOAD, sizeof(RESP_ERR_EXEC_NO_MULTI_PAYLOAD) - 1},
+        {server::RESP_ERR_DISCARD_NO_MULTI, RESP_ERR_DISCARD_NO_MULTI_PAYLOAD, sizeof(RESP_ERR_DISCARD_NO_MULTI_PAYLOAD) - 1},
+        {server::RESP_ERR_EXEC_ABORTED, RESP_ERR_EXEC_ABORTED_PAYLOAD, sizeof(RESP_ERR_EXEC_ABORTED_PAYLOAD) - 1},
+        {server::INTERNAL_ERROR, RESP_ERR_INTERNAL_ERROR_PAYLOAD, sizeof(RESP_ERR_INTERNAL_ERROR_PAYLOAD) - 1},
+        {server::INVALID_COMMAND_CODE, RESP_ERR_INVALID_COMMAND_CODE_PAYLOAD, sizeof(RESP_ERR_INVALID_COMMAND_CODE_PAYLOAD) - 1},
+        {server::INVALID_QUERY_CODE, RESP_ERR_INVALID_QUERY_CODE_PAYLOAD, sizeof(RESP_ERR_INVALID_QUERY_CODE_PAYLOAD) - 1},
+        {server::UNKNOWN_COMMAND, RESP_ERR_UNKNOWN_COMMAND_PAYLOAD, sizeof(RESP_ERR_UNKNOWN_COMMAND_PAYLOAD) - 1},
+        {server::UNABLE_TO_PARSE_REQUEST_ERROR, RESP_ERR_UNABLE_TO_PARSE_PAYLOAD, sizeof(RESP_ERR_UNABLE_TO_PARSE_PAYLOAD) - 1},
+        {server::INVALID_COMMAND_FORMAT, RESP_ERR_INVALID_COMMAND_FORMAT_PAYLOAD, sizeof(RESP_ERR_INVALID_COMMAND_FORMAT_PAYLOAD) - 1},
+    };
+
+    template <std::size_t N>
+    constexpr const StaticResponseData* findStaticResponse(const StaticResponseData (&responses)[N], const char* message) noexcept {
+        for (const auto& response : responses) {
+            if (response.message == message) {
+                return &response;
+            }
+        }
+        return nullptr;
+    }
+
     std::atomic<std::size_t> g_respInlineCapacity{255};
 
     inline std::size_t sanitizeCapacity(std::size_t value) noexcept {
@@ -336,6 +384,11 @@ ResponsePacket makeRespSimpleString(const char* message)
     ResponsePacket response{};
     response.protocol = RequestProtocol::RESP;
 
+    if (const auto* prebuilt = findStaticResponse(SIMPLE_STRING_RESPONSES, message)) {
+        response.setStaticData(prebuilt->payload, prebuilt->size);
+        return response;
+    }
+
     const size_t len = std::strlen(message);
     const size_t total = len + 3;
     char* out = response.tryUseInline(total);
@@ -457,6 +510,11 @@ ResponsePacket makeRespError(const char* message)
 {
     ResponsePacket response{};
     response.protocol = RequestProtocol::RESP;
+
+    if (const auto* prebuilt = findStaticResponse(ERROR_RESPONSES, message)) {
+        response.setStaticData(prebuilt->payload, prebuilt->size);
+        return response;
+    }
 
     const size_t prefixLen = std::strlen(RESP_ERROR_PREFIX);
     const size_t msgLen    = std::strlen(message);

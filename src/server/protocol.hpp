@@ -12,7 +12,7 @@
 
 namespace server {
 
-    static const char MSG_SEPARATOR = 0x1F;
+    inline constexpr char MSG_SEPARATOR = 0x1F;
     inline constexpr char RESP_ARRAY_PREFIX = '*';
     inline constexpr char RESP_SIMPLE_PREFIX = '+';
     inline constexpr char RESP_BULK_PREFIX = '$';
@@ -21,23 +21,23 @@ namespace server {
     inline constexpr char RESP_LF = '\n';
     inline constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
     inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
-    static constexpr const char* MULTI_STR = "MULTI";
-    static constexpr const char* EXEC_STR = "EXEC";
-    static constexpr const char* DISCARD_STR = "DISCARD";
-    static constexpr const char* QUEUED_STR = "QUEUED";
-    static constexpr const char* RESP_ERR_MULTI_NESTED = "ERR MULTI calls can not be nested";
-    static constexpr const char* RESP_ERR_EXEC_NO_MULTI = "ERR EXEC without MULTI";
-    static constexpr const char* RESP_ERR_DISCARD_NO_MULTI = "ERR DISCARD without MULTI";
-    static constexpr const char* RESP_ERR_EXEC_ABORTED = "EXECABORT Transaction discarded because of previous errors.";
-    static constexpr const char* OK = "OK";
-    static constexpr const char* NOTHING = "(nil)";
-    static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
-    static constexpr const char* INTERNAL_ERROR = "ERROR: Internal error";
-    static constexpr const char* INVALID_COMMAND_CODE = "ERROR: Invalid command code";
-    static constexpr const char* INVALID_QUERY_CODE = "ERROR: Invalid query code";
-    static constexpr const char* UNKNOWN_COMMAND = "ERROR: Unknown command";
-    static constexpr const char* UNABLE_TO_PARSE_REQUEST_ERROR = "ERROR: Unable to parse request";
-    static constexpr const char* INVALID_COMMAND_FORMAT = "ERROR: Invalid command format";
+    inline constexpr char MULTI_STR[] = "MULTI";
+    inline constexpr char EXEC_STR[] = "EXEC";
+    inline constexpr char DISCARD_STR[] = "DISCARD";
+    inline constexpr char QUEUED_STR[] = "QUEUED";
+    inline constexpr char RESP_ERR_MULTI_NESTED[] = "ERR MULTI calls can not be nested";
+    inline constexpr char RESP_ERR_EXEC_NO_MULTI[] = "ERR EXEC without MULTI";
+    inline constexpr char RESP_ERR_DISCARD_NO_MULTI[] = "ERR DISCARD without MULTI";
+    inline constexpr char RESP_ERR_EXEC_ABORTED[] = "EXECABORT Transaction discarded because of previous errors.";
+    inline constexpr char OK[] = "OK";
+    inline constexpr char NOTHING[] = "(nil)";
+    inline constexpr char KEY_NOT_EXISTS[] = "ERROR: Key does not exist";
+    inline constexpr char INTERNAL_ERROR[] = "ERROR: Internal error";
+    inline constexpr char INVALID_COMMAND_CODE[] = "ERROR: Invalid command code";
+    inline constexpr char INVALID_QUERY_CODE[] = "ERROR: Invalid query code";
+    inline constexpr char UNKNOWN_COMMAND[] = "ERROR: Unknown command";
+    inline constexpr char UNABLE_TO_PARSE_REQUEST_ERROR[] = "ERROR: Unable to parse request";
+    inline constexpr char INVALID_COMMAND_FORMAT[] = "ERROR: Invalid command format";
 
     static constexpr const char* GET_STR = "GET";
     static constexpr const char* SET_STR = "SET";
