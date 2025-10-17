@@ -7,6 +7,7 @@
 #include <deque>
 #include <string_view>
 #include <mutex>
+#include <memory>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -19,16 +20,19 @@
 #include "protocol.hpp"
 
 namespace server {
+    struct RespTransactionState;
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
         std::vector<char> readBuffer;
         std::deque<RequestView> pendingRequests;
         size_t bytesToErase = 0;
+        std::unique_ptr<RespTransactionState> respTransaction;
         ConnectionData() = default;
         ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
             readBuffer.reserve(READ_BUFFER_SIZE);
         }
+        ~ConnectionData();
     };
 
     class ConnManager {

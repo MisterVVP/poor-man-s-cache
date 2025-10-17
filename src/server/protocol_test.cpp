@@ -55,6 +55,18 @@ TEST(RespProtocolTest, MakeRespSimpleString)
     ASSERT_EQ(serialized, "+OK\r\n");
 }
 
+TEST(RespProtocolTest, InlineCapacityConfiguration)
+{
+    auto original = respInlineCapacity();
+    setRespInlineCapacity(64);
+    ASSERT_EQ(respInlineCapacity(), 64u);
+    {
+        auto response = makeRespSimpleString(OK);
+        ASSERT_TRUE(response.owned || response.usesInlineStorage());
+    }
+    setRespInlineCapacity(original);
+}
+
 TEST(RespProtocolTest, MakeRespBulkString)
 {
     auto response = makeRespBulkString("hello");

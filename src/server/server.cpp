@@ -1,10 +1,32 @@
 #include "server.hpp"
 #include <unordered_map>
+#include <string>
+#include <vector>
+
+namespace server {
+    struct RespTransactionState {
+        enum class CommandType : uint8_t { Get, Set, Del };
+
+        struct QueuedCommand {
+            CommandType type = CommandType::Get;
+            std::string key;
+            std::string value;
+        };
+
+        bool active = false;
+        bool aborted = false;
+        std::vector<QueuedCommand> queue;
+    };
+}
 
 using namespace server;
 
+ConnectionData::~ConnectionData() = default;
+
 CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numShards), port(settings.port)
 {
+    setRespInlineCapacity(settings.respInlineCapacity);
+
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
         throw std::system_error(errno, std::system_category(), "Socket creation failed");
@@ -102,7 +124,7 @@ ProcessRequestTask server::CacheServer::processRequest(const RequestView& reques
 
 ResponsePacket CacheServer::processRequestSync(const RequestView& request, ConnectionData& connData)
 {
-    auto handleGet = [&](char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
+    auto handleGet = [&](const char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Query query{QueryCode::GET, keyPtr, hash};
@@ -110,7 +132,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         return protocol == RequestProtocol::RESP ? makeRespBulkString(result) : makeCustomResponse(result);
     };
 
-    auto handleSet = [&](char* keyPtr, const char* valuePtr, RequestProtocol protocol) -> ResponsePacket {
+    auto handleSet = [&](const char* keyPtr, const char* valuePtr, RequestProtocol protocol) -> ResponsePacket {
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
@@ -121,7 +143,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         return makeCustomResponse(result);
     };
 
-    auto handleDel = [&](char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
+    auto handleDel = [&](const char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
@@ -139,16 +161,107 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     };
 
     if (request.protocol == RequestProtocol::RESP) {
+        auto markRespTransactionError = [&]() {
+            if (connData.respTransaction && connData.respTransaction->active) {
+                connData.respTransaction->aborted = true;
+            }
+        };
+
+        auto ensureRespTransaction = [&]() -> RespTransactionState& {
+            if (!connData.respTransaction) {
+                connData.respTransaction = std::make_unique<RespTransactionState>();
+            }
+            return *connData.respTransaction;
+        };
+
+        auto queueRespCommand = [&](RespTransactionState::CommandType type, const char* key, const char* value) -> ResponsePacket {
+            auto& tx = ensureRespTransaction();
+            if (!tx.active) {
+                ++numErrors;
+                return makeRespError(RESP_ERR_EXEC_NO_MULTI);
+            }
+            tx.queue.emplace_back();
+            auto& queued = tx.queue.back();
+            queued.type = type;
+            queued.key = key ? key : "";
+            queued.value = value ? value : "";
+            return makeRespSimpleString(QUEUED_STR);
+        };
+
         RespCommandParts parts{};
         if (!parseRespCommand(request.payload, parts)) {
             ++numErrors;
+            markRespTransactionError();
             return makeErrorResponse(RequestProtocol::RESP, UNABLE_TO_PARSE_REQUEST_ERROR);
+        }
+
+        if (std::strcmp(parts.command, MULTI_STR) == 0) {
+            auto& tx = ensureRespTransaction();
+            if (tx.active) {
+                ++numErrors;
+                markRespTransactionError();
+                return makeRespError(RESP_ERR_MULTI_NESTED);
+            }
+            tx.active = true;
+            tx.aborted = false;
+            tx.queue.clear();
+            return makeRespSimpleString(OK);
+        }
+
+        if (std::strcmp(parts.command, DISCARD_STR) == 0) {
+            if (!connData.respTransaction || !connData.respTransaction->active) {
+                ++numErrors;
+                return makeRespError(RESP_ERR_DISCARD_NO_MULTI);
+            }
+            auto& tx = *connData.respTransaction;
+            tx.queue.clear();
+            tx.active = false;
+            tx.aborted = false;
+            return makeRespSimpleString(OK);
+        }
+
+        if (std::strcmp(parts.command, EXEC_STR) == 0) {
+            if (!connData.respTransaction || !connData.respTransaction->active) {
+                ++numErrors;
+                return makeRespError(RESP_ERR_EXEC_NO_MULTI);
+            }
+            auto& tx = *connData.respTransaction;
+            if (tx.aborted) {
+                tx.queue.clear();
+                tx.active = false;
+                tx.aborted = false;
+                ++numErrors;
+                return makeRespError(RESP_ERR_EXEC_ABORTED);
+            }
+            std::vector<ResponsePacket> results;
+            results.reserve(tx.queue.size());
+            for (auto& queued : tx.queue) {
+                switch (queued.type) {
+                    case RespTransactionState::CommandType::Get:
+                        results.emplace_back(handleGet(queued.key.c_str(), RequestProtocol::RESP));
+                        break;
+                    case RespTransactionState::CommandType::Set:
+                        results.emplace_back(handleSet(queued.key.c_str(), queued.value.c_str(), RequestProtocol::RESP));
+                        break;
+                    case RespTransactionState::CommandType::Del:
+                        results.emplace_back(handleDel(queued.key.c_str(), RequestProtocol::RESP));
+                        break;
+                }
+            }
+            tx.queue.clear();
+            tx.active = false;
+            tx.aborted = false;
+            return makeRespArray(results);
         }
 
         if (std::strcmp(parts.command, GET_STR) == 0) {
             if (parts.argc != 2) {
                 ++numErrors;
+                markRespTransactionError();
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            if (connData.respTransaction && connData.respTransaction->active) {
+                return queueRespCommand(RespTransactionState::CommandType::Get, parts.key, nullptr);
             }
             return handleGet(parts.key, RequestProtocol::RESP);
         }
@@ -156,7 +269,11 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         if (std::strcmp(parts.command, SET_STR) == 0) {
             if (parts.argc != 3 || parts.value == nullptr) {
                 ++numErrors;
+                markRespTransactionError();
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            if (connData.respTransaction && connData.respTransaction->active) {
+                return queueRespCommand(RespTransactionState::CommandType::Set, parts.key, parts.value);
             }
             return handleSet(parts.key, parts.value, RequestProtocol::RESP);
         }
@@ -164,12 +281,17 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         if (std::strcmp(parts.command, DEL_STR) == 0) {
             if (parts.argc != 2) {
                 ++numErrors;
+                markRespTransactionError();
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
+            }
+            if (connData.respTransaction && connData.respTransaction->active) {
+                return queueRespCommand(RespTransactionState::CommandType::Del, parts.key, nullptr);
             }
             return handleDel(parts.key, RequestProtocol::RESP);
         }
 
         ++numErrors;
+        markRespTransactionError();
         return makeErrorResponse(RequestProtocol::RESP, UNKNOWN_COMMAND);
     }
 

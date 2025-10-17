@@ -21,7 +21,14 @@ namespace server {
     inline constexpr char RESP_LF = '\n';
     inline constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
     inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
-    inline constexpr std::size_t RESP_INLINE_CAPACITY = 128;
+    static constexpr const char* MULTI_STR = "MULTI";
+    static constexpr const char* EXEC_STR = "EXEC";
+    static constexpr const char* DISCARD_STR = "DISCARD";
+    static constexpr const char* QUEUED_STR = "QUEUED";
+    static constexpr const char* RESP_ERR_MULTI_NESTED = "ERR MULTI calls can not be nested";
+    static constexpr const char* RESP_ERR_EXEC_NO_MULTI = "ERR EXEC without MULTI";
+    static constexpr const char* RESP_ERR_DISCARD_NO_MULTI = "ERR DISCARD without MULTI";
+    static constexpr const char* RESP_ERR_EXEC_ABORTED = "EXECABORT Transaction discarded because of previous errors.";
     static constexpr const char* OK = "OK";
     static constexpr const char* NOTHING = "(nil)";
     static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
@@ -107,4 +114,7 @@ namespace server {
     ResponsePacket makeRespArray(const std::vector<ResponsePacket>& elements);
     ResponsePacket makeRespError(const char* message);
     ResponsePacket makeErrorResponse(RequestProtocol protocol, const char* message);
+
+    void setRespInlineCapacity(std::size_t capacity) noexcept;
+    std::size_t respInlineCapacity() noexcept;
 }

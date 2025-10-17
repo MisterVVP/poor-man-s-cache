@@ -59,6 +59,9 @@ namespace server {
 
         /// @brief Enable compression of stored values. Disable if RPS and processing speed is more important than memory consumption
         bool enableCompression = false;
+
+        /// @brief Inline RESP response capacity before falling back to heap allocations
+        std::size_t respInlineCapacity = 255;
     };
 
     class CacheServer : NonCopyableOrMovable {

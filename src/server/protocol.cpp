@@ -1,44 +1,79 @@
 #include "protocol.hpp"
 #include <array>
 #include <limits>
+#include <atomic>
+#include <memory>
 
 namespace {
-    using server::RESP_INLINE_CAPACITY;
-
     constexpr uint16_t RESP_INLINE_INVALID = std::numeric_limits<uint16_t>::max();
     constexpr size_t RESP_INLINE_SLOTS = 256;
 
+    std::atomic<std::size_t> g_respInlineCapacity{255};
+
+    inline std::size_t sanitizeCapacity(std::size_t value) noexcept {
+        return value == 0 ? 1 : value;
+    }
+
+    inline std::size_t currentCapacity() noexcept {
+        return sanitizeCapacity(g_respInlineCapacity.load(std::memory_order_relaxed));
+    }
+
     struct RespInlineArena {
-        std::array<std::array<char, RESP_INLINE_CAPACITY>, RESP_INLINE_SLOTS> buffers{};
         std::array<uint16_t, RESP_INLINE_SLOTS> freelist{};
+        std::unique_ptr<char[]> storage;
+        std::size_t slotSize = 0;
         uint16_t freeCount = RESP_INLINE_SLOTS;
 
         RespInlineArena() noexcept {
+            resetStorage(currentCapacity());
+        }
+
+        void resetStorage(std::size_t capacity) noexcept {
+            slotSize = sanitizeCapacity(capacity);
+            storage = std::make_unique<char[]>(slotSize * RESP_INLINE_SLOTS);
+            freeCount = RESP_INLINE_SLOTS;
             for (uint16_t i = 0; i < RESP_INLINE_SLOTS; ++i) {
                 // Fill the freelist in reverse order so we pop the lowest indices first.
                 freelist[i] = static_cast<uint16_t>(RESP_INLINE_SLOTS - 1 - i);
             }
         }
 
+        void ensureCapacity() noexcept {
+            const auto desired = currentCapacity();
+            if (!storage) {
+                resetStorage(desired);
+            } else if (desired != slotSize && freeCount == RESP_INLINE_SLOTS) {
+                resetStorage(desired);
+            }
+        }
+
         char* acquire(uint16_t& index, size_t required) noexcept {
-            if (required > RESP_INLINE_CAPACITY || freeCount == 0) {
+            ensureCapacity();
+            if (required > slotSize || freeCount == 0) {
                 index = RESP_INLINE_INVALID;
                 return nullptr;
             }
 
             index = freelist[--freeCount];
-            return buffers[index].data();
+            return storage.get() + static_cast<std::size_t>(index) * slotSize;
         }
 
         void release(uint16_t index) noexcept {
             if (index < RESP_INLINE_SLOTS && freeCount < RESP_INLINE_SLOTS) {
                 freelist[freeCount++] = index;
+                if (freeCount == RESP_INLINE_SLOTS) {
+                    const auto desired = currentCapacity();
+                    if (desired != slotSize) {
+                        resetStorage(desired);
+                    }
+                }
             }
         }
 
         char* pointer(uint16_t index) noexcept {
-            if (index < RESP_INLINE_SLOTS) {
-                return buffers[index].data();
+            ensureCapacity();
+            if (index < RESP_INLINE_SLOTS && storage) {
+                return storage.get() + static_cast<std::size_t>(index) * slotSize;
             }
             return nullptr;
         }
@@ -48,6 +83,14 @@ namespace {
 }
 
 namespace server {
+
+void setRespInlineCapacity(std::size_t capacity) noexcept {
+    g_respInlineCapacity.store(sanitizeCapacity(capacity), std::memory_order_relaxed);
+}
+
+std::size_t respInlineCapacity() noexcept {
+    return currentCapacity();
+}
 
 char* ResponsePacket::tryUseInline(size_t required) noexcept {
     if (inlineIndex != RESP_INLINE_INVALID) {
