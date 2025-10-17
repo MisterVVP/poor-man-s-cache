@@ -1,6 +1,180 @@
 #include "protocol.hpp"
+#include <array>
+#include <limits>
+#include <atomic>
+#include <memory>
+
+namespace {
+    constexpr uint16_t RESP_INLINE_INVALID = std::numeric_limits<uint16_t>::max();
+    constexpr size_t RESP_INLINE_SLOTS = 256;
+
+    std::atomic<std::size_t> g_respInlineCapacity{255};
+
+    inline std::size_t sanitizeCapacity(std::size_t value) noexcept {
+        return value == 0 ? 1 : value;
+    }
+
+    inline std::size_t currentCapacity() noexcept {
+        return sanitizeCapacity(g_respInlineCapacity.load(std::memory_order_relaxed));
+    }
+
+    struct RespInlineArena {
+        std::array<uint16_t, RESP_INLINE_SLOTS> freelist{};
+        std::unique_ptr<char[]> storage;
+        std::size_t slotSize = 0;
+        uint16_t freeCount = RESP_INLINE_SLOTS;
+
+        RespInlineArena() noexcept {
+            resetStorage(currentCapacity());
+        }
+
+        void resetStorage(std::size_t capacity) noexcept {
+            slotSize = sanitizeCapacity(capacity);
+            storage = std::make_unique<char[]>(slotSize * RESP_INLINE_SLOTS);
+            freeCount = RESP_INLINE_SLOTS;
+            for (uint16_t i = 0; i < RESP_INLINE_SLOTS; ++i) {
+                // Fill the freelist in reverse order so we pop the lowest indices first.
+                freelist[i] = static_cast<uint16_t>(RESP_INLINE_SLOTS - 1 - i);
+            }
+        }
+
+        void ensureCapacity() noexcept {
+            const auto desired = currentCapacity();
+            if (!storage) {
+                resetStorage(desired);
+            } else if (desired != slotSize && freeCount == RESP_INLINE_SLOTS) {
+                resetStorage(desired);
+            }
+        }
+
+        char* acquire(uint16_t& index, size_t required) noexcept {
+            ensureCapacity();
+            if (required > slotSize || freeCount == 0) {
+                index = RESP_INLINE_INVALID;
+                return nullptr;
+            }
+
+            index = freelist[--freeCount];
+            return storage.get() + static_cast<std::size_t>(index) * slotSize;
+        }
+
+        void release(uint16_t index) noexcept {
+            if (index < RESP_INLINE_SLOTS && freeCount < RESP_INLINE_SLOTS) {
+                freelist[freeCount++] = index;
+                if (freeCount == RESP_INLINE_SLOTS) {
+                    const auto desired = currentCapacity();
+                    if (desired != slotSize) {
+                        resetStorage(desired);
+                    }
+                }
+            }
+        }
+
+        char* pointer(uint16_t index) noexcept {
+            ensureCapacity();
+            if (index < RESP_INLINE_SLOTS && storage) {
+                return storage.get() + static_cast<std::size_t>(index) * slotSize;
+            }
+            return nullptr;
+        }
+    };
+
+    thread_local RespInlineArena g_respInlineArena;
+}
 
 namespace server {
+
+void setRespInlineCapacity(std::size_t capacity) noexcept {
+    g_respInlineCapacity.store(sanitizeCapacity(capacity), std::memory_order_relaxed);
+}
+
+std::size_t respInlineCapacity() noexcept {
+    return currentCapacity();
+}
+
+char* ResponsePacket::tryUseInline(size_t required) noexcept {
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+    owned.reset();
+    data = nullptr;
+    size = 0;
+
+    uint16_t index = RESP_INLINE_INVALID;
+    char* slot = g_respInlineArena.acquire(index, required);
+    if (!slot) {
+        return nullptr;
+    }
+
+    inlineIndex = index;
+    data = slot;
+    size = required;
+    return slot;
+}
+
+void ResponsePacket::setOwnedBuffer(std::unique_ptr<char[]> buffer, size_t length) noexcept {
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+    owned = std::move(buffer);
+    data = owned ? owned.get() : nullptr;
+    size = length;
+}
+
+void ResponsePacket::setStaticData(const char* ptr, size_t length) noexcept {
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+    owned.reset();
+    data = ptr;
+    size = length;
+}
+
+ResponsePacket& ResponsePacket::operator=(ResponsePacket&& other) noexcept {
+    if (this == &other) {
+        return *this;
+    }
+
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+
+    protocol = other.protocol;
+    size = other.size;
+    if (other.inlineIndex != RESP_INLINE_INVALID) {
+        inlineIndex = other.inlineIndex;
+        data = g_respInlineArena.pointer(inlineIndex);
+        owned.reset();
+    } else {
+        inlineIndex = RESP_INLINE_INVALID;
+        owned = std::move(other.owned);
+        if (owned) {
+            data = owned.get();
+        } else {
+            data = other.data;
+        }
+    }
+
+    other.data = nullptr;
+    other.size = 0;
+    other.inlineIndex = RESP_INLINE_INVALID;
+    other.owned.reset();
+
+    return *this;
+}
+
+ResponsePacket::~ResponsePacket() noexcept {
+    if (inlineIndex != RESP_INLINE_INVALID) {
+        g_respInlineArena.release(inlineIndex);
+        inlineIndex = RESP_INLINE_INVALID;
+    }
+    data = nullptr;
+    size = 0;
+}
 
 static inline bool is_digit(char c) noexcept {
     return (c >= '0') && (c <= '9');
@@ -163,17 +337,19 @@ ResponsePacket makeRespSimpleString(const char* message)
     response.protocol = RequestProtocol::RESP;
 
     const size_t len = std::strlen(message);
-    auto buffer = std::unique_ptr<char[]>(new char[len + 3]);
-    char* out = buffer.get();
+    const size_t total = len + 3;
+    char* out = response.tryUseInline(total);
+    if (!out) {
+        auto buffer = std::unique_ptr<char[]>(new char[total]);
+        out = buffer.get();
+        response.setOwnedBuffer(std::move(buffer), total);
+    }
 
     out[0] = RESP_SIMPLE_PREFIX;
     if (len) std::memcpy(out + 1, message, len);
     out[len + 1] = RESP_CR;
     out[len + 2] = RESP_LF;
 
-    response.size  = len + 3;
-    response.data  = out;
-    response.owned = std::move(buffer);
     return response;
 }
 
@@ -188,8 +364,12 @@ ResponsePacket makeRespInteger(int64_t value)
 
     const bool negative = value < 0;
     const size_t total = 1 + (negative ? 1 : 0) + digits + 2;
-    auto buffer = std::unique_ptr<char[]>(new char[total]);
-    char* out = buffer.get();
+    char* out = response.tryUseInline(total);
+    if (!out) {
+        auto buffer = std::unique_ptr<char[]>(new char[total]);
+        out = buffer.get();
+        response.setOwnedBuffer(std::move(buffer), total);
+    }
 
     out[0] = RESP_INTEGER_PREFIX;
     size_t offset = 1;
@@ -201,9 +381,6 @@ ResponsePacket makeRespInteger(int64_t value)
     out[offset++] = RESP_CR;
     out[offset++] = RESP_LF;
 
-    response.size  = total;
-    response.data  = out;
-    response.owned = std::move(buffer);
     return response;
 }
 
@@ -213,8 +390,7 @@ ResponsePacket makeRespBulkString(const char* value)
     response.protocol = RequestProtocol::RESP;
 
     if (value == NOTHING) {
-        response.data = RESP_NULL_BULK;
-        response.size = sizeof(RESP_NULL_BULK) - 1;
+        response.setStaticData(RESP_NULL_BULK, std::strlen(RESP_NULL_BULK));
         return response;
     }
 
@@ -223,8 +399,12 @@ ResponsePacket makeRespBulkString(const char* value)
     const unsigned digits = u64_to_ascii(len, lenBuf);
 
     const size_t total = 1 + digits + 2 + len + 2;
-    auto buffer = std::unique_ptr<char[]>(new char[total]);
-    char* out = buffer.get();
+    char* out = response.tryUseInline(total);
+    if (!out) {
+        auto buffer = std::unique_ptr<char[]>(new char[total]);
+        out = buffer.get();
+        response.setOwnedBuffer(std::move(buffer), total);
+    }
 
     out[0] = RESP_BULK_PREFIX;
     if (digits) std::memcpy(out + 1, lenBuf, digits);
@@ -234,9 +414,6 @@ ResponsePacket makeRespBulkString(const char* value)
     out[3 + digits + len] = RESP_CR;
     out[4 + digits + len] = RESP_LF;
 
-    response.size  = total;
-    response.data  = out;
-    response.owned = std::move(buffer);
     return response;
 }
 
@@ -253,8 +430,12 @@ ResponsePacket makeRespArray(const std::vector<ResponsePacket>& elements)
         total += element.size;
     }
 
-    auto buffer = std::unique_ptr<char[]>(new char[total]);
-    char* out = buffer.get();
+    char* out = response.tryUseInline(total);
+    if (!out) {
+        auto buffer = std::unique_ptr<char[]>(new char[total]);
+        out = buffer.get();
+        response.setOwnedBuffer(std::move(buffer), total);
+    }
 
     out[0] = RESP_ARRAY_PREFIX;
     if (digits) std::memcpy(out + 1, lenBuf, digits);
@@ -269,9 +450,6 @@ ResponsePacket makeRespArray(const std::vector<ResponsePacket>& elements)
         offset += element.size;
     }
 
-    response.size  = total;
-    response.data  = out;
-    response.owned = std::move(buffer);
     return response;
 }
 
@@ -280,19 +458,21 @@ ResponsePacket makeRespError(const char* message)
     ResponsePacket response{};
     response.protocol = RequestProtocol::RESP;
 
-    const size_t prefixLen = sizeof(RESP_ERROR_PREFIX) - 1;
+    const size_t prefixLen = std::strlen(RESP_ERROR_PREFIX);
     const size_t msgLen    = std::strlen(message);
-    auto buffer = std::unique_ptr<char[]>(new char[prefixLen + msgLen + 2]);
-    char* out = buffer.get();
+    const size_t total     = prefixLen + msgLen + 2;
+    char* out = response.tryUseInline(total);
+    if (!out) {
+        auto buffer = std::unique_ptr<char[]>(new char[total]);
+        out = buffer.get();
+        response.setOwnedBuffer(std::move(buffer), total);
+    }
 
     if (prefixLen) std::memcpy(out, RESP_ERROR_PREFIX, prefixLen);
     if (msgLen)    std::memcpy(out + prefixLen, message, msgLen);
     out[prefixLen + msgLen]     = RESP_CR;
     out[prefixLen + msgLen + 1] = RESP_LF;
 
-    response.size  = prefixLen + msgLen + 2;
-    response.data  = out;
-    response.owned = std::move(buffer);
     return response;
 }
 

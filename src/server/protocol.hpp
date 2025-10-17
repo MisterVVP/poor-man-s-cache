@@ -7,6 +7,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+#include <utility>
+#include <limits>
 
 namespace server {
 
@@ -19,8 +21,15 @@ namespace server {
     inline constexpr char RESP_LF = '\n';
     inline constexpr char RESP_ERROR_PREFIX[] = "-ERR ";
     inline constexpr char RESP_NULL_BULK[] = "$-1\r\n";
+    static constexpr const char* MULTI_STR = "MULTI";
+    static constexpr const char* EXEC_STR = "EXEC";
+    static constexpr const char* DISCARD_STR = "DISCARD";
+    static constexpr const char* QUEUED_STR = "QUEUED";
+    static constexpr const char* RESP_ERR_MULTI_NESTED = "ERR MULTI calls can not be nested";
+    static constexpr const char* RESP_ERR_EXEC_NO_MULTI = "ERR EXEC without MULTI";
+    static constexpr const char* RESP_ERR_DISCARD_NO_MULTI = "ERR DISCARD without MULTI";
+    static constexpr const char* RESP_ERR_EXEC_ABORTED = "EXECABORT Transaction discarded because of previous errors.";
     static constexpr const char* OK = "OK";
-    static constexpr const char* QUEUED = "QUEUED";
     static constexpr const char* NOTHING = "(nil)";
     static constexpr const char* KEY_NOT_EXISTS = "ERROR: Key does not exist";
     static constexpr const char* INTERNAL_ERROR = "ERROR: Internal error";
@@ -33,10 +42,6 @@ namespace server {
     static constexpr const char* GET_STR = "GET";
     static constexpr const char* SET_STR = "SET";
     static constexpr const char* DEL_STR = "DEL";
-    static constexpr const char* MULTI_STR = "MULTI";
-    static constexpr const char* EXEC_STR = "EXEC";
-    static constexpr const char* DISCARD_STR = "DISCARD";
-
     /// @brief Query codes, 0: Reserved, 1: GET
     enum QueryCode : uint_fast8_t {
         UnknownQuery = 0,
@@ -60,12 +65,20 @@ namespace server {
         const char* data = nullptr;
         size_t size = 0;
         std::unique_ptr<char[]> owned;
+        uint16_t inlineIndex = std::numeric_limits<uint16_t>::max();
 
         ResponsePacket() = default;
-        ResponsePacket(ResponsePacket&&) noexcept = default;
-        ResponsePacket& operator=(ResponsePacket&&) noexcept = default;
+        ResponsePacket(ResponsePacket&& other) noexcept { *this = std::move(other); }
+        ResponsePacket& operator=(ResponsePacket&& other) noexcept;
         ResponsePacket(const ResponsePacket&) = delete;
         ResponsePacket& operator=(const ResponsePacket&) = delete;
+        ~ResponsePacket() noexcept;
+
+        char* tryUseInline(size_t required) noexcept;
+        void setOwnedBuffer(std::unique_ptr<char[]> buffer, size_t length) noexcept;
+        void setStaticData(const char* ptr, size_t length) noexcept;
+
+        bool usesInlineStorage() const noexcept { return inlineIndex != std::numeric_limits<uint16_t>::max(); }
     };
 
     struct RequestView {
@@ -101,4 +114,7 @@ namespace server {
     ResponsePacket makeRespArray(const std::vector<ResponsePacket>& elements);
     ResponsePacket makeRespError(const char* message);
     ResponsePacket makeErrorResponse(RequestProtocol protocol, const char* message);
+
+    void setRespInlineCapacity(std::size_t capacity) noexcept;
+    std::size_t respInlineCapacity() noexcept;
 }

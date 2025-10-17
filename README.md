@@ -43,7 +43,7 @@ Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>)
 Lunix kernel settings used as much as possible for both local and docker setups can be found in local_server_setup.bash
 
 ##### Local setup
-- Ubuntu (with high end processor and half gbit internet).
+- Ubuntu 24.04 kernel 6.14.0-27-generic (with high end processor and half gbit internet).
 - Docker on Ubuntu or Windows (with high end processor and half gbit internet)
 
 ##### CI setup 

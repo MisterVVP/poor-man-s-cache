@@ -69,7 +69,7 @@ def send_command_to_custom_cache(command: str, bufSize: int):
                         break
                 except socket.timeout:
                     logger.error("Socket read timeout")
-                    exit(1)
+                    sys.exit(1)
                     return ""
                 except socket.error as e:
                     logger.error(e)
@@ -150,7 +150,7 @@ def preload_json_files():
             expectedResponse = "+OK" if cache_type == 'redis' else "OK"
             if response != expectedResponse:
                 logger.error(f"Failed to store {key} in cache. Response: {response}")
-                exit(1)
+                sys.exit(1)
             
             logger.info(f"Successfully stored {key} in cache.")
             time.sleep(delay_sec)
@@ -167,16 +167,16 @@ def preload_json_files():
                 if isBigData:
                     if len(response) != requestSize:
                         logger.error(f"Failed to retrieve {key} from cache! requestSize:{requestSize}, len(response): {len(response)}")
-                        exit(1)
+                        sys.exit(1)
                 else:
                     if response != json_content:
                         logger.error(f"Failed to retrieve {key} from cache! Response: {response}")
-                        exit(1)
+                        sys.exit(1)
             
             logger.info(f"Successfully retrieved {key} from cache.")
         except Exception as e:
             logger.error(f"Error processing {file_name}: {e}")
-            exit(1)
+            sys.exit(1)
 
 def test_iteration(x):
     """Perform one test iteration with SET and GET commands using retry logic."""
@@ -217,8 +217,8 @@ if __name__ == "__main__":
     time.sleep(delay_sec)
     load_test_res = run_load_tests()
     if load_test_res != 0:
-        exit(load_test_res)
+        sys.exit(load_test_res)
     logger.info(f"Deleting everything by sending DEL commands after {delay_sec} seconds...\n")
     time.sleep(delay_sec)
     del_res = delete_everything()
-    exit(del_res)
+    sys.exit(del_res)
