@@ -10,27 +10,29 @@ namespace {
 
     struct RespInlineArena {
         std::array<std::array<char, RESP_INLINE_CAPACITY>, RESP_INLINE_SLOTS> buffers{};
-        std::array<bool, RESP_INLINE_SLOTS> used{};
+        std::array<uint16_t, RESP_INLINE_SLOTS> freelist{};
+        uint16_t freeCount = RESP_INLINE_SLOTS;
+
+        RespInlineArena() noexcept {
+            for (uint16_t i = 0; i < RESP_INLINE_SLOTS; ++i) {
+                // Fill the freelist in reverse order so we pop the lowest indices first.
+                freelist[i] = static_cast<uint16_t>(RESP_INLINE_SLOTS - 1 - i);
+            }
+        }
 
         char* acquire(uint16_t& index, size_t required) noexcept {
-            if (required > RESP_INLINE_CAPACITY) {
+            if (required > RESP_INLINE_CAPACITY || freeCount == 0) {
                 index = RESP_INLINE_INVALID;
                 return nullptr;
             }
-            for (uint16_t i = 0; i < RESP_INLINE_SLOTS; ++i) {
-                if (!used[i]) {
-                    used[i] = true;
-                    index = i;
-                    return buffers[i].data();
-                }
-            }
-            index = RESP_INLINE_INVALID;
-            return nullptr;
+
+            index = freelist[--freeCount];
+            return buffers[index].data();
         }
 
         void release(uint16_t index) noexcept {
-            if (index < RESP_INLINE_SLOTS) {
-                used[index] = false;
+            if (index < RESP_INLINE_SLOTS && freeCount < RESP_INLINE_SLOTS) {
+                freelist[freeCount++] = index;
             }
         }
 
