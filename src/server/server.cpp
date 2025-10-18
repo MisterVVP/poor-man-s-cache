@@ -122,7 +122,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
         const char* result = shard.processCommand(cmd);
         if (protocol == RequestProtocol::RESP) {
-            return result == OK ? makeRespSimpleString(result) : makeRespError(result);
+            return (result && std::strcmp(result, OK) == 0) ? makeRespSimpleString(result) : makeRespError(result);
         }
         return makeCustomResponse(result);
     };
@@ -133,10 +133,10 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
         const char* result = shard.processCommand(cmd);
         if (protocol == RequestProtocol::RESP) {
-            if (result == OK) {
+            if (result && std::strcmp(result, OK) == 0) {
                 return makeRespInteger(1);
             }
-            if (result == KEY_NOT_EXISTS) {
+            if (result && std::strcmp(result, KEY_NOT_EXISTS) == 0) {
                 return makeRespInteger(0);
             }
             return makeRespError(result);
