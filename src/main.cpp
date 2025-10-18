@@ -21,8 +21,9 @@ int main() {
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
     auto connQueueLimit = getFromEnv<uint_fast32_t>("CONN_QUEUE_LIMIT", false, 1048576);
     auto enableCompression = getFromEnv<bool>("ENABLE_COMPRESSION", false, true);
+    auto respInlineCapacity = getFromEnv<std::size_t>("RESP_INLINE_CAPACITY", false, static_cast<std::size_t>(255));
 
-    ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression };
+    ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression, respInlineCapacity };
 
     CacheServer cacheServer { serverSettings };
 

@@ -43,6 +43,14 @@ jobs:
       run: docker compose --profile tests-pipelined up
       timeout-minutes: 5
 
+    - name: Run load and functional tests (RESP protocol)
+      run: docker compose --profile tests-resp up
+      timeout-minutes: 10
+
+    - name: Run load and functional tests (RESP protocol, pipelined mode enabled)
+      run: docker compose --profile tests-resp-pipelined up
+      timeout-minutes: 5
+
     - name: Run load and functional tests (request-per-connection clients)
       run: docker compose --profile tests-req-per-conn up
       timeout-minutes: 10

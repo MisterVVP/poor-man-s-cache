@@ -51,6 +51,32 @@ services:
       - cache_network
     command: ["tcp_server_test.py", "-p"]
 
+  tests-resp:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+      - CACHE_TYPE=resp
+    profiles:
+      - tests-resp
+    networks:
+      - cache_network
+    command: ["tcp_server_test.py", "--resp"]
+
+  tests-resp-pipelined:
+    extends:
+      file: common-compose-config.yaml
+      service: tests-common
+    environment:
+      - CACHE_HOST=cache
+      - CACHE_TYPE=resp
+    profiles:
+      - tests-resp-pipelined
+    networks:
+      - cache_network
+    command: ["tcp_server_test.py", "--resp", "-p"]
+
   tests-req-per-conn:
     extends:
       file: common-compose-config.yaml

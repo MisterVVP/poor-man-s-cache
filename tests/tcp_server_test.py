@@ -9,22 +9,16 @@ parser = argparse.ArgumentParser(description="Cache server functional tests")
 parser.add_argument('-p', '--pipeline', action='store_true', help='Use pipelining for requests')
 parser.add_argument('-b', '--batch_size', type=int, default=16, help='Batch size for pipelined requests')
 parser.add_argument('--redis', action='store_true', help='Use Redis RESP protocol instead of custom server')
+parser.add_argument('--resp', action='store_true', help='Use RESP protocol when talking to cache server')
 
 args, _ = parser.parse_known_args()
 pipelining_enabled = args.pipeline
 batch_size = args.batch_size
 use_redis = args.redis
-redis_port = 6379
+use_resp = args.resp
 
-redis = None
-if use_redis:
-    try:
-        import redis as redis_lib
-        redis = redis_lib
-    except ModuleNotFoundError as e:
-        logger = logging.getLogger(__name__)
-        logger.error("Redis library is required for --redis mode")
-        sys.exit(1)
+if use_redis and use_resp:
+    parser.error("--redis and --resp modes are mutually exclusive")
 
 # Logger config
 logger = logging.getLogger(__name__)
@@ -46,34 +40,54 @@ MSG_SEPARATOR = '\x1F'
 ENCODED_SEPARATOR = MSG_SEPARATOR.encode()
 from connection_pool import ConnectionPool
 
+redis_host = os.environ.get('REDIS_HOST', host)
+redis_port = int(os.environ.get('REDIS_PORT', 6379))
+redis_client_factory = None
+
+if use_redis or use_resp:
+    try:
+        import redis as redis_lib
+    except ModuleNotFoundError:
+        logger.error("Redis library is required for Redis/RESP modes")
+        sys.exit(1)
+
+    redis = redis_lib
+    target_host = host if use_resp else redis_host
+    target_port = port if use_resp else redis_port
+
+    def redis_client_factory():
+        return redis.Redis(host=target_host, port=target_port, decode_responses=True)
+
+
+async def _send_single_command(command: str, reader, writer, buf_size=1024):
+    command_with_sep = command + MSG_SEPARATOR
+    writer.write(command_with_sep.encode())
+    await writer.drain()
+
+    response = bytearray()
+    if command.startswith(("SET", "DEL")):
+        response = await reader.readuntil(ENCODED_SEPARATOR)
+        if not response:
+            raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+    else:
+        while True:
+            chunk = await reader.read(buf_size)
+            if not chunk:
+                raise ConnectionError("Server closed connection (EOF) unexpectedly.")
+            response.extend(chunk)
+            if ENCODED_SEPARATOR in chunk:
+                break
+
+    return response.decode().rstrip(MSG_SEPARATOR)
+
 async def send_command(command: str, conn_pool: ConnectionPool, buf_size=1024):
     reader, writer = await conn_pool.acquire()
     discard_connection = False
 
     try:
-        command += MSG_SEPARATOR
-        writer.write(command.encode())
-        await writer.drain()
+        return await _send_single_command(command, reader, writer, buf_size)
 
-        response = bytearray()
-        if command.startswith(("SET", "DEL")):
-            response = await reader.readuntil(ENCODED_SEPARATOR)
-            if not response:
-                discard_connection = True
-                raise ConnectionError("Server closed connection (EOF) unexpectedly.")
-        else:
-            while True:
-                chunk = await reader.read(buf_size)
-                if not chunk:
-                    discard_connection = True
-                    raise ConnectionError("Server closed connection (EOF) unexpectedly.")
-                response.extend(chunk)
-                if ENCODED_SEPARATOR in chunk:
-                    break
-
-        return response.decode().rstrip(MSG_SEPARATOR)
-
-    except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
+    except (BrokenPipeError, ConnectionResetError, ConnectionError, asyncio.IncompleteReadError) as e:
         discard_connection = True
         logger.warning(f"Connection error, discarding connection: {e}")
         raise
@@ -120,13 +134,13 @@ async def preload_json_files(conn_pool):
         logger.info(f"Stored {key}")
         await asyncio.sleep(delay_sec)
 
-def preload_json_files_redis():
+def preload_json_files_redis(client_factory):
     logger.info("Preloading JSON files for Redis...")
     if not os.path.exists(data_folder):
         logger.warning("Data folder not found. Skipping.")
         return
 
-    client = redis.Redis(host=host, port=redis_port, decode_responses=True)
+    client = client_factory()
     for file_name in filter(lambda f: f.endswith('.json'), os.listdir(data_folder)):
         with open(os.path.join(data_folder, file_name), 'r', encoding='utf-8') as f:
             content = f.read()
@@ -136,27 +150,16 @@ def preload_json_files_redis():
             sys.exit(1)
         logger.info(f"Stored {key}")
         time.sleep(delay_sec)
+    try:
+        client.close()
+    except AttributeError:
+        pass
 
 async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=False, batch_size=1):
     reader, writer = await asyncio.open_connection(host, port)
 
     async def send_command(command: str):
-        command += MSG_SEPARATOR
-        writer.write(command.encode())
-        await writer.drain()
-
-        response = bytearray()
-        if command.startswith(("SET", "DEL")):
-            response = await reader.readuntil(ENCODED_SEPARATOR)
-        else:
-            while True:
-                chunk = await reader.read(8096)
-                if not chunk:
-                    break
-                response.extend(chunk)
-                if ENCODED_SEPARATOR in chunk:
-                    break
-        return response.decode().rstrip(MSG_SEPARATOR)
+        return await _send_single_command(command, reader, writer, buf_size=8096)
 
     async def send_with_retry(command, expected_response, retries=1):
         nonlocal reader, writer
@@ -222,10 +225,17 @@ async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=
                 else:
                     raise ValueError("Unknown task_type")
 
-            writer.write(MSG_SEPARATOR.join(commands).encode() + ENCODED_SEPARATOR)
+            payload = MSG_SEPARATOR.join(commands).encode() + ENCODED_SEPARATOR
+
+            writer.write(payload)
             await writer.drain()
             for exp in expected:
-                resp = await reader.readuntil(ENCODED_SEPARATOR)
+                try:
+                    resp = await reader.readuntil(ENCODED_SEPARATOR)
+                except Exception as exc:
+                    logger.error(f"Pipeline read failed: {exc}")
+                    results.append(False)
+                    continue
                 results.append(resp.decode().rstrip(MSG_SEPARATOR) == exp)
             i = batch_end
 
@@ -233,8 +243,11 @@ async def worker_main_single_connection(start_idx, end_idx, task_type, pipeline=
     await writer.wait_closed()
     return len(results) - sum(results)  # number of failures
 
-def redis_worker_main(start_idx, end_idx, task_type, pipeline=False, batch_size=1):
-    client = redis.Redis(host=host, port=redis_port, decode_responses=True)
+def redis_worker_main(start_idx, end_idx, task_type, pipeline=False, batch_size=1, client_factory=None):
+    if client_factory is None:
+        raise ValueError("Redis client factory must be provided for Redis/RESP modes")
+
+    client = client_factory()
     results = []
 
     if not pipeline:
@@ -299,20 +312,32 @@ def redis_worker_main(start_idx, end_idx, task_type, pipeline=False, batch_size=
                     results.append(ok and val == f"value{j}" and missing is None)
             i = batch_end
 
+    try:
+        client.close()
+    except AttributeError:
+        pass
+
     return len(results) - sum(results)
 
 
 def run_worker(start_idx, end_idx, task_type, pipeline=False, batch_size=1):
-    if use_redis:
-        return redis_worker_main(start_idx, end_idx, task_type, pipeline, batch_size)
+    if use_redis or use_resp:
+        return redis_worker_main(
+            start_idx,
+            end_idx,
+            task_type,
+            pipeline,
+            batch_size,
+            client_factory=redis_client_factory,
+        )
 
     return asyncio.run(
         worker_main_single_connection(start_idx, end_idx, task_type, pipeline, batch_size)
     )
 
 async def run_preload():
-    if use_redis:
-        preload_json_files_redis()
+    if use_redis or use_resp:
+        preload_json_files_redis(redis_client_factory)
     else:
         pool = ConnectionPool(host, port, pool_size)
         await pool.initialize()
@@ -339,6 +364,8 @@ def run_parallel(task_type, test_name, requests_multiplier=1, pipeline=False, ba
     use_redis_str = ""
     if use_redis:
         use_redis_str = "[REDIS] "
+    elif use_resp:
+        use_redis_str = "[RESP] "
     logger.info(f"{use_redis_str}Running {test_name} with {iterations_count} iterations {num_processes} processes and {chunk_size} chunks per process. {pipelining_log_str}")
     start = time.time()
     ctx = multiprocessing.get_context("fork")

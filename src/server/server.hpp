@@ -59,6 +59,9 @@ namespace server {
 
         /// @brief Enable compression of stored values. Disable if RPS and processing speed is more important than memory consumption
         bool enableCompression = false;
+
+        /// @brief Inline RESP response capacity before falling back to heap allocations
+        std::size_t respInlineCapacity = 255;
     };
 
     class CacheServer : NonCopyableOrMovable {
@@ -91,11 +94,11 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             AsyncReadTask readRequestAsync(int client_fd);
-            ProcessRequestTask processRequest(std::string_view requestData, int client_fd);
-            const char* processRequestSync(std::string_view requestData);
+            ProcessRequestTask processRequest(const RequestView& request, int client_fd);
+            ResponsePacket processRequestSync(const RequestView& request, ConnectionData& connData);
             HandleReqTask handleRequests();
-            AsyncSendTask sendResponse(int client_fd, const char* response);
-            void sendResponses(int client_fd, const std::vector<const char*>& responses);
+            AsyncSendTask sendResponse(int client_fd, const ResponsePacket& response);
+            void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
             void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
         public:
             CacheServer(const ServerSettings settings = ServerSettings{});

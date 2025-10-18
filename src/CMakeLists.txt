@@ -2,6 +2,7 @@ add_executable(
   ${PROJECT_NAME} 
   main.cpp
   server/coroutines.cpp
+  server/protocol.cpp
   server/server.cpp
   server/shard.cpp
   server/conn_manager.hpp
