@@ -8,7 +8,7 @@
 using namespace server;
 
 int main() {
-    std::queue<CacheServerMetrics> serverChannel;
+    MetricsChannel serverChannel;
 
     auto metricsHost = getFromEnv<const char*>("METRICS_HOST", true);
     auto metricsPort = getFromEnv<int>("METRICS_PORT", true);
@@ -48,10 +48,9 @@ int main() {
             std::cout << "Metrics updater thread is running!" << std::endl;
             while (!stopToken.stop_requested())
             {
-                while (!serverChannel.empty()) {
-                    auto serverMetrics = serverChannel.front();
+                CacheServerMetrics serverMetrics{0, 0, 0, 0};
+                while (serverChannel.try_pop(serverMetrics)) {
                     metricsServer.UpdateMetrics(serverMetrics);
-                    serverChannel.pop();
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(2));
             }
