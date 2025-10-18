@@ -4,6 +4,29 @@
 #include <atomic>
 #include <memory>
 
+namespace server {
+    const char MULTI_STR[] = "MULTI";
+    const char EXEC_STR[] = "EXEC";
+    const char DISCARD_STR[] = "DISCARD";
+    const char QUEUED_STR[] = "QUEUED";
+    const char RESP_ERR_MULTI_NESTED[] = "ERR MULTI calls can not be nested";
+    const char RESP_ERR_EXEC_NO_MULTI[] = "ERR EXEC without MULTI";
+    const char RESP_ERR_DISCARD_NO_MULTI[] = "ERR DISCARD without MULTI";
+    const char RESP_ERR_EXEC_ABORTED[] = "EXECABORT Transaction discarded because of previous errors.";
+    const char OK[] = "OK";
+    const char NOTHING[] = "(nil)";
+    const char KEY_NOT_EXISTS[] = "ERROR: Key does not exist";
+    const char INTERNAL_ERROR[] = "ERROR: Internal error";
+    const char INVALID_COMMAND_CODE[] = "ERROR: Invalid command code";
+    const char INVALID_QUERY_CODE[] = "ERROR: Invalid query code";
+    const char UNKNOWN_COMMAND[] = "ERROR: Unknown command";
+    const char UNABLE_TO_PARSE_REQUEST_ERROR[] = "ERROR: Unable to parse request";
+    const char INVALID_COMMAND_FORMAT[] = "ERROR: Invalid command format";
+    const char GET_STR[] = "GET";
+    const char SET_STR[] = "SET";
+    const char DEL_STR[] = "DEL";
+}
+
 namespace {
     constexpr uint16_t RESP_INLINE_INVALID = std::numeric_limits<uint16_t>::max();
     constexpr size_t RESP_INLINE_SLOTS = 256;
@@ -46,10 +69,17 @@ namespace {
         {server::INVALID_COMMAND_FORMAT, RESP_ERR_INVALID_COMMAND_FORMAT_PAYLOAD, sizeof(RESP_ERR_INVALID_COMMAND_FORMAT_PAYLOAD) - 1},
     };
 
+    inline bool stringsEqual(const char* lhs, const char* rhs) noexcept {
+        return lhs && rhs && std::strcmp(lhs, rhs) == 0;
+    }
+
     template <std::size_t N>
     constexpr const StaticResponseData* findStaticResponse(const StaticResponseData (&responses)[N], const char* message) noexcept {
+        if (!message) {
+            return nullptr;
+        }
         for (const auto& response : responses) {
-            if (response.message == message) {
+            if (stringsEqual(response.message, message)) {
                 return &response;
             }
         }
