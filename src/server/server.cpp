@@ -604,7 +604,7 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
     }
 }
 
-void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
+void CacheServer::metricsUpdater(MetricsChannel& channel, std::stop_token stopToken)
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
@@ -613,7 +613,7 @@ void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::s
 }
 
 
-int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
+int CacheServer::Start(MetricsChannel& channel)
 {
     isRunning = true;
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken) {
@@ -645,7 +645,9 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
         std::cout << "Exiting requests handler thread..." << std::endl;
     });
 
-    shutdownLatch.wait();   
+    std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
+
+    shutdownLatch.wait();
     return resultCode;
 }
 
