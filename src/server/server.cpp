@@ -492,6 +492,7 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
 
     co_return ReadRequestResult{ ReqReadOperationResult::AwaitingData };
 }
+
 AsyncSendTask CacheServer::sendResponse(int client_fd, const ResponsePacket& response) {
     char sep = MSG_SEPARATOR;
     struct iovec iov[2];

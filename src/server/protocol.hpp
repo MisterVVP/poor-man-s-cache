@@ -9,6 +9,8 @@
 #include <vector>
 #include <utility>
 #include <limits>
+#include <array>
+#include <atomic>
 
 namespace server {
 
