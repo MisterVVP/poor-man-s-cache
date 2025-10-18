@@ -363,10 +363,9 @@ done
 - Test edge case scenarios
 - Integrate valgrind checks into CI
 - More corouties + refactor coroutine code to templates & other fancy things (if that won't hurt performance)
-- Work on error responses from cache server
+- Replace server metrics with wide observability events. Improve integration between the main server and the metrics server.
 - Support key expiration, support more operations.
 - Check if we can reduce memory usage during decompression as well.
-- Integration between the main server and the metrics server can be improved.
 - Continue improving collision resolution (endless task, tbh...).
 - Check if there are better ways of avoiding double hash calculation in the server and KVS (right now we just provide extra public methods in `kvs.cpp` which accept hash as an argument).
 - There is an opportunity to try out Robot Framework for testing & writing test cases (I've never used that tool). OR just use [Cucumber for Golang aka Godog](https://github.com/cucumber/godog) tests, which I know.
