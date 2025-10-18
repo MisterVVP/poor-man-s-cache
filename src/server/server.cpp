@@ -558,7 +558,7 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
         if (response.protocol == RequestProtocol::Custom) {
             separators.push_back(MSG_SEPARATOR);
             iovec sepVec{};
-            sepVec.iov_base = reinterpret_cast<void*>(&separators.back());
+            sepVec.iov_base = static_cast<void*>(&separators.back());
             sepVec.iov_len = 1;
             iov.push_back(sepVec);
             totalRequired += 1;
