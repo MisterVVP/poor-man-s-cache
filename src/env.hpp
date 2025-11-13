@@ -31,7 +31,7 @@ T getFromEnv(const char* env_var_name, bool isRequired, T defaultVal = T()) {
     }
 
     if (isRequired) {
-        std::cerr << "Environment variable " << env_var_name << " not found." << std::endl;
+        std::cerr << "Environment variable " << env_var_name << " not found.\n";
         std::exit(1);
     }
 

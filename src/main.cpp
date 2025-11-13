@@ -45,7 +45,7 @@ int main() {
     auto metricsUpdaterThread = std::jthread(
         [&serverChannel, &metricsServer](std::stop_token stopToken)
         {
-            std::cout << "Metrics updater thread is running!" << std::endl;
+            std::cout << "Metrics updater thread is running!\n";
             while (!stopToken.stop_requested())
             {
                 CacheServerMetrics serverMetrics{0, 0, 0};
@@ -54,7 +54,7 @@ int main() {
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(2));
             }
-            std::cout << "Exiting metrics updater thread..." << std::endl;
+            std::cout << "Exiting metrics updater thread...\n";
         }
     );
 

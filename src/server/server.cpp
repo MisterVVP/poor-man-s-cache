@@ -77,7 +77,7 @@ CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numS
     connManager = std::make_unique<ConnManager>(epoll_fd);
 
 #ifndef NDEBUG
-    std::cout << "Initializing " << numShards << " server shards…" << std::endl;
+    std::cout << "Initializing " << numShards << " server shards…\n";
 #endif
     serverShards.reserve(numShards);
     KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
@@ -336,7 +336,7 @@ HandleReqTask CacheServer::handleRequests()
             co_return event_count;
         } else if (event_count == 0) {
 #ifndef NDEBUG
-            std::cout << "handleRequests finished without events to handle!" << std::endl;
+            std::cout << "handleRequests finished without events to handle!\n";
 #endif
             co_yield event_count;
         } else {
@@ -366,7 +366,7 @@ HandleReqTask CacheServer::handleRequests()
 #endif
                 auto readResult = co_await readers[i];
                 if (readResult.operationResult == ReqReadOperationResult::Failure) {
-                    ++numErrors;
+                    //TODO: add special handling?
                     continue;
                 }
 
@@ -620,19 +620,19 @@ int CacheServer::Start(MetricsChannel& channel)
         metricsUpdater(channel, stopToken);
     });
 
-    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
+    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready\n";
 
     int resultCode = 0;
 
     connManagerThread = std::jthread([this](std::stop_token stopToken) {
-        std::cout << "Connection manager thread is running!" << std::endl;
+        std::cout << "Connection manager thread is running!\n";
         connManager->acceptConnections(server_fd, stopToken);
         shutdownLatch.count_down();
-        std::cout << "Exiting connection manager thread..." << std::endl;
+        std::cout << "Exiting connection manager thread...\n";
     });
 
     reqHandlerThread = std::jthread([this](std::stop_token stopToken) {
-        std::cout << "Requests handler thread is running!" << std::endl;
+        std::cout << "Requests handler thread is running!\n";
         auto hrt = handleRequests();
         while (!stopToken.stop_requested()) {
             auto events_processed = hrt.next_value();
@@ -642,7 +642,7 @@ int CacheServer::Start(MetricsChannel& channel)
             // TODO: try to recover when events_processed = -1
         }
         shutdownLatch.count_down();
-        std::cout << "Exiting requests handler thread..." << std::endl;
+        std::cout << "Exiting requests handler thread...\n";
     });
 
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
