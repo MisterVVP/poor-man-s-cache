@@ -31,12 +31,6 @@ void MetricsServer::RegisterMetrics()
                         .Help("Total number of server requests")
                         .Register(*registry)
                         .Add({});
-
-    server_events_per_batch = &BuildGauge()
-                        .Name("server_events_per_batch")
-                        .Help("Number of processed events per batch")
-                        .Register(*registry)
-                        .Add({});
 }
 
 MetricsServer::MetricsServer(std::string metrics_url)
@@ -51,7 +45,6 @@ MetricsServer::MetricsServer(std::string metrics_url)
 void MetricsServer::UpdateMetrics(CacheServerMetrics& serverMetrics)
 {
     server_num_active_connections->Set(serverMetrics.numActiveConnections);
-    server_events_per_batch->Set(serverMetrics.eventsPerBatch);
 
     auto numErrorsInc = serverMetrics.numErrors - server_num_errors_total->Value();
     server_num_errors_total->Increment(numErrorsInc);

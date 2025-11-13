@@ -159,7 +159,13 @@ namespace server {
 #endif
                 }
                 connections.erase(fd);
-                --activeConnectionsCounter;
+                if (activeConnectionsCounter > 0) {
+                    --activeConnectionsCounter;
+                } else {
+#ifndef NDEBUG
+                    std::cout << "Attempt to decrease activeConnectionsCounter = 0\n";
+#endif
+                }
             };
 
             void acceptConnections(int server_fd, std::stop_token stopToken) {

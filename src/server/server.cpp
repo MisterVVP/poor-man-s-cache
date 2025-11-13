@@ -343,7 +343,6 @@ HandleReqTask CacheServer::handleRequests()
             std::vector<AsyncReadTask> readers;
             readers.reserve(MAX_EVENTS);
             numRequests += event_count;
-            eventsPerBatch = event_count;
             for (int i = 0; i < event_count; ++i) {
                 auto client_fd = epoll_events[i].data.fd;
                 if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
@@ -608,7 +607,8 @@ void CacheServer::metricsUpdater(MetricsChannel& channel, std::stop_token stopTo
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, connManager->activeConnectionsCounter, numRequests, eventsPerBatch));
+        CacheServerMetrics metrics(numErrors.load(std::memory_order_relaxed), connManager->activeConnectionsCounter.load(std::memory_order_relaxed), numRequests.load(std::memory_order_relaxed));
+        channel.push(metrics);
     }
 }
 

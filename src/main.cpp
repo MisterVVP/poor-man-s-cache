@@ -48,7 +48,7 @@ int main() {
             std::cout << "Metrics updater thread is running!" << std::endl;
             while (!stopToken.stop_requested())
             {
-                CacheServerMetrics serverMetrics{0, 0, 0, 0};
+                CacheServerMetrics serverMetrics{0, 0, 0};
                 while (serverChannel.try_pop(serverMetrics)) {
                     metricsServer.UpdateMetrics(serverMetrics);
                 }

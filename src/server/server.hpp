@@ -36,12 +36,12 @@ namespace server {
         uint_fast64_t numErrors = 0;
         uint_fast32_t numActiveConnections = 0;
         uint_fast64_t numRequests = 0;
-        uint_fast32_t eventsPerBatch = 0;
 
         CacheServerMetrics() = default;
 
-        CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests, uint_fast32_t eventsPerBatch):
-        numErrors(numErrors), numActiveConnections(numConnections), numRequests(numRequests), eventsPerBatch(eventsPerBatch) {}
+        CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests):
+            numErrors(numErrors), numActiveConnections(numConnections), numRequests(numRequests) {}
+
     };
 
     class MetricsChannel {
@@ -109,7 +109,6 @@ namespace server {
             std::mutex req_handle_mutex;
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
-            std::atomic<uint_fast32_t> eventsPerBatch = 0;
             std::atomic<bool> isRunning = false;
             std::jthread metricsUpdaterThread;
             std::jthread connManagerThread;
