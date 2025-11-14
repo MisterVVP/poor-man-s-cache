@@ -20,7 +20,6 @@ namespace metrics
             std::shared_ptr<Exposer> server;
 
             Gauge* server_num_active_connections = nullptr;
-            Gauge* server_events_per_batch = nullptr;
             Counter* server_num_requests_total = nullptr;
             Counter* server_num_errors_total = nullptr;
 

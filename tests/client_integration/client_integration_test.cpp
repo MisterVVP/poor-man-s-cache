@@ -123,6 +123,6 @@ int main() {
         expect(finalGet.notFound(), "Key should be missing after deletion");
     }
 
-    std::cout << "Client integration test completed successfully" << std::endl;
+    std::cout << "Client integration test completed successfully\n";
     return EXIT_SUCCESS;
 }

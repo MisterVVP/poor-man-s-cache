@@ -7,6 +7,8 @@
 #include <deque>
 #include <string_view>
 #include <mutex>
+#include <memory>
+#include <cstring>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -16,18 +18,54 @@
 #include "coroutines.hpp"
 #include "sockutils.hpp"
 #include "constants.hpp"
+#include "protocol.hpp"
 
 namespace server {
+    struct RespTransactionState {
+        enum class CommandType : uint8_t { Get, Set, Del };
+
+        struct QueuedCommand {
+            CommandType type = CommandType::Get;
+            const char* key = nullptr;
+            const char* value = nullptr;
+        };
+
+        const char* persistString(const char* input) {
+            if (!input || !*input) {
+                static constexpr char EMPTY[] = "";
+                return EMPTY;
+            }
+
+            const size_t length = std::strlen(input);
+            auto buffer = std::unique_ptr<char[]>(new char[length + 1]);
+            std::memcpy(buffer.get(), input, length + 1);
+            const char* result = buffer.get();
+            storage.emplace_back(std::move(buffer));
+            return result;
+        }
+
+        void clearQueue() {
+            queue.clear();
+            storage.clear();
+        }
+
+        bool active = false;
+        bool aborted = false;
+        std::vector<QueuedCommand> queue;
+        std::vector<std::unique_ptr<char[]>> storage;
+    };
     struct ConnectionData {
         timespec lastActivity {0, 0};
         int epoll_fd = -1;
         std::vector<char> readBuffer;
-        std::deque<std::string_view> pendingRequests;
+        std::deque<RequestView> pendingRequests;
         size_t bytesToErase = 0;
+        std::unique_ptr<RespTransactionState> respTransaction;
         ConnectionData() = default;
         ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
             readBuffer.reserve(READ_BUFFER_SIZE);
         }
+        ~ConnectionData();
     };
 
     class ConnManager {
@@ -121,7 +159,13 @@ namespace server {
 #endif
                 }
                 connections.erase(fd);
-                --activeConnectionsCounter;
+                if (activeConnectionsCounter > 0) {
+                    --activeConnectionsCounter;
+                } else {
+#ifndef NDEBUG
+                    std::cout << "Attempt to decrease activeConnectionsCounter = 0\n";
+#endif
+                }
             };
 
             void acceptConnections(int server_fd, std::stop_token stopToken) {

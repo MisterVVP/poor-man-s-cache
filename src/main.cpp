@@ -8,7 +8,7 @@
 using namespace server;
 
 int main() {
-    std::queue<CacheServerMetrics> serverChannel;
+    MetricsChannel serverChannel;
 
     auto metricsHost = getFromEnv<const char*>("METRICS_HOST", true);
     auto metricsPort = getFromEnv<int>("METRICS_PORT", true);
@@ -21,8 +21,9 @@ int main() {
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
     auto connQueueLimit = getFromEnv<uint_fast32_t>("CONN_QUEUE_LIMIT", false, 1048576);
     auto enableCompression = getFromEnv<bool>("ENABLE_COMPRESSION", false, true);
+    auto respInlineCapacity = getFromEnv<std::size_t>("RESP_INLINE_CAPACITY", false, static_cast<std::size_t>(255));
 
-    ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression };
+    ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression, respInlineCapacity };
 
     CacheServer cacheServer { serverSettings };
 
@@ -44,17 +45,16 @@ int main() {
     auto metricsUpdaterThread = std::jthread(
         [&serverChannel, &metricsServer](std::stop_token stopToken)
         {
-            std::cout << "Metrics updater thread is running!" << std::endl;
+            std::cout << "Metrics updater thread is running!\n";
             while (!stopToken.stop_requested())
             {
-                while (!serverChannel.empty()) {
-                    auto serverMetrics = serverChannel.front();
+                CacheServerMetrics serverMetrics{0, 0, 0};
+                while (serverChannel.try_pop(serverMetrics)) {
                     metricsServer.UpdateMetrics(serverMetrics);
-                    serverChannel.pop();
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(2));
             }
-            std::cout << "Exiting metrics updater thread..." << std::endl;
+            std::cout << "Exiting metrics updater thread...\n";
         }
     );
 
