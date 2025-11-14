@@ -18,7 +18,7 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
     table = new Bucket[tableSize];
     initializeTable(table, tableSize);
 #ifndef NDEBUG
-    std::cout << "Table initialization finished!" << std::endl;
+    std::cout << "Table initialization finished!\n";
 #endif
 }
 
@@ -51,7 +51,7 @@ inline void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size)
         }
         delete[] tableToDelete;
 #ifndef NDEBUG
-        std::cout << "Table cleanup finished!" << std::endl;
+        std::cout << "Table cleanup finished!\n";
 #endif
     }
 
@@ -168,7 +168,7 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
 #ifndef NDEBUG
-    std::cerr << "Failed to insert key = " << key << " after " << attempt << " attempts." << std::endl;
+    std::cerr << "Failed to insert key = " << key << " after " << attempt << " attempts.\n";
 #endif
     return false;
 }
@@ -267,7 +267,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
 #ifndef NDEBUG
-    std::cerr << "Failed to find key during deletion, key = " << key << " after " << attempt << " attempts." << std::endl;
+    std::cerr << "Failed to find key during deletion, key = " << key << " after " << attempt << " attempts.\n";
 #endif
     return false;
 }

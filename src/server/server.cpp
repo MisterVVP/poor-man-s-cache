@@ -77,7 +77,7 @@ CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numS
     connManager = std::make_unique<ConnManager>(epoll_fd);
 
 #ifndef NDEBUG
-    std::cout << "Initializing " << numShards << " server shards…" << std::endl;
+    std::cout << "Initializing " << numShards << " server shards…\n";
 #endif
     serverShards.reserve(numShards);
     KeyValueStoreSettings kvsSettings { 2053, settings.enableCompression, true };
@@ -336,14 +336,13 @@ HandleReqTask CacheServer::handleRequests()
             co_return event_count;
         } else if (event_count == 0) {
 #ifndef NDEBUG
-            std::cout << "handleRequests finished without events to handle!" << std::endl;
+            std::cout << "handleRequests finished without events to handle!\n";
 #endif
             co_yield event_count;
         } else {
             std::vector<AsyncReadTask> readers;
             readers.reserve(MAX_EVENTS);
             numRequests += event_count;
-            eventsPerBatch = event_count;
             for (int i = 0; i < event_count; ++i) {
                 auto client_fd = epoll_events[i].data.fd;
                 if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
@@ -367,7 +366,7 @@ HandleReqTask CacheServer::handleRequests()
 #endif
                 auto readResult = co_await readers[i];
                 if (readResult.operationResult == ReqReadOperationResult::Failure) {
-                    ++numErrors;
+                    //TODO: add special handling?
                     continue;
                 }
 
@@ -604,35 +603,36 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
     }
 }
 
-void CacheServer::metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken)
+void CacheServer::metricsUpdater(MetricsChannel& channel, std::stop_token stopToken)
 {
     while (!stopToken.stop_requested()) {
         metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        channel.push(CacheServerMetrics(numErrors, connManager->activeConnectionsCounter, numRequests, eventsPerBatch));
+        CacheServerMetrics metrics(numErrors.load(std::memory_order_relaxed), connManager->activeConnectionsCounter.load(std::memory_order_relaxed), numRequests.load(std::memory_order_relaxed));
+        channel.push(metrics);
     }
 }
 
 
-int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
+int CacheServer::Start(MetricsChannel& channel)
 {
     isRunning = true;
     metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken) {
         metricsUpdater(channel, stopToken);
     });
 
-    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready" << std::endl;
+    std::cout << "Server started on port " << port << ", " << numShards << " shards are ready\n";
 
     int resultCode = 0;
 
     connManagerThread = std::jthread([this](std::stop_token stopToken) {
-        std::cout << "Connection manager thread is running!" << std::endl;
+        std::cout << "Connection manager thread is running!\n";
         connManager->acceptConnections(server_fd, stopToken);
         shutdownLatch.count_down();
-        std::cout << "Exiting connection manager thread..." << std::endl;
+        std::cout << "Exiting connection manager thread...\n";
     });
 
     reqHandlerThread = std::jthread([this](std::stop_token stopToken) {
-        std::cout << "Requests handler thread is running!" << std::endl;
+        std::cout << "Requests handler thread is running!\n";
         auto hrt = handleRequests();
         while (!stopToken.stop_requested()) {
             auto events_processed = hrt.next_value();
@@ -642,10 +642,12 @@ int CacheServer::Start(std::queue<CacheServerMetrics>& channel)
             // TODO: try to recover when events_processed = -1
         }
         shutdownLatch.count_down();
-        std::cout << "Exiting requests handler thread..." << std::endl;
+        std::cout << "Exiting requests handler thread...\n";
     });
 
-    shutdownLatch.wait();   
+    std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
+
+    shutdownLatch.wait();
     return resultCode;
 }
 

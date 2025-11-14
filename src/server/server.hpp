@@ -36,10 +36,39 @@ namespace server {
         uint_fast64_t numErrors = 0;
         uint_fast32_t numActiveConnections = 0;
         uint_fast64_t numRequests = 0;
-        uint_fast32_t eventsPerBatch = 0;
 
-        CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests, uint_fast32_t eventsPerBatch):
-        numErrors(numErrors), numActiveConnections(numConnections), numRequests(numRequests), eventsPerBatch(eventsPerBatch) {}
+        CacheServerMetrics() = default;
+
+        CacheServerMetrics(uint_fast64_t numErrors, uint_fast32_t numConnections, uint_fast64_t numRequests):
+            numErrors(numErrors), numActiveConnections(numConnections), numRequests(numRequests) {}
+
+    };
+
+    class MetricsChannel {
+        public:
+            void push(const CacheServerMetrics& metrics) {
+                std::scoped_lock lock(mutex);
+                queue.push(metrics);
+            }
+
+            bool try_pop(CacheServerMetrics& metrics) {
+                std::scoped_lock lock(mutex);
+                if (queue.empty()) {
+                    return false;
+                }
+                metrics = queue.front();
+                queue.pop();
+                return true;
+            }
+
+            bool empty() const {
+                std::scoped_lock lock(mutex);
+                return queue.empty();
+            }
+
+        private:
+            mutable std::mutex mutex;
+            std::queue<CacheServerMetrics> queue;
     };
 
     struct ServerSettings {
@@ -80,7 +109,6 @@ namespace server {
             std::mutex req_handle_mutex;
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
-            std::atomic<uint_fast32_t> eventsPerBatch = 0;
             std::atomic<bool> isRunning = false;
             std::jthread metricsUpdaterThread;
             std::jthread connManagerThread;
@@ -99,7 +127,7 @@ namespace server {
             HandleReqTask handleRequests();
             AsyncSendTask sendResponse(int client_fd, const ResponsePacket& response);
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
-            void metricsUpdater(std::queue<CacheServerMetrics>& channel, std::stop_token stopToken);
+            void metricsUpdater(MetricsChannel& channel, std::stop_token stopToken);
         public:
             CacheServer(const ServerSettings settings = ServerSettings{});
             ~CacheServer();
@@ -107,7 +135,7 @@ namespace server {
             /// @brief Starts processing incoming requests
             /// @param channel metrics queue to report to
             /// @return operation result, 0 - success, other values - failure
-            int Start(std::queue<CacheServerMetrics>& channel);
+            int Start(MetricsChannel& channel);
 
             /// @brief Gracefully stops server, restart is not (yet) supported
             void Stop() noexcept;
