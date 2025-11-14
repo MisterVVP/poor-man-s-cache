@@ -366,6 +366,7 @@ HandleReqTask CacheServer::handleRequests()
 #endif
                 auto readResult = co_await readers[i];
                 if (readResult.operationResult == ReqReadOperationResult::Failure) {
+
                     //TODO: add special handling?
                     continue;
                 }
@@ -454,6 +455,7 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
                 connData.pendingRequests.clear();
                 connData.readBuffer.clear();
                 connData.bytesToErase = 0;
+                connManager->closeConnection(client_fd);
                 co_return ReadRequestResult{ ReqReadOperationResult::Failure };
             }
 
