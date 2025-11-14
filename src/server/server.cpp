@@ -365,13 +365,8 @@ HandleReqTask CacheServer::handleRequests()
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
 #endif
                 auto readResult = co_await readers[i];
-                if (readResult.operationResult == ReqReadOperationResult::Failure) {
 
-                    //TODO: add special handling?
-                    continue;
-                }
-
-                if (readResult.operationResult == ReqReadOperationResult::AwaitingData) {
+                if (readResult.operationResult == ReqReadOperationResult::Failure || readResult.operationResult == ReqReadOperationResult::AwaitingData) {
                     continue;
                 }
 
