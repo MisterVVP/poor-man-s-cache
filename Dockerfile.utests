@@ -8,4 +8,4 @@ COPY . .
 ARG NUM_ELEMENTS=10000000
 ENV NUM_ELEMENTS=$NUM_ELEMENTS
 
-ENTRYPOINT [ "/app/run-all-tests.bash" ]
+ENTRYPOINT [ "/app/scripts/run-all-tests.bash" ]

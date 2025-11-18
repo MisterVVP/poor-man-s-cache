@@ -23,7 +23,7 @@ COPY --from=build /usr/local/include/prometheus/ /usr/local/include/prometheus/
 COPY --from=build /usr/local/lib/ /usr/local/lib/
 
 WORKDIR /callgrind
-COPY ./callgrind.bash ./callgrind.bash
+COPY ./scripts/callgrind.bash ./callgrind.bash
 
 EXPOSE 9001
 EXPOSE 8080

@@ -40,7 +40,7 @@ Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>)
 - N - total number of requests 
 
 #### Test setups
-Lunix kernel settings used as much as possible for both local and docker setups can be found in local_server_setup.bash
+Lunix kernel settings used as much as possible for both local and docker setups can be found in scripts/local_server_setup.bash
 
 ##### Local setup
 - Ubuntu 24.04 kernel 6.14.0-27-generic (with high end processor and half gbit internet).
@@ -172,7 +172,7 @@ docker run -it cache-tests:latest
 ### Local Ubuntu with sudo access
 Open terminal in repository root and apply system configuration via
 ```
-sudo bash ./local_server_setup.bash
+sudo bash ./scripts/local_server_setup.bash
 ```
 
 Open second terminal somewhere on your hard drive and install required dependencies
@@ -196,7 +196,7 @@ source .env
 
 Run unit tests:
 ```
-./run-all-tests.bash
+./scripts/run-all-tests.bash
 ```
 
 ### Static analysis (CodeQL)
@@ -345,7 +345,7 @@ docker compose -f docker-compose-local.yaml --profile tests-callgrind up
 
 ### Various helpful shell commands
 `sysctl -a` - Check that all required sysctl options were overwritten successfully in Docker.
-`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `sockmon.bash`).
+`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `scripts/sockmon.bash`).
 `echo -ne "SET key1 value1\x1F" | nc localhost 9001` - Send a single SET request to cache server (nice for quick testing)
 `echo -ne "GET key1\x1F" | nc localhost 9001` - Send a single GET request to cache server (nice for quick testing)
 
