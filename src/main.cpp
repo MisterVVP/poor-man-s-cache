@@ -8,14 +8,6 @@
 using namespace server;
 
 int main() {
-    MetricsChannel serverChannel;
-
-    auto metricsHost = getFromEnv<const char*>("METRICS_HOST", true);
-    auto metricsPort = getFromEnv<int>("METRICS_PORT", true);
-    auto metricsUrl = std::format("{}:{}", metricsHost, metricsPort);
-    metrics::MetricsServer metricsServer { metricsUrl };
-
-
     auto serverPort = getFromEnv<int>("SERVER_PORT", true);
     auto numShards = getFromEnv<uint_fast32_t>("NUM_SHARDS", false, 24);
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
@@ -42,21 +34,5 @@ int main() {
     signal(SIGINT, signalDispatcher); 
     signal(SIGTERM, signalDispatcher);
 
-    auto metricsUpdaterThread = std::jthread(
-        [&serverChannel, &metricsServer](std::stop_token stopToken)
-        {
-            std::cout << "Metrics updater thread is running!\n";
-            while (!stopToken.stop_requested())
-            {
-                CacheServerMetrics serverMetrics{0, 0, 0};
-                while (serverChannel.try_pop(serverMetrics)) {
-                    metricsServer.UpdateMetrics(serverMetrics);
-                }
-                std::this_thread::sleep_for(std::chrono::seconds(2));
-            }
-            std::cout << "Exiting metrics updater thread...\n";
-        }
-    );
-
-    return cacheServer.Start(serverChannel);
+    return cacheServer.Start();
 }

@@ -112,7 +112,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Query query{QueryCode::GET, keyPtr, hash};
-        const char* result = shard.processQuery(query);
+        auto result = shard.processQuery(query);
         return protocol == RequestProtocol::RESP ? makeRespBulkString(result) : makeCustomResponse(result);
     };
 
@@ -120,7 +120,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
-        const char* result = shard.processCommand(cmd);
+        auto result = shard.processCommand(cmd);
         if (protocol == RequestProtocol::RESP) {
             return (result && std::strcmp(result, OK) == 0) ? makeRespSimpleString(result) : makeRespError(result);
         }
@@ -131,7 +131,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
-        const char* result = shard.processCommand(cmd);
+        auto result = shard.processCommand(cmd);
         if (protocol == RequestProtocol::RESP) {
             if (result && std::strcmp(result, OK) == 0) {
                 return makeRespInteger(1);
@@ -600,22 +600,9 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
     }
 }
 
-void CacheServer::metricsUpdater(MetricsChannel& channel, std::stop_token stopToken)
-{
-    while (!stopToken.stop_requested()) {
-        metricsSemaphore.try_acquire_for(METRICS_UPDATE_FREQUENCY_SEC);
-        CacheServerMetrics metrics(numErrors.load(std::memory_order_relaxed), connManager->activeConnectionsCounter.load(std::memory_order_relaxed), numRequests.load(std::memory_order_relaxed));
-        channel.push(metrics);
-    }
-}
-
-
-int CacheServer::Start(MetricsChannel& channel)
+int CacheServer::Start()
 {
     isRunning = true;
-    metricsUpdaterThread = std::jthread([this, &channel](std::stop_token stopToken) {
-        metricsUpdater(channel, stopToken);
-    });
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready\n";
 
@@ -641,7 +628,15 @@ int CacheServer::Start(MetricsChannel& channel)
         shutdownLatch.count_down();
         std::cout << "Exiting requests handler thread...\n";
     });
+    auto env_port = std::getenv("PORT");
+    auto env_idx  = std::getenv("WORKER_INDEX");
+    auto env_cnt  = std::getenv("WORKER_COUNT");
 
+    std::fprintf(stderr,
+                "[startup] poor-man-s-cache: WORKER_INDEX=%s WORKER_COUNT=%s PORT=%s\n",
+                env_idx ? env_idx : "n/a",
+                env_cnt ? env_cnt : "n/a",
+                env_port ? env_port : "n/a");
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
 
     shutdownLatch.wait();

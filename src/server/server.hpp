@@ -127,15 +127,13 @@ namespace server {
             HandleReqTask handleRequests();
             AsyncSendTask sendResponse(int client_fd, const ResponsePacket& response);
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
-            void metricsUpdater(MetricsChannel& channel, std::stop_token stopToken);
         public:
             CacheServer(const ServerSettings settings = ServerSettings{});
             ~CacheServer();
 
             /// @brief Starts processing incoming requests
-            /// @param channel metrics queue to report to
             /// @return operation result, 0 - success, other values - failure
-            int Start(MetricsChannel& channel);
+            int Start();
 
             /// @brief Gracefully stops server, restart is not (yet) supported
             void Stop() noexcept;
