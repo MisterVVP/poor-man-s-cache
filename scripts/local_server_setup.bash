@@ -19,4 +19,3 @@ echo "DefaultLimitNOFILE=1048576" | sudo tee -a /etc/systemd/system.conf
 echo "DefaultLimitNOFILE=1048576" | sudo tee -a /etc/systemd/user.conf
 
 sudo sysctl --system
-
