@@ -17,6 +17,32 @@ High performance and minimalist cache server.
 
 ## Current progress
 
+### Clustered multi-worker mode (experimental)
+
+poor-man-s-cache can run as a cluster of N independent worker processes on a single host.
+
+Each worker:
+
+- runs in its own process
+- has its own in-memory key-value store
+- listens on its own TCP port
+
+There is **no shared memory and no replication** between workers. Each worker is a shard.
+Clients are responsible for routing keys to the correct shard (e.g. `shard = hash(key) % workerCount`).
+
+To start a local 24-worker cluster:
+
+```bash
+cmake --preset release
+cmake --build --preset release
+
+sudo ./scripts/local_server_setup.bash
+
+WORKER_COUNT=24 \
+BASE_PORT=9001 \
+scripts/run-cluster-local.bash
+```
+
 ### Functional tests
 
 #### Testing method

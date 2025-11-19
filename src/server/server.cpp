@@ -23,19 +23,15 @@ CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numS
     }
     if (setsockopt(server_fd, IPPROTO_TCP, TCP_DEFER_ACCEPT, &flag, sizeof(flag)) == -1) {
         close(server_fd);
-        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
+        throw std::system_error(errno, std::system_category(), "Failed to set TCP_DEFER_ACCEPT for server socket");
     }
     if (setsockopt(server_fd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag)) == -1) {
         close(server_fd);
-        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
+        throw std::system_error(errno, std::system_category(), "Failed to set TCP_QUICKACK for server socket");
     }
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
         close(server_fd);
         throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEADDR for server socket");
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof(flag)) == -1) {
-        close(server_fd);
-        throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEPORT for server socket");
     }
 
     int qlen = 2048;
@@ -330,15 +326,20 @@ HandleReqTask CacheServer::handleRequests()
 
         int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
         if (event_count == -1) {
-            if (errno != EINTR) {
+            if (errno == EINTR) {
+#ifndef NDEBUG
+                std::cout << "epoll_wait interrupted by signal (EINTR), retrying...\n";
+#endif
+                co_yield 0;
+            } else {
                 perror("epoll_wait failed");
+                co_yield -1;
             }
-            co_return event_count;
         } else if (event_count == 0) {
 #ifndef NDEBUG
-            std::cout << "handleRequests finished without events to handle!\n";
+            //TODO: this log is 'Trace' level, not even 'Debug' std::cout << "handleRequests finished without events to handle!\n";
 #endif
-            co_yield event_count;
+            co_yield 0;
         } else {
             std::vector<AsyncReadTask> readers;
             readers.reserve(MAX_EVENTS);
@@ -615,30 +616,22 @@ int CacheServer::Start()
         std::cout << "Exiting connection manager thread...\n";
     });
 
-    reqHandlerThread = std::jthread([this](std::stop_token stopToken) {
-        std::cout << "Requests handler thread is running!\n";
-        auto hrt = handleRequests();
-        while (!stopToken.stop_requested()) {
+    auto hrt = handleRequests();
+
+    std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
+    try {
+        while (isRunning) {
             auto events_processed = hrt.next_value();
-            if (!events_processed) {
+            if (events_processed <= 0) {
                 std::this_thread::sleep_for(PROCESS_REQ_DELAY);
             }
             // TODO: try to recover when events_processed = -1
         }
-        shutdownLatch.count_down();
-        std::cout << "Exiting requests handler thread...\n";
-    });
-    auto env_port = std::getenv("PORT");
-    auto env_idx  = std::getenv("WORKER_INDEX");
-    auto env_cnt  = std::getenv("WORKER_COUNT");
-
-    std::fprintf(stderr,
-                "[startup] poor-man-s-cache: WORKER_INDEX=%s WORKER_COUNT=%s PORT=%s\n",
-                env_idx ? env_idx : "n/a",
-                env_cnt ? env_cnt : "n/a",
-                env_port ? env_port : "n/a");
-    std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
-
+    }
+    catch (const std::exception& ex) {
+        std::cerr << "Unrecoverable exception during requests handling: " << ex.what() << '\n';
+        Stop();
+    }
     shutdownLatch.wait();
     return resultCode;
 }
@@ -650,11 +643,12 @@ void CacheServer::Stop() noexcept
     }
 
     std::cout << "Stopping server…\n";
-    isRunning        = false;
+    isRunning = false;
 
-    for (auto* t : { &metricsUpdaterThread, &connManagerThread, &reqHandlerThread }) {
+    for (auto* t : { &connManagerThread }) {
         t->request_stop();
     }
 
+    shutdownLatch.wait();
     std::cout << "Server stopped.\n";
 }

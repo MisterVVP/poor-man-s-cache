@@ -101,7 +101,6 @@ namespace server {
                     perror("clock_gettime() failed when registering connection");
                     return -1;
                 }
-                ++activeConnectionsCounter;
                 return 0; 
             };
 
@@ -123,7 +122,6 @@ namespace server {
             };
 
         public:
-            std::atomic<uint_fast32_t> activeConnectionsCounter;
             std::unordered_map<int, ConnectionData> connections;
 
             bool updateActivity(int fd) {
@@ -159,13 +157,6 @@ namespace server {
 #endif
                 }
                 connections.erase(fd);
-                if (activeConnectionsCounter > 0) {
-                    --activeConnectionsCounter;
-                } else {
-#ifndef NDEBUG
-                    std::cout << "Attempt to decrease activeConnectionsCounter = 0\n";
-#endif
-                }
             };
 
             void acceptConnections(int server_fd, std::stop_token stopToken) {
@@ -178,7 +169,7 @@ namespace server {
                             continue;
                         };
                     } else {
-                        if (activeConnectionsCounter > 0) {
+                        if (!connections.empty()) {
                             validateConnections();
                         }
                         if (errno == EINTR) {
@@ -193,7 +184,7 @@ namespace server {
                 } while (!stopToken.stop_requested());
             }
 
-            ConnManager(int epoll_fd): epoll_fd(epoll_fd), activeConnectionsCounter(0) {}
+            ConnManager(int epoll_fd): epoll_fd(epoll_fd) {}
     };
 }
 

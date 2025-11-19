@@ -103,16 +103,13 @@ namespace server {
                 RequestPart(char* part, size_t size, size_t location): part(part), size(size), location(location){}
             };
 
-            std::latch shutdownLatch{2};
-            std::binary_semaphore metricsSemaphore{0};
+            std::latch shutdownLatch{1};
             std::unique_ptr<ConnManager> connManager;
             std::mutex req_handle_mutex;
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<bool> isRunning = false;
-            std::jthread metricsUpdaterThread;
             std::jthread connManagerThread;
-            std::jthread reqHandlerThread;
 
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
