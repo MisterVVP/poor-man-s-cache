@@ -24,7 +24,7 @@ USE_CPU_PINNING="${USE_CPU_PINNING:-1}"
 START_CPU="${START_CPU:-0}"
 
 # NUMA binding; 1 = use numactl, 0 = off
-USE_NUMA="${USE_NUMA:-0}"
+USE_NUMA="${USE_NUMA:-1}"
 
 # Logs
 LOG_DIR="${LOG_DIR:-./logs/workers}"
@@ -108,7 +108,7 @@ for ((i=0; i<WORKER_COUNT; i++)); do
     pids+=( "$!" )
 done
 
-echo "Workers started: ${pids[*]}"
+echo "USE_NUMA=${USE_NUMA} USE_CPU_PINNING=${USE_CPU_PINNING}, workers started: ${pids[*]}"
 echo "Press Ctrl+C to stop."
 
 # Graceful shutdown
