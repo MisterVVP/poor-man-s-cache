@@ -398,6 +398,7 @@ HandleReqTask CacheServer::handleRequests()
             co_yield event_count;
         }
     }
+    co_return 0;
 }
 
 AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
@@ -609,20 +610,21 @@ int CacheServer::Start()
 
     int resultCode = 0;
 
-    connManagerThread = std::jthread([this](std::stop_token stopToken) {
-        std::cout << "Connection manager thread is running!\n";
-        connManager->acceptConnections(server_fd, stopToken);
-        shutdownLatch.count_down();
-        std::cout << "Exiting connection manager thread...\n";
-    });
+    auto acceptTask = connManager->acceptConnections(server_fd, isRunning);
 
     auto hrt = handleRequests();
 
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
     try {
         while (isRunning) {
+            auto accepted_count = acceptTask.next_value();
             auto events_processed = hrt.next_value();
-            if (events_processed <= 0) {
+            if (accepted_count < 0 || events_processed < 0) {
+                resultCode = -1;
+                break;
+            }
+
+            if (accepted_count == 0 && events_processed <= 0) {
                 std::this_thread::sleep_for(PROCESS_REQ_DELAY);
             }
             // TODO: try to recover when events_processed = -1
@@ -632,7 +634,7 @@ int CacheServer::Start()
         std::cerr << "Unrecoverable exception during requests handling: " << ex.what() << '\n';
         Stop();
     }
-    shutdownLatch.wait();
+
     return resultCode;
 }
 
@@ -644,11 +646,5 @@ void CacheServer::Stop() noexcept
 
     std::cout << "Stopping server…\n";
     isRunning = false;
-
-    for (auto* t : { &connManagerThread }) {
-        t->request_stop();
-    }
-
-    shutdownLatch.wait();
     std::cout << "Server stopped.\n";
 }
