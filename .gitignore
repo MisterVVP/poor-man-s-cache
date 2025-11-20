@@ -54,3 +54,4 @@ callgrind.out.*
 prometheus-cpp/
 tests/__pycache__/
 logs
+pmc-cluster-launcher

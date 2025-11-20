@@ -33,14 +33,10 @@ Clients are responsible for routing keys to the correct shard (e.g. `shard = has
 To start a local 24-worker cluster:
 
 ```bash
-cmake --preset release
-cmake --build --preset release
-
-sudo ./scripts/local_server_setup.bash
-
-WORKER_COUNT=24 \
-BASE_PORT=9001 \
-scripts/run-cluster-local.bash
+cmake --preset Release
+cmake --build ./out/build/Release
+go build -C ./launcher -o ../pmc-cluster-launcher
+./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
 ### Functional tests

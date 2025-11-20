@@ -7,8 +7,17 @@
 
 using namespace server;
 
-int main() {
-    auto serverPort = getFromEnv<int>("SERVER_PORT", true);
+int main(int argc, char* argv[]) {
+    std::string cliListen;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string_view(argv[i]) == "--listen") {
+            cliListen = argv[++i];
+            break;
+        }
+    }
+    std::cout << "cliListen = " << cliListen << std::endl;
+
+    auto serverPort = cliListen.empty() ? getFromEnv<int>("SERVER_PORT", true) : std::stoi(cliListen);
     auto numShards = getFromEnv<uint_fast32_t>("NUM_SHARDS", false, 24);
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
     auto connQueueLimit = getFromEnv<uint_fast32_t>("CONN_QUEUE_LIMIT", false, 1048576);
