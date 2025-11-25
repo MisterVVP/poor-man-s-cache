@@ -39,6 +39,13 @@ go build -C ./launcher -o ../pmc-cluster-launcher
 ./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
+To test clustered performance use 
+```bash
+python3 ./tcp_server_cluster_test.py -p -b 2048
+```
+
+Tweak batch size (-b) based on your system and network.
+
 ### Functional tests
 
 #### Testing method
@@ -74,13 +81,20 @@ Free github hosted runner hardware
 #### Test details results
 Local setup. 10 million requests per test suite, 96 test client processes forked
 
-##### Local Ubuntu  
+##### Local Ubuntu
+
 ###### Without pipelining
 more than 100 000 RPS.
+
 ###### With pipelining
 - more than 1 500 000 RPS (GET/DEL)
 - more than 1 000 000 RPS (SET)
 - around 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
+
+###### Local 24 node cluster with pipelining
+
+- 3 000 000 to 4 000 000 RPS (GET/DEL/SET)
+- around 7 500 000 RPS (SET key, GET key, GET non_existent_key) workflow  
 
 ##### Docker on Ubuntu  
 ###### Without pipelining

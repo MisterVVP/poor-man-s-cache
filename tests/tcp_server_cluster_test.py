@@ -42,7 +42,7 @@ def detect_workers(base_port, max_workers=256):
 
 parser = argparse.ArgumentParser(description="Clustered cache server functional tests")
 parser.add_argument("-p", "--pipeline", action="store_true", help="Use pipelining for requests")
-parser.add_argument("-b", "--batch_size", type=int, default=16, help="Batch size for pipelined requests")
+parser.add_argument("-b", "--batch_size", type=int, default=128, help="Batch size for pipelined requests")
 args, _ = parser.parse_known_args()
 pipelining_enabled = args.pipeline
 batch_size = args.batch_size

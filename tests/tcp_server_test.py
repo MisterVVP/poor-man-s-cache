@@ -7,7 +7,7 @@ import multiprocessing
 import argparse
 parser = argparse.ArgumentParser(description="Cache server functional tests")
 parser.add_argument('-p', '--pipeline', action='store_true', help='Use pipelining for requests')
-parser.add_argument('-b', '--batch_size', type=int, default=16, help='Batch size for pipelined requests')
+parser.add_argument('-b', '--batch_size', type=int, default=128, help='Batch size for pipelined requests')
 parser.add_argument('--redis', action='store_true', help='Use Redis RESP protocol instead of custom server')
 parser.add_argument('--resp', action='store_true', help='Use RESP protocol when talking to cache server')
 
