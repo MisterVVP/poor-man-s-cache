@@ -5,6 +5,24 @@ import logging
 import asyncio
 import multiprocessing
 import argparse
+import zlib
+
+def hash64(key_bytes: bytes) -> int:
+    # Simple 64-bit hash based on CRC32; inexpensive and stable
+    h32 = zlib.crc32(key_bytes) & 0xffffffff
+    return (h32 << 32) | h32
+
+
+def jump_consistent_hash(key_hash: int, buckets: int) -> int:
+    # John Lamping & Eric Veach (Google)
+    if buckets <= 0:
+        raise ValueError("buckets must be > 0")
+    b, j = -1, 0
+    while j < buckets:
+        b = j
+        key_hash = (key_hash * 2862933555777941757 + 1) & 0xffffffffffffffff
+        j = int((b + 1) * ((1 << 31) / ((key_hash >> 33) + 1)))
+    return b
 
 # discover how many ports are actually listening
 def detect_workers(base_port, max_workers=256):
@@ -72,8 +90,11 @@ async def _send_single_command(command: str, reader, writer, buf_size: int = 102
 
 
 def shard_for_index(i: int) -> int:
-    # For keys like "key{i}" we simply shard on the numeric index.
-    return i % cluster_worker_count
+    # Legacy fallback: shard based on key instead of modulo index
+    key_str = f"key{i}"
+    key_bytes = key_str.encode("ascii")
+    h = hash64(key_bytes)
+    return jump_consistent_hash(h, cluster_worker_count)
 
 
 async def worker_main_cluster(start_idx: int, end_idx: int, task_type: str, pipeline: bool = False, batch_size: int = 1) -> int:
