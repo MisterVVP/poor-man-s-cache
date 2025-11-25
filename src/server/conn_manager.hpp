@@ -90,7 +90,7 @@ namespace server {
                 auto offset = writeStorage.size();
                 writeStorage.insert(writeStorage.end(), data, data + len);
 
-                wb.chunks.push_back(WriteBatch::Chunk{offset, len});
+                wb.chunks.push_back({offset, len});
                 wb.totalBytes += len;
 
 
@@ -99,7 +99,7 @@ namespace server {
                     std::size_t sepOffset = writeStorage.size();
                     writeStorage.push_back(sep);
 
-                    wb.chunks.push_back(WriteBatch::Chunk{sepOffset, 1});
+                    wb.chunks.push_back({sepOffset, 1});
                     wb.totalBytes += 1;
                 }
             }
@@ -112,33 +112,68 @@ namespace server {
                     return true;
                 }
 
-                std::vector<iovec> iov;
-                iov.reserve(wb.chunks.size());
                 char* base = writeStorage.data();
-                for (const auto& ch : wb.chunks) {
-                    iovec v{};
-                    v.iov_base = base + ch.offset;
-                    v.iov_len  = ch.len;
-                    iov.push_back(v);
-                }
+                std::size_t remaining = wb.totalBytes;
 
-                msghdr msg{};
-                msg.msg_iov    = iov.data();
-                msg.msg_iovlen = iov.size();
+                std::size_t idx = 0;
+                std::size_t offsetInside = 0;
 
-                auto n = ::sendmsg(fd, &msg, MSG_DONTWAIT | MSG_NOSIGNAL);
-                if (n == -1) {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                while (remaining > 0 && idx < wb.chunks.size()) {
+
+                    std::vector<iovec> iov;
+                    iov.reserve(wb.chunks.size() - idx);
+
+                    {
+                        const auto& first = wb.chunks[idx];
+                        iovec chunkPartV{};
+                        chunkPartV.iov_base = base + first.offset + offsetInside;
+                        chunkPartV.iov_len  = first.len - offsetInside;
+                        iov.push_back(chunkPartV);
+                    }
+
+                    for (std::size_t c = idx + 1; c < wb.chunks.size(); c++) {
+                        const auto& ch = wb.chunks[c];
+                        iovec chunkV{};
+                        chunkV.iov_base = base + ch.offset;
+                        chunkV.iov_len  = ch.len;
+                        iov.push_back(chunkV);
+                    }
+
+                    msghdr msg{};
+                    msg.msg_iov = iov.data();
+                    msg.msg_iovlen = iov.size();
+
+                    auto bytesSent = ::sendmsg(fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
+                    if (bytesSent == -1) {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    auto written = static_cast<std::size_t>(bytesSent);
+                    if (written == 0) {
                         return true;
                     }
-                    return false;
-                }
 
-                std::size_t written = static_cast<std::size_t>(n);
-                if (written < wb.totalBytes) {
-                    return false;
-                }
+                    remaining -= written;
 
+                    while (written > 0) {
+                        const auto& ch = wb.chunks[idx];
+                        auto chunkRemaining = ch.len - offsetInside;
+
+                        if (written >= chunkRemaining) {
+                            written -= chunkRemaining;
+                            idx++;
+                            offsetInside = 0;
+                            if (idx >= wb.chunks.size())
+                                break;
+                        } else {
+                            offsetInside += written;
+                            written = 0;
+                        }
+                    }
+                }
                 wb.totalBytes = 0;
                 wb.chunks.clear();
                 writeStorage.clear();
