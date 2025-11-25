@@ -91,16 +91,6 @@ CacheServer::~CacheServer() {
     }
 }
 
-ProcessRequestTask server::CacheServer::processRequest(const RequestView& request, int client_fd)
-{
-    auto connIt = connManager->connections.find(client_fd);
-    if (connIt == connManager->connections.end()) {
-        co_return;
-    }
-    auto response = processRequestSync(request, connIt->second);
-    auto sendTask = sendResponse(client_fd, response);
-    co_await sendTask;
-}
 
 ResponsePacket CacheServer::processRequestSync(const RequestView& request, ConnectionData& connData)
 {
@@ -385,9 +375,22 @@ HandleReqTask CacheServer::handleRequests()
             }
 
             for (auto& [fd, responses] : responsesPerConn) {
-                if (!responses.empty()) {
-                    sendResponses(fd, responses);
+                if (responses.empty())
+                    continue;
+        
+                auto it = connManager->connections.find(fd);
+                if (it == connManager->connections.end())
+                    continue;
+        
+                ConnectionData& conn = it->second;
+
+                for (const auto& resp : responses) {
+                    conn.queueResponseChunk(resp.data, resp.size, resp.protocol);
                 }
+
+                if(!conn.flushWriteBatch(fd)) {
+                    ++numErrors;
+                };
             }
 
 #ifndef NDEBUG
@@ -489,55 +492,6 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     }
 
     co_return ReadRequestResult{ ReqReadOperationResult::AwaitingData };
-}
-
-AsyncSendTask CacheServer::sendResponse(int client_fd, const ResponsePacket& response) {
-    char sep = MSG_SEPARATOR;
-    struct iovec iov[2];
-
-    iov[0].iov_base = const_cast<char*>(response.data);
-    iov[0].iov_len  = response.size;
-    iov[1].iov_base = &sep;
-    iov[1].iov_len  = 1;
-
-    const size_t iovCount = response.protocol == RequestProtocol::Custom ? 2 : 1;
-    size_t totalRequired = response.size + (iovCount == 2 ? 1 : 0);
-    size_t totalSent = 0;
-    size_t iov_idx = 0;
-
-    struct msghdr msg{};
-    msg.msg_iov    = iov;
-    msg.msg_iovlen = iovCount;
-
-    while (totalSent < totalRequired) {
-        auto bytesSent = co_await AsyncSendAwaiter(client_fd, &msg);
-
-        if (bytesSent == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
-            } else {
-                perror("Error when sending data back to client");
-                ++numErrors;
-                break;
-            }
-        }
-
-        totalSent += bytesSent;
-
-        while (bytesSent > 0 && iov_idx < iovCount) {
-            if (static_cast<size_t>(bytesSent) >= iov[iov_idx].iov_len) {
-                bytesSent -= iov[iov_idx].iov_len;
-                ++iov_idx;
-            } else {
-                iov[iov_idx].iov_base = static_cast<char*>(iov[iov_idx].iov_base) + bytesSent;
-                iov[iov_idx].iov_len -= bytesSent;
-                bytesSent = 0;
-            }
-        }
-
-        msg.msg_iov = &iov[iov_idx];
-        msg.msg_iovlen = iovCount - iov_idx;
-    }
 }
 
 void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>& responses) {

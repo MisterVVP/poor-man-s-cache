@@ -115,10 +115,8 @@ namespace server {
             epoll_event epoll_events[MAX_EVENTS];
 
             AsyncReadTask readRequestAsync(int client_fd);
-            ProcessRequestTask processRequest(const RequestView& request, int client_fd);
             ResponsePacket processRequestSync(const RequestView& request, ConnectionData& connData);
             HandleReqTask handleRequests();
-            AsyncSendTask sendResponse(int client_fd, const ResponsePacket& response);
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
         public:
             CacheServer(const ServerSettings settings = ServerSettings{});

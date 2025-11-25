@@ -11,6 +11,7 @@
 #include <cstring>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/uio.h> 
 #include <netinet/in.h>
 #include "../kvs/kvs.hpp"
 #include "../utils/time.hpp"
@@ -54,18 +55,101 @@ namespace server {
         std::vector<QueuedCommand> queue;
         std::vector<std::unique_ptr<char[]>> storage;
     };
+
+    struct WriteBatch {
+        struct Chunk {
+            std::size_t offset;
+            std::size_t len;
+        };
+
+        std::vector<Chunk> chunks;
+        std::size_t totalBytes = 0;
+    };
+
     struct ConnectionData {
-        timespec lastActivity {0, 0};
-        int epoll_fd = -1;
-        std::vector<char> readBuffer;
-        std::deque<RequestView> pendingRequests;
-        size_t bytesToErase = 0;
-        std::unique_ptr<RespTransactionState> respTransaction;
-        ConnectionData() = default;
-        ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
-            readBuffer.reserve(READ_BUFFER_SIZE);
-        }
-        ~ConnectionData();
+        private:
+            WriteBatch writeBatch;
+            std::vector<char> writeStorage;
+
+        public:
+            timespec lastActivity {0, 0};
+            int epoll_fd = -1;
+            std::vector<char> readBuffer;
+            std::deque<RequestView> pendingRequests;
+            size_t bytesToErase = 0;
+            std::unique_ptr<RespTransactionState> respTransaction;
+
+            void queueResponseChunk(const char* data, std::size_t len, RequestProtocol protocol) noexcept
+            {
+                if (len == 0) {
+                    return;
+                }
+
+                WriteBatch& wb = writeBatch;
+
+                auto offset = writeStorage.size();
+                writeStorage.insert(writeStorage.end(), data, data + len);
+
+                wb.chunks.push_back(WriteBatch::Chunk{offset, len});
+                wb.totalBytes += len;
+
+
+                if (protocol == RequestProtocol::Custom) {
+                    const auto sep = MSG_SEPARATOR;
+                    std::size_t sepOffset = writeStorage.size();
+                    writeStorage.push_back(sep);
+
+                    wb.chunks.push_back(WriteBatch::Chunk{sepOffset, 1});
+                    wb.totalBytes += 1;
+                }
+            }
+            
+            bool flushWriteBatch(int fd) noexcept
+            {
+                WriteBatch& wb = writeBatch;
+
+                if (wb.chunks.empty()) {
+                    return true;
+                }
+
+                std::vector<iovec> iov;
+                iov.reserve(wb.chunks.size());
+                char* base = writeStorage.data();
+                for (const auto& ch : wb.chunks) {
+                    iovec v{};
+                    v.iov_base = base + ch.offset;
+                    v.iov_len  = ch.len;
+                    iov.push_back(v);
+                }
+
+                msghdr msg{};
+                msg.msg_iov    = iov.data();
+                msg.msg_iovlen = iov.size();
+
+                auto n = ::sendmsg(fd, &msg, MSG_DONTWAIT | MSG_NOSIGNAL);
+                if (n == -1) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                std::size_t written = static_cast<std::size_t>(n);
+                if (written < wb.totalBytes) {
+                    return false;
+                }
+
+                wb.totalBytes = 0;
+                wb.chunks.clear();
+                writeStorage.clear();
+                return true;
+            }
+            
+            ConnectionData() = default;
+            ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
+                readBuffer.reserve(READ_BUFFER_SIZE);
+            }
+            ~ConnectionData();
     };
 
     class ConnManager {

@@ -15,8 +15,9 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
-    std::cout << "cliListen = " << cliListen << std::endl;
-
+    if (!cliListen.empty()) {
+        std::cout << "cliListen = " << cliListen << std::endl;
+    }
     auto serverPort = cliListen.empty() ? getFromEnv<int>("SERVER_PORT", true) : std::stoi(cliListen);
     auto numShards = getFromEnv<uint_fast32_t>("NUM_SHARDS", false, 24);
     auto sockBufferSize = getFromEnv<int>("SOCK_BUF_SIZE", false, 1048576);
