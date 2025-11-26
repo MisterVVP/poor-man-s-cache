@@ -32,6 +32,7 @@ host = os.environ.get('CACHE_HOST', 'localhost')
 port = int(os.environ.get('CACHE_PORT', 9001))
 delay_sec = int(os.environ.get('TEST_DELAY_SEC', 1))
 iterations_count = int(os.environ.get('TEST_ITERATIONS', 1000))
+socket_timeout = float(os.environ.get('SOCKET_TIMEOUT_SEC', 30))
 redis_password = os.environ.get('REDIS_PASSWORD', None)  # Only for Redis
 data_folder = os.environ.get('TEST_DATA_FOLDER', './data')
 
@@ -53,8 +54,8 @@ def calc_thread_pool_size():
 
 def send_command_to_custom_cache(command: str, bufSize: int):
     try:
-        with socket.create_connection((host, port), timeout=5) as s:
-            s.settimeout(5)
+        with socket.create_connection((host, port), timeout=socket_timeout) as s:
+            s.settimeout(socket_timeout)
             command += "\x1F"
             s.sendall(command.encode("utf-8"))
 
@@ -68,7 +69,10 @@ def send_command_to_custom_cache(command: str, bufSize: int):
                     if b"\x1F" in chunk:
                         break
                 except socket.timeout:
-                    logger.error("Socket read timeout")
+                    logger.error(
+                        "Socket read timeout after %.1f seconds while waiting for response",
+                        socket_timeout,
+                    )
                     sys.exit(1)
                     return ""
                 except socket.error as e:

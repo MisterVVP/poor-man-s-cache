@@ -39,12 +39,19 @@ go build -C ./launcher -o ../pmc-cluster-launcher
 ./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
-To test clustered performance use 
+To test clustered performance use
 ```bash
 python3 ./tcp_server_cluster_test.py -p -b 2048
 ```
 
 Tweak batch size (-b) based on your system and network.
+
+To run the clustered test flow inside Docker Compose (as done in CI), generate a compose file and enable the cluster profiles:
+```bash
+python3 generate_compose.py 4
+PMC_CLUSTER_WORKERS=4 PMC_CLUSTER_BASE_PORT=9001 docker compose --profile cluster --profile tests-cluster up --build --abort-on-container-exit
+```
+Adjust `PMC_CLUSTER_WORKERS`, `PMC_CLUSTER_TEST_ITERATIONS`, and `PMC_CLUSTER_TEST_POOL_SIZE` to tune how many workers the launcher starts and how much traffic the cluster test produces.
 
 ### Functional tests
 
@@ -62,6 +69,8 @@ There are few testing scenarios supported right now:
 3. Multiple DEL requests
 4. (SET key, GET key, GET non_existent_key) workflow
 5. Single request per single connection test (not recommended)
+
+For the single-request-per-connection scenario, set `SOCKET_TIMEOUT_SEC` if you need to tolerate slower responses when moving large payloads during CI runs.
 
 Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>) / N  
 - T<sub>client</sub> - time spent to send all the requests by client + time to receive and verify the responses
