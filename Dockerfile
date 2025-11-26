@@ -17,7 +17,8 @@ RUN bash /app/scripts/run-all-tests.bash
 
 ARG BUILD_TYPE="Release"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .
-RUN go build -o /app/pmc-cluster-launcher ./launcher
+# Build the launcher from within its module directory so Go can resolve go.mod
+RUN cd launcher && go build -o /app/pmc-cluster-launcher .
 
 
 FROM alpine:latest
