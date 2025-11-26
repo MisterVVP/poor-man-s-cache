@@ -13,17 +13,17 @@ services:
     networks:
       - cache_network
 
-    cache-cluster:
-      build:
-        context: .
-        dockerfile: Dockerfile
-        args:
-          - BUILD_TYPE=Release
-      extends:
-        file: common-compose-config.yaml
-        service: cache-common
-      entrypoint: ["/app/pmc-cluster-launcher"]
-      command: ["/app/poor-man-s-cache", "${PMC_CLUSTER_WORKERS:-4}", "${PMC_CLUSTER_BASE_PORT:-9001}"]
+  cache-cluster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILD_TYPE=Release
+    extends:
+      file: common-compose-config.yaml
+      service: cache-common
+    entrypoint: ["/app/pmc-cluster-launcher"]
+    command: ["/app/poor-man-s-cache", "${PMC_CLUSTER_WORKERS:-4}", "${PMC_CLUSTER_BASE_PORT:-9001}"]
     environment:
       - PMC_CLUSTER_WORKERS=${PMC_CLUSTER_WORKERS:-4}
       - PMC_CLUSTER_BASE_PORT=${PMC_CLUSTER_BASE_PORT:-9001}
