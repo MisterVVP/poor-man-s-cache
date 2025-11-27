@@ -72,7 +72,7 @@ services:
       - tests-pipelined
     networks:
       - cache_network
-    command: ["tcp_server_test.py", "-p", "-b", "192"]
+    command: ["tcp_server_test.py", "-p", "-b", "128"]
 
   tests-resp:
     extends:
