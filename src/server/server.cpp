@@ -329,6 +329,24 @@ HandleReqTask CacheServer::handleRequests()
 #ifndef NDEBUG
             //TODO: this log is 'Trace' level, not even 'Debug' std::cout << "handleRequests finished without events to handle!\n";
 #endif
+            if (!connManager->connections.empty()) {
+                std::vector<int> pendingFds;
+                pendingFds.reserve(connManager->connections.size());
+                for (const auto& [fd, _] : connManager->connections) {
+                    pendingFds.push_back(fd);
+                }
+
+                for (const int fd : pendingFds) {
+                    auto it = connManager->connections.find(fd);
+                    if (it == connManager->connections.end()) {
+                        continue;
+                    }
+
+                    if (!it->second.flushWriteBatch(fd)) {
+                        connManager->closeConnection(fd);
+                    }
+                }
+            }
             co_yield 0;
         } else {
             std::vector<AsyncReadTask> readers;
@@ -400,6 +418,7 @@ HandleReqTask CacheServer::handleRequests()
 
                 if(!conn.flushWriteBatch(fd)) {
                     ++numErrors;
+                    connManager->closeConnection(fd);
                 };
             }
 

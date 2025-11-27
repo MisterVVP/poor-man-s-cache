@@ -12,6 +12,9 @@ services:
       - main
     networks:
       - cache_network
+    ports:
+      - "9001:9001"
+      - "8080:8080"
 
   cache-cluster:
     build:
