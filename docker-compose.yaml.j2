@@ -118,8 +118,6 @@ services:
     extends:
       file: common-compose-config.yaml
       service: tests-common
-    depends_on:
-      - cache-cluster
     environment:
       - CACHE_HOST=cache-cluster
       - PMC_CLUSTER_BASE_PORT=${PMC_CLUSTER_BASE_PORT:-9001}
