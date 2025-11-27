@@ -341,6 +341,16 @@ HandleReqTask CacheServer::handleRequests()
                     continue;
                 }
 
+                if (epoll_events[i].events & EPOLLOUT) {
+                    auto it = connManager->connections.find(client_fd);
+                    if (it != connManager->connections.end()) {
+                        if (!it->second.flushWriteBatch(client_fd)) {
+                            connManager->closeConnection(client_fd);
+                            continue;
+                        }
+                    }
+                }
+
                 if (epoll_events[i].events & EPOLLIN) {
                     auto asyncRead = readRequestAsync(client_fd);
                     connManager->updateActivity(client_fd);

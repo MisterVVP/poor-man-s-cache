@@ -55,3 +55,4 @@ prometheus-cpp/
 tests/__pycache__/
 logs
 pmc-cluster-launcher
+!launcher/go.mod
