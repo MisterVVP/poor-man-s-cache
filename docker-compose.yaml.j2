@@ -32,7 +32,6 @@ services:
       - PMC_CLUSTER_BASE_PORT=${PMC_CLUSTER_BASE_PORT:-9001}
     profiles:
       - cluster
-      - tests-cluster
     networks:
       - cache_network
     ports: []
@@ -99,7 +98,7 @@ services:
       - tests-resp-pipelined
     networks:
       - cache_network
-    command: ["tcp_server_test.py", "--resp", "-p"]
+    command: ["tcp_server_test.py", "--resp", "-p", "-b", "256"]
 
   tests-req-per-conn:
     extends:
@@ -130,7 +129,7 @@ services:
       - tests-cluster
     networks:
       - cache_network
-    command: ["tcp_server_cluster_test.py"]
+    command: ["tcp_server_cluster_test.py", "-p", "-b", "256"]
 
 networks:
   cache_network:
