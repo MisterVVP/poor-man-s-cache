@@ -55,15 +55,12 @@ jobs:
       run: docker compose --profile tests-req-per-conn up
       timeout-minutes: 10
 
-    - name: Stop cache server before cluster suite
+    - name: Stop cache server
       run: docker compose --profile main down
 
     - name: Run cluster mode tests
       run: docker compose --profile tests-cluster up
       timeout-minutes: 15
-
-    - name: Stop cache server
-      run: docker compose --profile main down
 
     - name: Stop cache cluster
       run: docker compose --profile cluster down
