@@ -1,5 +1,5 @@
 FROM alpine:latest AS build
-RUN apk update && apk upgrade && apk add git cmake build-base gtest-dev zlib-dev bash
+RUN apk update && apk upgrade && apk add git cmake build-base gtest-dev zlib-dev bash go
 RUN git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp \
     && git submodule init && git submodule update && mkdir _build && cd _build \
     && cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF \
@@ -17,6 +17,8 @@ RUN bash /app/scripts/run-all-tests.bash
 
 ARG BUILD_TYPE="Release"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .
+# Build the launcher from within its module directory so Go can resolve go.mod
+RUN cd launcher && go build -o /app/pmc-cluster-launcher .
 
 
 FROM alpine:latest
@@ -24,6 +26,7 @@ FROM alpine:latest
 RUN apk update && apk upgrade && apk add libstdc++ 
 
 COPY --from=build /app/build/src/poor-man-s-cache /app/poor-man-s-cache
+COPY --from=build /app/pmc-cluster-launcher /app/pmc-cluster-launcher
 COPY --from=build /usr/local/include/prometheus/ /usr/local/include/prometheus/
 COPY --from=build /usr/local/lib/ /usr/local/lib/
 

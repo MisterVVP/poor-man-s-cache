@@ -39,7 +39,7 @@ go build -C ./launcher -o ../pmc-cluster-launcher
 ./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
-To test clustered performance use 
+To test clustered performance use
 ```bash
 python3 ./tcp_server_cluster_test.py -p -b 2048
 ```
@@ -62,6 +62,8 @@ There are few testing scenarios supported right now:
 3. Multiple DEL requests
 4. (SET key, GET key, GET non_existent_key) workflow
 5. Single request per single connection test (not recommended)
+
+For the single-request-per-connection scenario, set `SOCKET_TIMEOUT_SEC` if you need to tolerate slower responses when moving large payloads during CI runs.
 
 Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>) / N  
 - T<sub>client</sub> - time spent to send all the requests by client + time to receive and verify the responses
