@@ -26,7 +26,7 @@ jobs:
       run: pip install jinja2 && python generate_compose.py 1
 
     - name: Build docker images and run unit tests
-      run: docker compose --profile main --profile tests build
+      run: docker compose --profile main --profile tests --profile cluster --profile tests-cluster build
 
     - name: Start cache server
       run: docker compose --profile main up --detach
@@ -41,7 +41,7 @@ jobs:
 
     - name: Run load and functional tests (pipelined mode enabled)
       run: docker compose --profile tests-pipelined up
-      timeout-minutes: 5
+      timeout-minutes: 10
 
     - name: Run load and functional tests (RESP protocol)
       run: docker compose --profile tests-resp up
@@ -49,7 +49,7 @@ jobs:
 
     - name: Run load and functional tests (RESP protocol, pipelined mode enabled)
       run: docker compose --profile tests-resp-pipelined up
-      timeout-minutes: 5
+      timeout-minutes: 10
 
     - name: Run load and functional tests (request-per-connection clients)
       run: docker compose --profile tests-req-per-conn up
@@ -57,3 +57,13 @@ jobs:
 
     - name: Stop cache server
       run: docker compose --profile main down
+
+    - name: Start cluster
+      run: docker compose --profile cluster up --detach
+
+    - name: Run cluster tests (pipelined mode enabled)
+      run: docker compose --profile tests-cluster up
+      timeout-minutes: 10
+
+    - name: Stop cluster
+      run: docker compose --profile cluster down

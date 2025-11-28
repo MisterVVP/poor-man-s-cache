@@ -57,7 +57,7 @@ logger.addHandler(handler)
 
 # Env config
 host = os.environ.get("CACHE_HOST", "localhost")
-cluster_base_port = int(os.environ.get("PMC_CLUSTER_BASE_PORT", os.environ.get("CACHE_PORT", 9001)))
+cluster_base_port = int(os.environ.get("CLUSTER_BASE_PORT", os.environ.get("CACHE_PORT", 9001)))
 delay_sec = float(os.environ.get("TEST_DELAY_SEC", 1))
 iterations_count = int(os.environ.get("TEST_ITERATIONS", 1000))
 num_processes = int(os.environ.get("TEST_POOL_SIZE", multiprocessing.cpu_count()))

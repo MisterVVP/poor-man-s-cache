@@ -70,6 +70,27 @@ namespace server {
         private:
             WriteBatch writeBatch;
             std::vector<char> writeStorage;
+            bool writeInterestEnabled = false;
+
+            void updateEpollWriteInterest(int fd, bool enable) noexcept
+            {
+                if (epoll_fd < 0 || writeInterestEnabled == enable) {
+                    return;
+                }
+
+                epoll_event event{};
+                event.data.fd = fd;
+                event.events = EPOLLIN | EPOLLET | (enable ? EPOLLOUT : 0);
+
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &event) == -1) {
+#ifndef NDEBUG
+                    perror("Failed to update epoll events for connection");
+#endif
+                    return;
+                }
+
+                writeInterestEnabled = enable;
+            }
 
         public:
             timespec lastActivity {0, 0};
@@ -109,6 +130,7 @@ namespace server {
                 WriteBatch& wb = writeBatch;
 
                 if (wb.chunks.empty()) {
+                    updateEpollWriteInterest(fd, false);
                     return true;
                 }
 
@@ -117,6 +139,7 @@ namespace server {
 
                 std::size_t idx = 0;
                 std::size_t offsetInside = 0;
+                bool needMoreWrite = false;
 
                 while (remaining > 0 && idx < wb.chunks.size()) {
 
@@ -146,14 +169,16 @@ namespace server {
                     auto bytesSent = ::sendmsg(fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
                     if (bytesSent == -1) {
                         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            return true;
+                            needMoreWrite = true;
+                            break;
                         }
                         return false;
                     }
 
                     auto written = static_cast<std::size_t>(bytesSent);
                     if (written == 0) {
-                        return true;
+                        needMoreWrite = true;
+                        break;
                     }
 
                     remaining -= written;
@@ -174,12 +199,43 @@ namespace server {
                         }
                     }
                 }
-                wb.totalBytes = 0;
-                wb.chunks.clear();
-                writeStorage.clear();
+
+                if (remaining == 0 && !needMoreWrite) {
+                    wb.totalBytes = 0;
+                    wb.chunks.clear();
+                    writeStorage.clear();
+                    updateEpollWriteInterest(fd, false);
+                    return true;
+                }
+
+                if (idx < wb.chunks.size()) {
+                    const auto dropBytes = wb.chunks[idx].offset + offsetInside;
+                    if (dropBytes > 0 && dropBytes <= writeStorage.size()) {
+                        writeStorage.erase(writeStorage.begin(), writeStorage.begin() + dropBytes);
+                    }
+
+                    std::vector<WriteBatch::Chunk> newChunks;
+                    newChunks.reserve(wb.chunks.size() - idx);
+
+                    auto firstLen = wb.chunks[idx].len > offsetInside ? (wb.chunks[idx].len - offsetInside) : 0;
+                    if (firstLen > 0) {
+                        newChunks.push_back({0, firstLen});
+                    }
+
+                    for (std::size_t c = idx + 1; c < wb.chunks.size(); ++c) {
+                        auto ch = wb.chunks[c];
+                        ch.offset -= dropBytes;
+                        newChunks.push_back(ch);
+                    }
+
+                    wb.chunks.swap(newChunks);
+                    wb.totalBytes = remaining;
+                }
+
+                updateEpollWriteInterest(fd, true);
                 return true;
             }
-            
+
             ConnectionData() = default;
             ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
                 readBuffer.reserve(READ_BUFFER_SIZE);

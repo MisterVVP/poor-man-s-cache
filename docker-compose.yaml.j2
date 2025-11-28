@@ -12,6 +12,9 @@ services:
       - main
     networks:
       - cache_network
+    ports:
+      - "9001:9001"
+      - "8080:8080"
 
   cache-cluster:
     build:
@@ -23,13 +26,12 @@ services:
       file: common-compose-config.yaml
       service: cache-common
     entrypoint: ["/app/pmc-cluster-launcher"]
-    command: ["/app/poor-man-s-cache", "${PMC_CLUSTER_WORKERS:-4}", "${PMC_CLUSTER_BASE_PORT:-9001}"]
+    command: ["/app/poor-man-s-cache", "${CLUSTER_WORKERS:-8}", "${CLUSTER_BASE_PORT:-9001}"]
     environment:
-      - PMC_CLUSTER_WORKERS=${PMC_CLUSTER_WORKERS:-4}
-      - PMC_CLUSTER_BASE_PORT=${PMC_CLUSTER_BASE_PORT:-9001}
+      - CLUSTER_WORKERS=${CLUSTER_WORKERS:-8}
+      - CLUSTER_BASE_PORT=${CLUSTER_BASE_PORT:-9001}
     profiles:
       - cluster
-      - tests-cluster
     networks:
       - cache_network
     ports: []
@@ -70,7 +72,7 @@ services:
       - tests-pipelined
     networks:
       - cache_network
-    command: ["tcp_server_test.py", "-p"]
+    command: ["tcp_server_test.py", "-p", "-b", "128"]
 
   tests-resp:
     extends:
@@ -96,7 +98,7 @@ services:
       - tests-resp-pipelined
     networks:
       - cache_network
-    command: ["tcp_server_test.py", "--resp", "-p"]
+    command: ["tcp_server_test.py", "--resp", "-p", "-b", "256"]
 
   tests-req-per-conn:
     extends:
@@ -116,18 +118,16 @@ services:
     extends:
       file: common-compose-config.yaml
       service: tests-common
-    depends_on:
-      - cache-cluster
     environment:
       - CACHE_HOST=cache-cluster
-      - PMC_CLUSTER_BASE_PORT=${PMC_CLUSTER_BASE_PORT:-9001}
-      - TEST_ITERATIONS=${PMC_CLUSTER_TEST_ITERATIONS:-100000}
+      - CLUSTER_BASE_PORT=${CLUSTER_BASE_PORT:-9001}
+      - TEST_ITERATIONS=${PMC_CLUSTER_TEST_ITERATIONS:-1000000}
       - TEST_POOL_SIZE=${PMC_CLUSTER_TEST_POOL_SIZE:-4}
     profiles:
       - tests-cluster
     networks:
       - cache_network
-    command: ["tcp_server_cluster_test.py"]
+    command: ["tcp_server_cluster_test.py", "-p", "-b", "256"]
 
 networks:
   cache_network:
