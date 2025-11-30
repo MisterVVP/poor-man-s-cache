@@ -648,6 +648,10 @@ namespace pmc {
                 return shard(key).enqueueDelete(key);
             }
 
+            pmc::CacheClient::Response waitFor(std::string_view key, pmc::CacheClient::RequestId id) {
+                return shard(key).waitFor(id);
+            }
+
             void flush(std::string_view key) {
                 shard(key).flush();
             }

@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Generate test suite
       run: pip install jinja2 && python generate_compose.py 1
@@ -67,3 +67,69 @@ jobs:
 
     - name: Stop cluster
       run: docker compose --profile cluster down
+
+  native_cluster:
+    name: Native cluster tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: sudo apt-get update && sudo apt-get install -y ninja-build cmake g++ golang-go python3 python3-pip zlib1g-dev
+
+    - name: Build prometheus-cpp
+      run: |
+        cmake -S prometheus-cpp -B prometheus-cpp/_build -GNinja \
+          -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF -DENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON
+        cmake --build prometheus-cpp/_build --config Release
+        sudo cmake --install prometheus-cpp/_build
+
+    - name: Configure cache server
+      run: cmake --preset Release
+
+    - name: Build cache server
+      run: cmake --build out/build/Release
+
+    - name: Build cluster launcher
+      run: go build -C launcher -o ../pmc-cluster-launcher
+
+    - name: Build C++ client integration test
+      run: g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
+
+    - name: Start cluster
+      run: |
+        ./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 4 9101 > cluster.log 2>&1 &
+        echo $! > cluster.pid
+        sleep 2
+
+    - name: Run cluster-aware client tests
+      env:
+        CACHE_HOST: 127.0.0.1
+        CACHE_PORT: 9101
+        PMC_CLUSTER_HOST: 127.0.0.1
+        PMC_CLUSTER_BASE_PORT: 9101
+        PMC_CLUSTER_SHARD_COUNT: 4
+      run: ./client_integration_test
+
+    - name: Run cluster functional tests
+      env:
+        CACHE_HOST: 127.0.0.1
+        CLUSTER_BASE_PORT: 9101
+        TEST_ITERATIONS: 10000
+        TEST_POOL_SIZE: 2
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install -r tests/requirements.txt
+        python3 tests/tcp_server_cluster_test.py -p -b 64
+
+    - name: Stop cluster
+      if: always()
+      run: |
+        if [ -f cluster.pid ]; then
+          kill $(cat cluster.pid) || true
+          sleep 2
+          pkill -f poor-man-s-cache || true
+        fi
+        cat cluster.log || true
