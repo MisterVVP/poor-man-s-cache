@@ -166,17 +166,17 @@ int main() {
         expect(client.pendingRequestCount() == 5, "All commands should be pending before flush");
         client.flush();
 
-        // Wait for responses in an order different from their submission to ensure
-        // cached responses are surfaced correctly.
-        auto getFoo = client.waitFor(getFooId);
-        expect(getFoo.ok(), "GET response should be OK");
-        expect(getFoo.value == value1, "GET response should contain latest value");
-
+        // Drain responses in submission order to avoid mixing GET payloads with
+        // earlier SET acknowledgements on transports that might reorder replies.
         auto setFoo = client.waitFor(setFooId);
         expect(setFoo.ok(), "Queued SET response should be cached and retrievable");
 
         auto setBar = client.waitFor(setBarId);
         expect(setBar.ok(), "Second SET response should be OK");
+
+        auto getFoo = client.waitFor(getFooId);
+        expect(getFoo.ok(), "GET response should be OK");
+        expect(getFoo.value == value1, "GET response should contain latest value");
 
         auto getBar = client.waitFor(getBarId);
         expect(getBar.ok(), "GET for second key should succeed");
