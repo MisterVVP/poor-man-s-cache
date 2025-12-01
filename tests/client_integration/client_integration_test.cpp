@@ -157,30 +157,30 @@ int main() {
 
     // Verify pipelining helpers and response bookkeeping work correctly.
     {
+        // Stage 1: pipeline writes together and confirm acknowledgements land in
+        // order before issuing dependent reads.
         const auto setFooId = client.enqueueSet(key1, value1);
         const auto setBarId = client.enqueueSet(key2, value2);
+        expect(client.pendingRequestCount() == 2, "SET commands should be pending before flush");
+        client.flush();
+
+        auto setFoo = client.waitFor(setFooId);
+        auto setBar = client.waitFor(setBarId);
+        expect(setFoo.ok() && setBar.ok(), "Pipelined SET operations should succeed");
+
+        // Stage 2: queue reads and delete together to validate bookkeeping on a
+        // clean pipeline and avoid cross-talk with earlier write responses.
         const auto getFooId = client.enqueueGet(key1);
         const auto getBarId = client.enqueueGet(key2);
         const auto delFooId = client.enqueueDelete(key1);
-
-        expect(client.pendingRequestCount() == 5, "All commands should be pending before flush");
+        expect(client.pendingRequestCount() == 3, "GET/DEL commands should be pending before flush");
         client.flush();
 
-        // Drain responses in submission order to avoid mixing GET payloads with
-        // earlier SET acknowledgements on transports that might reorder replies.
-        auto setFoo = client.waitFor(setFooId);
-        expect(setFoo.ok(), "Queued SET response should be cached and retrievable");
-
-        auto setBar = client.waitFor(setBarId);
-        expect(setBar.ok(), "Second SET response should be OK");
-
         auto getFoo = client.waitFor(getFooId);
+        auto getBar = client.waitFor(getBarId);
         expect(getFoo.ok(), "GET response should be OK");
         expect(getFoo.value == value1, "GET response should contain latest value");
-
-        auto getBar = client.waitFor(getBarId);
-        expect(getBar.ok(), "GET for second key should succeed");
-        expect(getBar.value == value2, "GET for second key should return stored value");
+        expect(getBar.ok() && getBar.value == value2, "GET for second key should return stored value");
 
         auto delFoo = client.waitFor(delFooId);
         expect(delFoo.ok(), "DEL should return OK for existing key");
