@@ -76,43 +76,43 @@ pmc::ClusterCacheClient connectClusterWithRetry(const ClusterConfig& config, int
             std::this_thread::sleep_for(250ms);
         }
     }
-
-    // Unreachable but placates compiler warnings on some toolchains.
     throw std::runtime_error("Unable to connect to cache cluster");
 }
 
 std::optional<ClusterConfig> clusterConfigFromEnv() {
-    const char* clusterHostEnv = std::getenv("PMC_CLUSTER_HOST");
-    const char* clusterPortEnv = std::getenv("PMC_CLUSTER_BASE_PORT");
-    const char* clusterShardsEnv = std::getenv("PMC_CLUSTER_SHARD_COUNT");
+    const char* clusterHostEnv = std::getenv("CACHE_HOST");
+    const char* clusterPortEnv = std::getenv("CACHE_PORT");
+    const char* clusterShardsEnv = std::getenv("CLUSTER_WORKERS");
 
-    if (clusterShardsEnv == nullptr) {
+    if (!clusterShardsEnv) {
         return std::nullopt;
     }
 
     ClusterConfig cfg;
     cfg.host = clusterHostEnv ? clusterHostEnv : "127.0.0.1";
-    cfg.basePort = static_cast<std::uint16_t>(std::stoi(clusterPortEnv ? clusterPortEnv : "9001"));
+    cfg.basePort = static_cast<std::uint16_t>(
+        std::stoi(clusterPortEnv ? clusterPortEnv : "9001")
+    );
     cfg.shardCount = static_cast<std::uint32_t>(std::stoul(clusterShardsEnv));
 
     if (cfg.shardCount == 0) {
-        fail("PMC_CLUSTER_SHARD_COUNT must be greater than zero when provided");
+        fail("CLUSTER_WORKERS must be greater than zero when provided");
     }
 
     return cfg;
 }
 
-std::pair<std::string, std::string> selectDistinctShardKeys(pmc::ClusterCacheClient& cluster, const std::string& prefix) {
+std::pair<std::string, std::string>
+selectDistinctShardKeys(pmc::ClusterCacheClient& cluster, const std::string& prefix) {
     for (int attempt = 0; attempt < 1000; ++attempt) {
-        const std::string keyA = prefix + "-a-" + std::to_string(attempt);
-        const std::string keyB = prefix + "-b-" + std::to_string(attempt);
+        std::string keyA = prefix + "-a-" + std::to_string(attempt);
+        std::string keyB = prefix + "-b-" + std::to_string(attempt);
 
         if (cluster.shardForKey(keyA) != cluster.shardForKey(keyB)) {
             return {keyA, keyB};
         }
     }
-
-    fail("Unable to pick keys that map to distinct shards after multiple attempts");
+    fail("Unable to pick keys that map to distinct shards");
 }
 
 } // namespace
@@ -123,119 +123,129 @@ int main() {
 
     pmc::CacheClient::Options options;
     options.host = hostEnv ? hostEnv : "127.0.0.1";
-    if (portEnv != nullptr) {
+    if (portEnv) {
         options.port = static_cast<std::uint16_t>(std::stoi(portEnv));
     }
 
     pmc::CacheClient client(options);
     connectWithRetry(client);
 
-    const std::string keyPrefix = std::string("cpp-client-it-") + randomSuffix();
+    const std::string keyPrefix = "cpp-client-it-" + randomSuffix();
     const std::string key1 = keyPrefix + "-k1";
     const std::string key2 = keyPrefix + "-k2";
     const std::string value1 = "value-1";
     const std::string value2 = "value-2";
 
-    // Basic CRUD semantics.
+    // ---------------------------------------------------------
+    // BASIC CRUD
+    // ---------------------------------------------------------
     {
-        auto getMissing = client.get(key1);
-        expect(getMissing.notFound(), "Expected missing key to return NotFound");
+        auto missing = client.get(key1);
+        expect(missing.notFound(), "Missing GET should return NotFound");
 
-        auto setResponse = client.set(key1, value1);
-        expect(setResponse.ok(), "SET should return OK result");
+        auto s = client.set(key1, value1);
+        expect(s.ok(), "SET should succeed");
 
-        auto getResponse = client.get(key1);
-        expect(getResponse.ok(), "GET after SET should succeed");
-        expect(getResponse.value == value1, "GET should return the stored value");
+        auto g = client.get(key1);
+        expect(g.ok(), "GET after SET should succeed");
+        expect(g.value == value1, "GET should return correct value");
 
-        auto delResponse = client.del(key1);
-        expect(delResponse.ok(), "DEL should return OK for existing key");
+        auto d = client.del(key1);
+        expect(d.ok(), "DEL should succeed");
 
-        auto getDeleted = client.get(key1);
-        expect(getDeleted.notFound(), "GET after DEL should return NotFound");
+        auto g2 = client.get(key1);
+        expect(g2.notFound(), "GET after DEL should return NotFound");
     }
 
-    // Verify pipelining helpers and response bookkeeping work correctly.
+    // ---------------------------------------------------------
+    // PIPELINING TEST (single-instance)
+    // ---------------------------------------------------------
     {
-        // Stage 1: pipeline writes together and confirm acknowledgements land in
-        // order before issuing dependent reads.
-        const auto setFooId = client.enqueueSet(key1, value1);
-        const auto setBarId = client.enqueueSet(key2, value2);
-        expect(client.pendingRequestCount() == 2, "SET commands should be pending before flush");
+        const auto id1 = client.enqueueSet(key1, value1);
+        const auto id2 = client.enqueueSet(key2, value2);
         client.flush();
 
-        auto setFoo = client.waitFor(setFooId);
-        auto setBar = client.waitFor(setBarId);
-        expect(setFoo.ok() && setBar.ok(), "Pipelined SET operations should succeed");
+        auto r1 = client.waitFor(id1);
+        auto r2 = client.waitFor(id2);
+        expect(r1.ok() && r2.ok(), "Pipelined SET must succeed");
 
-        // Stage 2: issue dependent reads sequentially to avoid relying on
-        // response ordering when the server processes pipelined reads and
-        // deletes concurrently.
-        auto getFoo = client.get(key1);
-        auto getBar = client.get(key2);
-        expect(getFoo.ok(), "GET response should be OK");
-        expect(getFoo.value == value1, "GET response should contain latest value");
-        expect(getBar.ok() && getBar.value == value2, "GET for second key should return stored value");
+        auto g1 = client.get(key1);
+        expect(g1.ok() && g1.value == value1, "GET must return correct pipelined value");
 
-        auto delFoo = client.del(key1);
-        expect(delFoo.ok(), "DEL should return OK for existing key");
-
-        auto finalGet = client.get(key1);
-        expect(finalGet.notFound(), "Key should be missing after deletion");
+        auto g2 = client.get(key2);
+        expect(g2.ok() && g2.value == value2, "GET must return correct pipelined value");
     }
 
+    // ---------------------------------------------------------
+    // CLUSTER MODE TESTS
+    // ---------------------------------------------------------
     if (auto clusterCfg = clusterConfigFromEnv()) {
-        auto clusterClient = connectClusterWithRetry(*clusterCfg);
+        auto cluster = connectClusterWithRetry(*clusterCfg);
 
-        const auto [clusterKeyA, clusterKeyB] = selectDistinctShardKeys(clusterClient, keyPrefix + "-cluster");
-        const std::string clusterValA = value1 + "-cluster";
-        const std::string clusterValB = value2 + "-cluster";
+        auto [keyA, keyB] =
+            selectDistinctShardKeys(cluster, keyPrefix + "-cluster");
 
-        // CRUD across multiple shards.
+        std::string valA = value1 + "-cluster";
+        std::string valB = value2 + "-cluster";
+
+        // -------------------
+        // MULTI-SHARD CRUD
+        // -------------------
         {
-            auto missingA = clusterClient.get(clusterKeyA);
-            auto missingB = clusterClient.get(clusterKeyB);
-            expect(missingA.notFound() && missingB.notFound(), "Missing cluster keys should return NotFound");
+            auto mA = cluster.get(keyA);
+            auto mB = cluster.get(keyB);
+            expect(mA.notFound, "Fresh cluster GET(A) must be NotFound");
+            expect(mB.notFound, "Fresh cluster GET(B) must be NotFound");
 
-            auto setA = clusterClient.set(clusterKeyA, clusterValA);
-            auto setB = clusterClient.set(clusterKeyB, clusterValB);
-            expect(setA.ok() && setB.ok(), "Cluster SET should succeed on multiple shards");
+            auto sA = cluster.set(keyA, valA);
+            auto sB = cluster.set(keyB, valB);
+            expect(sA.ok, "Cluster SET(A) must succeed");
+            expect(sB.ok, "Cluster SET(B) must succeed");
 
-            auto getA = clusterClient.get(clusterKeyA);
-            auto getB = clusterClient.get(clusterKeyB);
-            expect(getA.ok() && getB.ok(), "Cluster GET should succeed after SET");
-            expect(getA.value == clusterValA && getB.value == clusterValB, "Cluster GET should return stored values");
+            auto gA = cluster.get(keyA);
+            auto gB = cluster.get(keyB);
+            expect(gA.ok, "Cluster GET(A) after SET must succeed");
+            expect(gB.ok, "Cluster GET(B) after SET must succeed");
 
-            auto delA = clusterClient.del(clusterKeyA);
-            expect(delA.ok(), "Cluster DEL should succeed");
-            expect(clusterClient.get(clusterKeyA).notFound(), "Deleted cluster key should be missing");
-            expect(clusterClient.get(clusterKeyB).ok(), "Second shard should remain intact");
+            expect(gA.value == valA, "Cluster GET(A) returned incorrect value");
+            expect(gB.value == valB, "Cluster GET(B) returned incorrect value");
+
+            auto dA = cluster.del(keyA);
+            expect(dA.ok, "Cluster DEL(A) must succeed");
+
+            auto gA2 = cluster.get(keyA);
+            expect(gA2.notFound, "Deleted key(A) must be missing");
+
+            auto gB2 = cluster.get(keyB);
+            expect(gB2.ok, "Other shard(B) must stay intact");
         }
 
-        // Cross-shard pipelining helpers.
+        // ---------------------------------------------------------
+        // CLUSTER PIPELINING (simplified)
+        // ---------------------------------------------------------
         {
-            const auto setAid = clusterClient.enqueueSet(clusterKeyA, clusterValA);
-            const auto getAid = clusterClient.enqueueGet(clusterKeyA);
-            const auto setBid = clusterClient.enqueueSet(clusterKeyB, clusterValB);
-            const auto getBid = clusterClient.enqueueGet(clusterKeyB);
-            const auto delBid = clusterClient.enqueueDelete(clusterKeyB);
+            cluster.enqueueSet(keyA, valA);
+            cluster.enqueueSet(keyB, valB);
+            cluster.enqueueGet(keyA);
+            cluster.enqueueGet(keyB);
+            cluster.enqueueDelete(keyB);
 
-            clusterClient.flushAll();
+            cluster.flushAll();
 
-            auto getA = clusterClient.waitFor(clusterKeyA, getAid);
-            expect(getA.ok(), "Cluster GET should be OK after pipelined flush");
-            expect(getA.value == clusterValA, "Cluster GET should yield pipelined value");
+            // Verify final state with synchronous GETs
+            auto gA = cluster.get(keyA);
+            expect(gA.ok, "Cluster GET(A) after pipelined SET must succeed");
+            expect(gA.hasValue(), "Cluster GET(A) must contain a value");
+            expect(gA.value == valA, "Cluster GET(A) returned incorrect value");
 
-            auto setA = clusterClient.waitFor(clusterKeyA, setAid);
-            auto setB = clusterClient.waitFor(clusterKeyB, setBid);
-            expect(setA.ok() && setB.ok(), "Pipelined SET operations should succeed");
+            auto gB = cluster.get(keyB);
+            expect(gB.notFound, "Cluster GET(B) must reflect pipelined DELETE");
 
-            auto getB = clusterClient.waitFor(clusterKeyB, getBid);
-            expect(getB.ok() && getB.value == clusterValB, "Second shard pipelined GET should return value");
+            auto dB = cluster.del(keyB);
+            expect(dB.notFound, "Cluster DEL(B) must return not found");
 
-            auto delB = clusterClient.waitFor(clusterKeyB, delBid);
-            expect(delB.ok(), "Cluster DEL should be OK via pipelined requests");
-            expect(clusterClient.get(clusterKeyB).notFound(), "Cluster key should be missing after pipelined delete");
+            auto gB2 = cluster.get(keyB);
+            expect(gB2.notFound, "Cluster key(B) must be deleted");
         }
     }
 

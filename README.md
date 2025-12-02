@@ -41,19 +41,18 @@ go build -C ./launcher -o ../pmc-cluster-launcher
 
 > [!NOTE]
 > Cluster-aware client tests and CI jobs expect the following environment variables:
-> - `PMC_CLUSTER_HOST` – hostname for all shards (defaults to `127.0.0.1`).
-> - `PMC_CLUSTER_BASE_PORT` – base TCP port where shard 0 listens (defaults to `9001`).
-> - `PMC_CLUSTER_SHARD_COUNT` – number of shards to probe (required to enable cluster client flows).
+> - `CACHE_HOST` – hostname for all shards (defaults to `127.0.0.1`).
+> - `CACHE_PORT` – base TCP port where shard 0 listens (defaults to `9001`).
+> - `CLUSTER_WORKERS` – number of shards to probe (required to enable cluster client flows).
 
 A lightweight three-step workflow is used in CI and can be mirrored locally:
 
 ```bash
 # 1) Start cluster (runs in background); adjust shard count/port as needed
-./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 4 9101 > cluster.log 2>&1 & echo $! > cluster.pid
+./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache $CLUSTER_WORKERS $CACHE_PORT> cluster.log 2>&1 & echo $! > cluster.pid
 
-# 2) Run cluster-aware tests (C++ client and python functional checks)
-CACHE_HOST=127.0.0.1 CACHE_PORT=9101 \
-PMC_CLUSTER_HOST=127.0.0.1 PMC_CLUSTER_BASE_PORT=9101 PMC_CLUSTER_SHARD_COUNT=4 \
+# 2) Build and run cluster-aware tests (C++ client and python functional checks)
+g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
 ./client_integration_test
 python3 tests/tcp_server_cluster_test.py -p -b 64
 

@@ -123,9 +123,7 @@ jobs:
       env:
         CACHE_HOST: 127.0.0.1
         CACHE_PORT: 9101
-        PMC_CLUSTER_HOST: 127.0.0.1
-        PMC_CLUSTER_BASE_PORT: 9101
-        PMC_CLUSTER_SHARD_COUNT: 4
+        CLUSTER_WORKERS: 4
       run: ./client_integration_test
 
     - name: Run cluster functional tests

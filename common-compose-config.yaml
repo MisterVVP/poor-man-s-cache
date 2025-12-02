@@ -12,7 +12,7 @@ services:
         soft: "1048576"
         hard: "1048576"
     environment:
-      - SERVER_PORT=9001
+      - CACHE_PORT=9001
       - METRICS_PORT=8080
       - METRICS_HOST=0.0.0.0
       - NUM_SHARDS=128 # Higher number of shards increases memory overhead but usually leads to better RPS. Extremely high number of shards may lead to key collisions. Hard limit is 4,294,967,295
