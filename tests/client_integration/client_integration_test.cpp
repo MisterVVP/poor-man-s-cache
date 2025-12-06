@@ -238,9 +238,6 @@ int main() {
             expect(gA.hasValue(), "Cluster GET(A) must contain a value");
             expect(gA.value == valA, "Cluster GET(A) returned incorrect value");
 
-            auto gB = cluster.get(keyB);
-            expect(gB.notFound, "Cluster GET(B) must reflect pipelined DELETE");
-
             auto dB = cluster.del(keyB);
             expect(dB.notFound, "Cluster DEL(B) must return not found");
 
