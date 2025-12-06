@@ -141,8 +141,7 @@ jobs:
       if: always()
       run: |
         if [ -f cluster.pid ]; then
-          kill $(cat cluster.pid) || true
+          kill -s SIGTERM $(cat cluster.pid) || true
           sleep 2
-          pkill -f poor-man-s-cache || true
         fi
         cat cluster.log || true
