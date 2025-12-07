@@ -132,6 +132,7 @@ Free github hosted runner hardware
 Local setup. 10 million requests per test suite, `multiprocessing.cpu_count()` test client processes forked.
 
 ##### Local Ubuntu
+24 node cluster.
 
 ###### Without pipelining
 - TBD
@@ -151,12 +152,12 @@ Pipelined batch size 2048. (`-b 2048`)
 - TBD
 
 ##### CI setup.
-1 million requests total (4 processes and 250000 chunks per process). Pipelined batch size 256. (`-b 256`)
+4 node cluster, 1 million requests total (4 processes and 250000 chunks per process), pipelined batch size 256 (`-b 256`).
 ###### Without pipelining
 - TBD
 ###### With pipelining
-- TBD
-- TBD
+- 500 000 RPS (GET/DEL/SET)
+- around 1 000 000 RPS (SET key, GET key, GET non_existent_key) workflow 
 
 #### Test details results (Single Node)
 Local setup. 10 million requests per test suite, `multiprocessing.cpu_count()` test client processes forked, pipelined batch size 128.
@@ -469,6 +470,7 @@ done
 ```
 
 ## TODO
+- Finish clustered setup and get above 10M RPS locally
 - Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
@@ -484,6 +486,7 @@ done
 - Check why Valgrind always shows a tiny memory leak from the Prometheus-cpp lib (`116 bytes in 1 block are still reachable in loss record 1 of 1`).
 - Read http://www.kegel.com/c10k.html
 - Continue reading https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/coroutines-c++20/
+- Revamp this README (build wiki, split documentation)
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face
