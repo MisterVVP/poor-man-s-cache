@@ -1,32 +1,114 @@
 #pragma once
-#include <memory>
-#include <format>
-#include <prometheus/exposer.h>
-#include <prometheus/registry.h>
-#include <prometheus/counter.h>
-#include <prometheus/histogram.h>
-#include <prometheus/gauge.h>
-#include "../server/server.hpp"
 
-namespace metrics
-{
-    using namespace prometheus;
-    using namespace server;
+#include <atomic>
+#include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
 
-    class MetricsServer {
-        private:
-            std::string metrics_url;
-            std::shared_ptr<Registry> registry;
-            std::shared_ptr<Exposer> server;
+namespace metrics {
 
-            Gauge* server_num_active_connections = nullptr;
-            Counter* server_num_requests_total = nullptr;
-            Counter* server_num_errors_total = nullptr;
+enum class RequestOperation : uint8_t {
+    Get,
+    Set,
+    Del,
+    Other,
+};
 
-            void RegisterMetrics();
+enum class ResponseStatus : uint8_t {
+    Ok,
+    NotFound,
+    Error,
+};
 
-        public:
-            MetricsServer(std::string metrics_url);
-            void UpdateMetrics(CacheServerMetrics& serverMetrics);
-    };
-}
+enum class CloseReason : uint8_t {
+    Client,
+    Server,
+    Error,
+};
+
+struct MetricsSnapshot {
+    uint64_t requestsGet = 0;
+    uint64_t requestsSet = 0;
+    uint64_t requestsDel = 0;
+    uint64_t requestsOther = 0;
+
+    uint64_t responsesOk = 0;
+    uint64_t responsesNotFound = 0;
+    uint64_t responsesError = 0;
+
+    uint64_t bytesRx = 0;
+    uint64_t bytesTx = 0;
+
+    uint64_t connectionsCurrent = 0;
+    uint64_t connectionsAccepted = 0;
+    uint64_t connectionsClosedClient = 0;
+    uint64_t connectionsClosedServer = 0;
+    uint64_t connectionsClosedError = 0;
+
+    uint64_t batchesTotal = 0;
+    uint64_t requestsPerBatchSum = 0;
+    uint64_t requestsPerBatchCount = 0;
+
+    uint64_t kvsItems = 0;
+    uint64_t kvsBytesUsed = 0;
+    uint64_t kvsEvictions = 0;
+
+    uint64_t writeQueueDepth = 0;
+    uint64_t readBufferUsageBytes = 0;
+};
+
+struct MetricsConfig {
+    std::string listenHost = "0.0.0.0";
+    int listenPort = 9100;
+    std::string shardLabel = "0";
+    std::string nodeLabel = "local";
+};
+
+class MetricsCollector {
+  public:
+    MetricsCollector(std::string shardLabel, std::string nodeLabel);
+
+    void incrementRequest(RequestOperation op) noexcept;
+    void incrementResponse(ResponseStatus status) noexcept;
+    void addBytesRx(std::size_t amount) noexcept;
+    void addBytesTx(std::size_t amount) noexcept;
+    void connectionAccepted() noexcept;
+    void connectionClosed(CloseReason reason) noexcept;
+    void recordBatch(std::size_t requestsInBatch) noexcept;
+    void setWriteQueueDepth(std::size_t depth) noexcept;
+    void setReadBufferUsageBytes(std::size_t bytes) noexcept;
+    void setKvsState(std::size_t items, std::size_t bytesUsed) noexcept;
+
+    MetricsSnapshot snapshot() const noexcept;
+    std::string renderPrometheus() const;
+
+  private:
+    mutable std::mutex mutex;
+    MetricsSnapshot metrics;
+    const std::string shard;
+    const std::string node;
+};
+
+class MetricsHttpServer {
+  public:
+    MetricsHttpServer(MetricsConfig config, MetricsCollector& collector);
+    ~MetricsHttpServer();
+
+    void start();
+    void stop();
+
+  private:
+    void serveLoop();
+    void handleClient(int client_fd);
+
+    MetricsConfig config;
+    MetricsCollector& collector;
+    std::optional<int> server_fd;
+    std::thread worker;
+    std::atomic<bool> running{false};
+};
+
+} // namespace metrics

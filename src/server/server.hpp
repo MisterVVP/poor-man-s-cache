@@ -19,6 +19,7 @@
 #include <netinet/tcp.h>
 #include "../hash/hash.hpp"
 #include "../non_copyable.hpp"
+#include "../metrics/metrics.hpp"
 #include "sockutils.hpp"
 #include "conn_manager.hpp"
 #include "shard.hpp"
@@ -106,6 +107,8 @@ namespace server {
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<bool> isRunning = false;
+            std::shared_ptr<metrics::MetricsCollector> metrics;
+            std::size_t bufferedReadBytes = 0;
 
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
@@ -118,8 +121,9 @@ namespace server {
             ResponsePacket processRequestSync(const RequestView& request, ConnectionData& connData);
             HandleReqTask handleRequests();
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
+            void updateKvsMetrics();
         public:
-            CacheServer(const ServerSettings settings = ServerSettings{});
+            CacheServer(const ServerSettings settings = ServerSettings{}, std::shared_ptr<metrics::MetricsCollector> metrics = nullptr);
             ~CacheServer();
 
             /// @brief Starts processing incoming requests

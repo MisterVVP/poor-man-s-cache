@@ -1,4 +1,4 @@
-module github.com/poor-man-s-cache/launcher
+module github.com/poor-man-s-cache/cluster-controller
 
 go 1.24.0
 

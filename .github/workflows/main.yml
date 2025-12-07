@@ -76,7 +76,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install dependencies and build prometheus-cpp
+    - name: Install native dependencies
       run: |
         set -e
         cd "$GITHUB_WORKSPACE"
@@ -84,19 +84,6 @@ jobs:
         sudo bash ./scripts/local_server_setup.bash
         sudo apt update && sudo apt upgrade -y
         sudo apt install -y git cmake build-essential libgtest-dev zlib1g-dev gcc-14 g++-14
-
-        if [ ! -d prometheus-cpp/.git ]; then
-          rm -rf prometheus-cpp
-          git clone https://github.com/jupp0r/prometheus-cpp.git
-        fi
-
-        cd prometheus-cpp && \
-        git submodule init && git submodule update && \
-        mkdir -p _build && cd _build && \
-        cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF && \
-        cmake --build . --parallel $(nproc) && \
-        ctest -V && \
-        sudo cmake --install .
 
         cd "$GITHUB_WORKSPACE"
         go install go.k6.io/xk6/cmd/xk6@latest

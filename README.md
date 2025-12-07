@@ -35,8 +35,8 @@ To start a local 24-worker cluster:
 ```bash
 cmake --preset Release
 cmake --build ./out/build/Release
-go build -C ./launcher -o ../pmc-cluster-launcher
-./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
+go build -C ./launcher -o ../pmc-cluster-controller
+./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
 > [!NOTE]
@@ -49,7 +49,7 @@ A lightweight three-step workflow is used in CI and can be mirrored locally:
 
 ```bash
 # 1) Start cluster (runs in background); adjust shard count/port as needed
-./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache $CLUSTER_WORKERS $CACHE_PORT> cluster.log 2>&1 & echo $! > cluster.pid
+./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache $CLUSTER_WORKERS $CACHE_PORT> cluster.log 2>&1 & echo $! > cluster.pid
 
 # 2) Build and run cluster-aware tests (C++ client and python functional checks)
 g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
@@ -109,8 +109,8 @@ Start the cluster:
 ```bash
 cmake --preset Release
 cmake --build ./out/build/Release
-go build -C ./launcher -o ../pmc-cluster-launcher
-./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
+go build -C ./launcher -o ../pmc-cluster-controller
+./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
 Run tests from separate shell:
@@ -266,7 +266,7 @@ After the server has started, run the test script:
 docker compose -f docker-compose-local.yaml --profile tests up
 ```
 
-You can check Prometheus metrics while tests are running by opening http://localhost:8080/metrics
+You can check Prometheus metrics while tests are running by opening http://localhost:9100/metrics. To launch the bundled Prometheus and Grafana stack, use `docker compose --profile main --profile monitoring up` and open Grafana at http://localhost:3000 with the pre-provisioned "Poor Man's Cache - Cluster" dashboard. Cluster deployments expose a discovery endpoint at `http://cache-cluster:9400/discovery` (override via `PMC_DISCOVERY_ADDR` and `PMC_SCRAPE_HOST`) that Prometheus uses via HTTP service discovery, so metrics targets are generated automatically from `CLUSTER_WORKERS` and the base metrics port.
 
 Don't forget to shut the detached container down by issuing:
 ```
@@ -290,14 +290,6 @@ Open second terminal somewhere on your hard drive and install required dependenc
 ```
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y git cmake build-essential libgtest-dev zlib1g-dev gcc-14 g++-14
-
-git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp && \
-git submodule init && git submodule update && \
-mkdir _build && cd _build && \
-cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF && \
-cmake --build . --parallel $(nproc) && \
-ctest -V && \
-sudo cmake --install .
 ```
 
 Set env variables, for example:
@@ -312,7 +304,7 @@ Run unit tests:
 
 ### Static analysis (CodeQL)
 
-The repository is scanned with GitHub CodeQL for C++, Python, and GitHub Actions sources. CodeQL analyses for Python and GitHub Actions run in `build-mode: none`, so no manual build steps are required for those languages. The C++ analysis path uses `build-mode: manual` to compile the project with GCC 14 and a locally installed copy of `prometheus-cpp`. To reproduce the same environment locally, use the following commands (they require sudo privileges):
+The repository is scanned with GitHub CodeQL for C++, Python, and GitHub Actions sources. CodeQL analyses for Python and GitHub Actions run in `build-mode: none`, so no manual build steps are required for those languages. The C++ analysis path uses `build-mode: manual` to compile the project with GCC 14. To reproduce the same environment locally, use the following commands (they require sudo privileges):
 
 ```bash
 sudo apt-get update
@@ -321,21 +313,7 @@ sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
 sudo apt-get update
 sudo apt-get install -y gcc-14 g++-14 cmake ninja-build pkg-config zlib1g-dev libgtest-dev
 
-if [ ! -d prometheus-cpp ]; then
-  git clone https://github.com/jupp0r/prometheus-cpp.git prometheus-cpp
-fi
-git -C prometheus-cpp submodule update --init --recursive
-
-cmake -S prometheus-cpp -B prometheus-cpp/_build -G Ninja \
-  -DBUILD_SHARED_LIBS=ON \
-  -DENABLE_TESTING=OFF \
-  -DENABLE_PUSH=OFF \
-  -DENABLE_COMPRESSION=OFF \
-  -DENABLE_LOGGING=OFF
-cmake --build prometheus-cpp/_build --parallel
-cmake --install prometheus-cpp/_build --prefix "$(pwd)/prometheus-cpp/_install"
-
-CMAKE_PREFIX_PATH="$(pwd)/prometheus-cpp/_install" cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 ```
 
