@@ -3,7 +3,9 @@
 void Primegen::initGenerator()
 {
     if (!isInitialized) {
+#ifndef NDEBUG
         std::cout << "Generating prime numbers queue...\n";
+#endif
         uint_fast64_t start = 2;
         uint_fast64_t lastStored = 2053;
         double growthFactor = 2.0;
@@ -50,7 +52,9 @@ void Primegen::initGenerator()
             start = end;
         }
         isInitialized = true;
+#ifndef NDEBUG
         std::cout << "Prime numbers queue is ready\n";
+#endif
     }
 }
 

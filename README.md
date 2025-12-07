@@ -54,7 +54,7 @@ A lightweight three-step workflow is used in CI and can be mirrored locally:
 # 2) Build and run cluster-aware tests (C++ client and python functional checks)
 g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
 ./client_integration_test
-python3 tests/tcp_server_cluster_test.py -p -b 64
+python3 tests/tcp_server_cluster_test.py -p -b 256
 
 # 3) Stop cluster
 kill "$(cat cluster.pid)"
