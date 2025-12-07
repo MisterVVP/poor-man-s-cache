@@ -29,6 +29,15 @@ type Config struct {
 	UseHugeTLB        bool
 }
 
+func resolveMetricsPortBase(metricsBase, dataBase, workers int) int {
+	metricsRangeEnd := metricsBase + workers
+	dataRangeEnd := dataBase + workers
+	if metricsBase < dataRangeEnd && dataBase < metricsRangeEnd {
+		return dataRangeEnd + 1 // leave a closed port between data and metrics ranges
+	}
+	return metricsBase
+}
+
 func getEnvInt(key string, defaultVal int) int {
 	raw := os.Getenv(key)
 	if raw == "" {
@@ -162,19 +171,19 @@ func startWorkerOnce(ctx context.Context, cfg Config, i int) (*os.Process, error
 		fmt.Fprintf(os.Stderr, "warning: NUMA bind cpu %d node %d failed: %v\n", i, node, err)
 	}
 
-        port := cfg.BasePort + i
-        cmd := exec.Command(cfg.ServerPath, "--listen", strconv.Itoa(port))
-        cmd.Stdout = os.Stdout
-        cmd.Stderr = os.Stderr
+	port := cfg.BasePort + i
+	cmd := exec.Command(cfg.ServerPath, "--listen", strconv.Itoa(port))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-        metricsPort := cfg.MetricsPortBase + i
+	metricsPort := cfg.MetricsPortBase + i
 
-        cmd.Env = append(os.Environ(),
-                fmt.Sprintf("PMC_SHARD=%d", i),
-                fmt.Sprintf("PMC_NODE=%s", "local"),
-                fmt.Sprintf("METRICS_PORT=%d", metricsPort),
-                "METRICS_PORT_OFFSET=0",
-        )
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("PMC_SHARD=%d", i),
+		fmt.Sprintf("PMC_NODE=%s", "local"),
+		fmt.Sprintf("METRICS_PORT=%d", metricsPort),
+		"METRICS_PORT_OFFSET=0",
+	)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("worker %d start failed: %w", i, err)
@@ -307,18 +316,16 @@ func main() {
 	workers, _ := strconv.Atoi(os.Args[2])
 	basePort, _ := strconv.Atoi(os.Args[3])
 
-        metricsPortBase := getEnvInt("METRICS_PORT", 9100)
-        metricsHost := os.Getenv("PMC_SCRAPE_HOST")
-        if metricsHost == "" {
-                metricsHost = "cache-cluster"
-        }
+	metricsPortBase := getEnvInt("METRICS_PORT", 9100)
+	metricsHost := os.Getenv("PMC_SCRAPE_HOST")
+	if metricsHost == "" {
+		metricsHost = "cache-cluster"
+	}
 
-        metricsRangeEnd := metricsPortBase + workers
-        dataRangeEnd := basePort + workers
-        if metricsPortBase < dataRangeEnd && basePort < metricsRangeEnd {
-                metricsPortBase = dataRangeEnd
-                log.Printf("metrics port base overlaps data ports; shifting to %d", metricsPortBase)
-        }
+	metricsPortBase = resolveMetricsPortBase(metricsPortBase, basePort, workers)
+	if metricsPortBase != getEnvInt("METRICS_PORT", 9100) {
+		log.Printf("metrics port base overlaps data ports; shifting to %d", metricsPortBase)
+	}
 
 	discoveryAddr := os.Getenv("PMC_DISCOVERY_ADDR")
 	if discoveryAddr == "" {

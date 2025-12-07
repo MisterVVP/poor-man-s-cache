@@ -31,6 +31,18 @@ func TestBuildTargetGroups(t *testing.T) {
 	}
 }
 
+func TestResolveMetricsPortBase(t *testing.T) {
+	base := resolveMetricsPortBase(9100, 9101, 4)
+	if base != 9106 {
+		t.Fatalf("expected shifted metrics base to leave a gap, got %d", base)
+	}
+
+	unchanged := resolveMetricsPortBase(9200, 9101, 4)
+	if unchanged != 9200 {
+		t.Fatalf("expected metrics base to stay unchanged when non-overlapping, got %d", unchanged)
+	}
+}
+
 func TestDiscoveryHandler(t *testing.T) {
 	cfg := Config{
 		WorkerCount:       2,
