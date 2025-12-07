@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -21,28 +23,57 @@ type Config struct {
 	UseHugeTLB  bool
 }
 
-func spawnWorkers(cfg Config) error {
+func spawnWorkers(ctx context.Context, cfg Config) error {
+	workerProcs := make([]*os.Process, cfg.WorkerCount)
+
 	for i := range cfg.WorkerCount {
 		idx := i
 
 		go func() {
 			for {
-				if err := startWorkerOnce(cfg, idx); err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				proc, err := startWorkerOnce(ctx, cfg, idx)
+				if proc != nil {
+					workerProcs[idx] = proc
+				}
+
+				if err != nil {
 					fmt.Fprintf(os.Stderr, "worker %d crashed: %v\n", idx, err)
 				} else {
-					fmt.Fprintf(os.Stderr, "worker %d exited, restarting\n", idx)
+					fmt.Fprintf(os.Stderr, "worker %d exited\n", idx)
 				}
-				time.Sleep(1 * time.Second)
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+				}
 			}
 		}()
 
-		time.Sleep(60 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	select {}
+	<-ctx.Done()
+
+	fmt.Fprintf(os.Stderr, "sending SIGTERM to all workers...\n")
+	for _, p := range workerProcs {
+		if p != nil {
+			_ = p.Signal(unix.SIGTERM)
+		}
+	}
+
+	time.Sleep(1000 * time.Millisecond)
+
+	return nil
 }
 
-func startWorkerOnce(cfg Config, i int) error {
+func startWorkerOnce(ctx context.Context, cfg Config, i int) (*os.Process, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -52,40 +83,37 @@ func startWorkerOnce(cfg Config, i int) error {
 	}
 
 	port := cfg.BasePort + i
-
-	args := []string{
-		"--listen", strconv.Itoa(port),
-	}
-
-	cmd := exec.Command(cfg.ServerPath, args...)
+	cmd := exec.Command(cfg.ServerPath, "--listen", strconv.Itoa(port))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("worker %d start failed: %w", i, err)
+		return nil, fmt.Errorf("worker %d start failed: %w", i, err)
 	}
+
+	proc := cmd.Process
 
 	var mask unix.CPUSet
 	mask.Set(i)
-	if err := unix.SchedSetaffinity(cmd.Process.Pid, &mask); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not set CPU affinity for worker %d: %v\n", i, err)
+	_ = unix.SchedSetaffinity(proc.Pid, &mask)
+	_ = setRealtimePriority(proc.Pid)
+
+	fmt.Printf("Started worker %d on port %d (NUMA node %d) (CPU %d)\n", i, port, node, i)
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		_ = proc.Signal(unix.SIGTERM)
+		<-waitDone
+		return proc, nil
+
+	case err := <-waitDone:
+		return proc, err
 	}
-
-	if err := setRealtimePriority(cmd.Process.Pid); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not set RT priority for worker %d: %v\n", i, err)
-	}
-
-	fmt.Printf("Started worker %d on port %d (NUMA node %d) (CPU %d)\n",
-		i, port, node, i)
-
-	err := cmd.Wait()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "worker %d exited with error: %v\n", i, err)
-	} else {
-		fmt.Fprintf(os.Stderr, "worker %d exited cleanly\n", i)
-	}
-
-	return err
 }
 
 func getNUMANodeForCPU(cpu int) int {
@@ -197,9 +225,19 @@ func main() {
 		UseHugeTLB:  false,
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, unix.SIGTERM, unix.SIGINT)
+
+	go func() {
+		sig := <-sigs
+		fmt.Fprintf(os.Stderr, "launcher received signal: %v — shutting down...\n", sig)
+		cancel() // broadcast shutdown
+	}()
+
 	fmt.Println("Launching workers...")
-	err := spawnWorkers(cfg)
-	if err != nil {
+	if err := spawnWorkers(ctx, cfg); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}
 }

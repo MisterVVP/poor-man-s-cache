@@ -56,3 +56,5 @@ tests/__pycache__/
 logs
 pmc-cluster-launcher
 !launcher/go.mod
+cluster.*
+client_integration_test

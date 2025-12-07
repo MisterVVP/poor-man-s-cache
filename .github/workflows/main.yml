@@ -20,7 +20,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Generate test suite
       run: pip install jinja2 && python generate_compose.py 1
@@ -67,3 +67,80 @@ jobs:
 
     - name: Stop cluster
       run: docker compose --profile cluster down
+
+  native_cluster:
+    name: Native cluster tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install dependencies and build prometheus-cpp
+      run: |
+        set -e
+        cd "$GITHUB_WORKSPACE"
+        source .env
+        sudo bash ./scripts/local_server_setup.bash
+        sudo apt update && sudo apt upgrade -y
+        sudo apt install -y git cmake build-essential libgtest-dev zlib1g-dev gcc-14 g++-14
+
+        if [ ! -d prometheus-cpp/.git ]; then
+          rm -rf prometheus-cpp
+          git clone https://github.com/jupp0r/prometheus-cpp.git
+        fi
+
+        cd prometheus-cpp && \
+        git submodule init && git submodule update && \
+        mkdir -p _build && cd _build && \
+        cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF && \
+        cmake --build . --parallel $(nproc) && \
+        ctest -V && \
+        sudo cmake --install .
+
+        cd "$GITHUB_WORKSPACE"
+        go install go.k6.io/xk6/cmd/xk6@latest
+
+    - name: Configure cache server
+      run: cmake --preset Release
+
+    - name: Build cache server
+      run: cmake --build out/build/Release
+
+    - name: Build cluster launcher
+      run: go build -C launcher -o ../pmc-cluster-launcher
+
+    - name: Build C++ client integration test
+      run: g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
+
+    - name: Start cluster
+      run: |
+        ./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 4 9101 > cluster.log 2>&1 &
+        echo $! > cluster.pid
+        sleep 2
+
+    - name: Run cluster-aware client tests
+      env:
+        CACHE_HOST: 127.0.0.1
+        CACHE_PORT: 9101
+        CLUSTER_WORKERS: 4
+      run: ./client_integration_test
+
+    - name: Run cluster functional tests
+      env:
+        CACHE_HOST: 127.0.0.1
+        CLUSTER_BASE_PORT: 9101
+        TEST_ITERATIONS: 1000000
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install -r tests/requirements.txt
+        python3 tests/tcp_server_cluster_test.py -p -b 256
+
+    - name: Stop cluster
+      if: always()
+      run: |
+        if [ -f cluster.pid ]; then
+          kill -s SIGTERM $(cat cluster.pid) || true
+          sleep 2
+        fi
+        cat cluster.log || true
