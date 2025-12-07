@@ -98,7 +98,7 @@ services:
       - tests-resp-pipelined
     networks:
       - cache_network
-    command: ["tcp_server_test.py", "--resp", "-p", "-b", "256"]
+    command: ["tcp_server_test.py", "--resp", "-p", "-b", "128"]
 
   tests-req-per-conn:
     extends:
@@ -122,7 +122,6 @@ services:
       - CACHE_HOST=cache-cluster
       - CLUSTER_BASE_PORT=${CLUSTER_BASE_PORT:-9001}
       - TEST_ITERATIONS=${PMC_CLUSTER_TEST_ITERATIONS:-1000000}
-      - TEST_POOL_SIZE=${PMC_CLUSTER_TEST_POOL_SIZE:-4}
     profiles:
       - tests-cluster
     networks:

@@ -70,11 +70,13 @@ Tweak batch size (-b) based on your system and network.
 ### Functional tests
 
 #### Testing method
+
+##### Single node
 Local python script which is leveraging multiprocessing to send requests to the running server and await response from server.
 
 Example:
-```
-export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
+```bash
+python3 ./tcp_server_test.py -p -b 128
 ```
 
 There are few testing scenarios supported right now:
@@ -91,6 +93,31 @@ Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>)
 - T<sub>server</sub> - time spent to process and respond to all the request by server
 - N - total number of requests 
 
+##### Cluster (experimental)
+- Golang launcher is used to spawn and shut down multiple processes of cache server.
+- Cluster consists of `CLUSTER_WORKERS` workers. It's set to 24 locally and to 4 in github (limited by CPUs of github hosted runner)
+- Separate python test script is used for testing, but it's scenarios are identical to tcp_server_test.py
+
+Below is an example of how to run cluster and tests locally:
+
+Set env variables, for example:
+```bash
+source .env
+```
+
+Start the cluster:
+```bash
+cmake --preset Release
+cmake --build ./out/build/Release
+go build -C ./launcher -o ../pmc-cluster-launcher
+./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 24 9001
+```
+
+Run tests from separate shell:
+```bash
+python3 tests/tcp_server_cluster_test.py -p -b 2048
+```
+
 #### Test setups
 Lunix kernel settings used as much as possible for both local and docker setups can be found in scripts/local_server_setup.bash
 
@@ -101,8 +128,38 @@ Lunix kernel settings used as much as possible for both local and docker setups 
 ##### CI setup 
 Free github hosted runner hardware
 
-#### Test details results
-Local setup. 10 million requests per test suite, 96 test client processes forked
+#### Test details results (Cluster)
+Local setup. 10 million requests per test suite, `multiprocessing.cpu_count()` test client processes forked.
+
+##### Local Ubuntu
+
+###### Without pipelining
+- TBD
+
+###### With pipelining
+Pipelined batch size 2048. (`-b 2048`)
+- 3 000 000 to 4 000 000 RPS (GET/DEL/SET)
+- around 7 500 000 RPS (SET key, GET key, GET non_existent_key) workflow  
+
+##### Docker on Ubuntu  
+###### Without pipelining
+- TBD
+###### With pipelining
+- TBD  
+
+##### Docker on Windows
+- TBD
+
+##### CI setup.
+1 million requests total (4 processes and 250000 chunks per process). Pipelined batch size 256. (`-b 256`)
+###### Without pipelining
+- TBD
+###### With pipelining
+- TBD
+- TBD
+
+#### Test details results (Single Node)
+Local setup. 10 million requests per test suite, `multiprocessing.cpu_count()` test client processes forked, pipelined batch size 128.
 
 ##### Local Ubuntu
 
@@ -110,14 +167,8 @@ Local setup. 10 million requests per test suite, 96 test client processes forked
 more than 100 000 RPS.
 
 ###### With pipelining
-- more than 1 500 000 RPS (GET/DEL)
-- more than 1 000 000 RPS (SET)
+- 1 000 000 to 2 000 000 RPS (GET/DEL/SET)
 - around 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
-
-###### Local 24 node cluster with pipelining
-
-- 3 000 000 to 4 000 000 RPS (GET/DEL/SET)
-- around 7 500 000 RPS (SET key, GET key, GET non_existent_key) workflow  
 
 ##### Docker on Ubuntu  
 ###### Without pipelining
@@ -134,12 +185,12 @@ TBD
 around 22 500 RPS
 ###### With pipelining
 more than 200 000 RPS (SET/GET/DEL)
-more than 400 000 RPS (SET key, GET key, GET non_existent_key) workflow 
+more than 400 000 RPS (SET key, GET key, GET non_existent_key) workflow
 
 #### Goals
 Next step is 10M+ functional RPS on Ubuntu (with our without pipelining)
 
-### How Redis works with the same task
+### How Redis works with the same task (Single node comparison)
 Below are results that I got from using Redis.
 
 #### Ubuntu (with high end processor and half gbit internet)
@@ -147,7 +198,7 @@ Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install
 
 ##### Our own tests
 ```
-python3 ./tcp_server_test.py -p -b 100 --redis
+python3 ./tcp_server_test.py -p -b 128 --redis
 ```
 ###### Results
 around 120 000 RPS for GET / SET / DEL tests  
@@ -158,7 +209,7 @@ around 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
 
 ##### Redis benchmark
 ```
-redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
+redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 128
 ```
 ###### Results
 around 120 000 RPS for GET / SET tests  
@@ -176,7 +227,7 @@ docker compose -f docker-compose-local.yaml --profile redis up
 
 Run official redis-benchmark tool
 ```
-docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
+docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 128
 ```
 
 ##### Results
@@ -302,7 +353,7 @@ cd tests && \
 virtualenv .venv && \
 source .venv/bin/activate && \
 pip install -r requirements.txt && \
-export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
+python3 ./tcp_server_test.py -p -b 128
 ```
 
 > [!TIP]
@@ -317,7 +368,7 @@ valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose .
 
 Run python tests, e.g. from tests folder:
 ```
-python3 ./tcp_server_test.py -p -b 100
+python3 ./tcp_server_test.py -p -b 128
 ```
 
 #### Profiling (callgrind)
