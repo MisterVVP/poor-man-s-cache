@@ -1,11 +1,5 @@
 FROM alpine:latest AS build
 RUN apk update && apk upgrade && apk add git cmake build-base gtest-dev
-RUN git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp \
-    && git submodule init && git submodule update && mkdir _build && cd _build \
-    && cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF \
-    && cmake --build . --parallel 4 \
-    && ctest -V \
-    && cmake --install .
 
 WORKDIR /app
 COPY . .
@@ -19,14 +13,12 @@ FROM alpine:latest
 RUN apk update && apk upgrade && apk add libstdc++ valgrind valgrind-scripts bash
 
 COPY --from=build /app/build/src/poor-man-s-cache /app/poor-man-s-cache
-COPY --from=build /usr/local/include/prometheus/ /usr/local/include/prometheus/
-COPY --from=build /usr/local/lib/ /usr/local/lib/
 
 WORKDIR /callgrind
 COPY ./scripts/callgrind.bash ./callgrind.bash
 
 EXPOSE 9001
-EXPOSE 8080
+EXPOSE 9100
 
 RUN addgroup -g 10001 notroot \
     && adduser -u 10001 -G notroot -h /app -s /sbin/nologin -D poor-man-s-cache

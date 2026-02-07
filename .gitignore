@@ -55,6 +55,7 @@ prometheus-cpp/
 tests/__pycache__/
 logs
 pmc-cluster-launcher
+pmc-cluster-controller
 !launcher/go.mod
 cluster.*
 client_integration_test

@@ -92,8 +92,8 @@ services:
     networks:
       - cache_network
 
-{% for i in range(1, num_tests + 1) %}
-  tests-{{ i }}:
+
+  tests-1:
     extends:
       file: common-compose-config.yaml
       service: tests-common
@@ -104,7 +104,7 @@ services:
       - tests
     networks:
       - cache_network
-{% endfor %}
+
 
   client-integration:
     build:

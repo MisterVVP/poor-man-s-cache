@@ -13,7 +13,8 @@ services:
         hard: "1048576"
     environment:
       - CACHE_PORT=9001
-      - METRICS_PORT=8080
+      - METRICS_PORT=9100
+      - METRICS_PORT_OFFSET=0
       - METRICS_HOST=0.0.0.0
       - NUM_SHARDS=128 # Higher number of shards increases memory overhead but usually leads to better RPS. Extremely high number of shards may lead to key collisions. Hard limit is 4,294,967,295
       - CONN_QUEUE_LIMIT=1048576 # Align with net.core.netdev_max_backlog = 1048576, net.core.somaxconn = 1048576 settings of kernel
