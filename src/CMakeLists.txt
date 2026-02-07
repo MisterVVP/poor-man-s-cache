@@ -16,14 +16,6 @@ add_executable(
   compressor/gzip_compressor.cpp
 )
 
-if(PROMETHEUS_CPP_ENABLE_PUSH)
-  target_link_libraries(${PROJECT_NAME} PRIVATE prometheus-cpp::push $<$<BOOL:${WIN32}>:Ws2_32>)
-endif()
-
-if(PROMETHEUS_CPP_ENABLE_PULL)
-  target_link_libraries(${PROJECT_NAME} PRIVATE prometheus-cpp::pull)
-endif()
-
 target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
 
 add_library(pmc_cache_client INTERFACE)

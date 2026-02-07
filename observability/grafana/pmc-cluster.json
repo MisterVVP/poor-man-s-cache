@@ -1,0 +1,49 @@
+{
+  "title": "Poor Man's Cache - Cluster",
+  "uid": "pmc-cluster",
+  "schemaVersion": 38,
+  "version": 1,
+  "tags": ["pmc", "cache"],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Request rate by operation",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(pmc_requests_total{op=\"get\"}[1m]))", "legendFormat": "get"},
+        {"expr": "sum(rate(pmc_requests_total{op=\"set\"}[1m]))", "legendFormat": "set"},
+        {"expr": "sum(rate(pmc_requests_total{op=\"del\"}[1m]))", "legendFormat": "del"},
+        {"expr": "sum(rate(pmc_requests_total{op=\"other\"}[1m]))", "legendFormat": "other"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Responses by status",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "sum(rate(pmc_responses_total{status=\"ok\"}[1m]))", "legendFormat": "ok"},
+        {"expr": "sum(rate(pmc_responses_total{status=\"not_found\"}[1m]))", "legendFormat": "not_found"},
+        {"expr": "sum(rate(pmc_responses_total{status=\"error\"}[1m]))", "legendFormat": "error"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Connections",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "sum(pmc_connections_current)", "legendFormat": "current"},
+        {"expr": "sum(pmc_connections_accepted_total)", "legendFormat": "accepted"}
+      ],
+      "options": {"reduceOptions": {"calcs": ["last"]}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Bytes in/out",
+      "gridPos": {"h": 6, "w": 12, "x": 6, "y": 8},
+      "targets": [
+        {"expr": "sum(rate(pmc_bytes_rx_total[1m]))", "legendFormat": "rx"},
+        {"expr": "sum(rate(pmc_bytes_tx_total[1m]))", "legendFormat": "tx"}
+      ]
+    }
+  ]
+}

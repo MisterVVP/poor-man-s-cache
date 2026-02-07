@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include <algorithm>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -7,7 +8,8 @@ using namespace server;
 
 ConnectionData::~ConnectionData() = default;
 
-CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numShards), port(settings.port)
+CacheServer::CacheServer(const ServerSettings settings, std::shared_ptr<metrics::MetricsCollector> metricsCollector)
+    : numShards(settings.numShards), port(settings.port), metrics(std::move(metricsCollector))
 {
     setRespInlineCapacity(settings.respInlineCapacity);
 
@@ -70,7 +72,7 @@ CacheServer::CacheServer(const ServerSettings settings): numShards(settings.numS
         throw std::system_error(errno, std::system_category(), "Failed to create epoll instance");
     }
 
-    connManager = std::make_unique<ConnManager>(epoll_fd);
+    connManager = std::make_unique<ConnManager>(epoll_fd, metrics.get());
 
 #ifndef NDEBUG
     std::cout << "Initializing " << numShards << " server shards…\n";
@@ -94,19 +96,45 @@ CacheServer::~CacheServer() {
 
 ResponsePacket CacheServer::processRequestSync(const RequestView& request, ConnectionData& connData)
 {
+    auto recordRequest = [&](metrics::RequestOperation op) {
+        if (metrics) {
+            metrics->incrementRequest(op);
+        }
+    };
+
+    auto recordResponse = [&](metrics::ResponseStatus status) {
+        if (metrics) {
+            metrics->incrementResponse(status);
+        }
+    };
+
     auto handleGet = [&](const char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
+        recordRequest(metrics::RequestOperation::Get);
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Query query{QueryCode::GET, keyPtr, hash};
         auto result = shard.processQuery(query);
+        if (result == NOTHING) {
+            recordResponse(metrics::ResponseStatus::NotFound);
+        } else if (result) {
+            recordResponse(metrics::ResponseStatus::Ok);
+        } else {
+            recordResponse(metrics::ResponseStatus::Error);
+        }
         return protocol == RequestProtocol::RESP ? makeRespBulkString(result) : makeCustomResponse(result);
     };
 
     auto handleSet = [&](const char* keyPtr, const char* valuePtr, RequestProtocol protocol) -> ResponsePacket {
+        recordRequest(metrics::RequestOperation::Set);
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
         auto result = shard.processCommand(cmd);
+        if (result && std::strcmp(result, OK) == 0) {
+            recordResponse(metrics::ResponseStatus::Ok);
+        } else {
+            recordResponse(metrics::ResponseStatus::Error);
+        }
         if (protocol == RequestProtocol::RESP) {
             return (result && std::strcmp(result, OK) == 0) ? makeRespSimpleString(result) : makeRespError(result);
         }
@@ -114,18 +142,29 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     };
 
     auto handleDel = [&](const char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
+        recordRequest(metrics::RequestOperation::Del);
         auto hash = hashFunc(keyPtr);
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
         auto result = shard.processCommand(cmd);
         if (protocol == RequestProtocol::RESP) {
             if (result && std::strcmp(result, OK) == 0) {
+                recordResponse(metrics::ResponseStatus::Ok);
                 return makeRespInteger(1);
             }
             if (result && std::strcmp(result, KEY_NOT_EXISTS) == 0) {
+                recordResponse(metrics::ResponseStatus::NotFound);
                 return makeRespInteger(0);
             }
+            recordResponse(metrics::ResponseStatus::Error);
             return makeRespError(result);
+        }
+        if (result && std::strcmp(result, OK) == 0) {
+            recordResponse(metrics::ResponseStatus::Ok);
+        } else if (result && std::strcmp(result, KEY_NOT_EXISTS) == 0) {
+            recordResponse(metrics::ResponseStatus::NotFound);
+        } else {
+            recordResponse(metrics::ResponseStatus::Error);
         }
         return makeCustomResponse(result);
     };
@@ -145,8 +184,10 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         };
 
         auto queueRespCommand = [&](RespTransactionState::CommandType type, const char* key, const char* value) -> ResponsePacket {
+            recordRequest(metrics::RequestOperation::Other);
             auto& tx = ensureRespTransaction();
             if (!tx.active) {
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 return makeRespError(RESP_ERR_EXEC_NO_MULTI);
             }
@@ -155,19 +196,24 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             queued.type = type;
             queued.key = tx.persistString(key);
             queued.value = tx.persistString(value);
+            recordResponse(metrics::ResponseStatus::Ok);
             return makeRespSimpleString(QUEUED_STR);
         };
 
         RespCommandParts parts{};
         if (!parseRespCommand(request.payload, parts)) {
+            recordRequest(metrics::RequestOperation::Other);
+            recordResponse(metrics::ResponseStatus::Error);
             ++numErrors;
             markRespTransactionError();
             return makeErrorResponse(RequestProtocol::RESP, UNABLE_TO_PARSE_REQUEST_ERROR);
         }
 
         if (std::strcmp(parts.command, MULTI_STR) == 0) {
+            recordRequest(metrics::RequestOperation::Other);
             auto& tx = ensureRespTransaction();
             if (tx.active) {
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 markRespTransactionError();
                 return makeRespError(RESP_ERR_MULTI_NESTED);
@@ -175,11 +221,14 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             tx.active = true;
             tx.aborted = false;
             tx.clearQueue();
+            recordResponse(metrics::ResponseStatus::Ok);
             return makeRespSimpleString(OK);
         }
 
         if (std::strcmp(parts.command, DISCARD_STR) == 0) {
+            recordRequest(metrics::RequestOperation::Other);
             if (!connData.respTransaction || !connData.respTransaction->active) {
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 return makeRespError(RESP_ERR_DISCARD_NO_MULTI);
             }
@@ -187,11 +236,14 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             tx.clearQueue();
             tx.active = false;
             tx.aborted = false;
+            recordResponse(metrics::ResponseStatus::Ok);
             return makeRespSimpleString(OK);
         }
 
         if (std::strcmp(parts.command, EXEC_STR) == 0) {
+            recordRequest(metrics::RequestOperation::Other);
             if (!connData.respTransaction || !connData.respTransaction->active) {
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 return makeRespError(RESP_ERR_EXEC_NO_MULTI);
             }
@@ -201,6 +253,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
                 tx.active = false;
                 tx.aborted = false;
                 ++numErrors;
+                recordResponse(metrics::ResponseStatus::Error);
                 return makeRespError(RESP_ERR_EXEC_ABORTED);
             }
             std::vector<ResponsePacket> results;
@@ -221,11 +274,14 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
             tx.clearQueue();
             tx.active = false;
             tx.aborted = false;
+            recordResponse(metrics::ResponseStatus::Ok);
             return makeRespArray(results);
         }
 
         if (std::strcmp(parts.command, GET_STR) == 0) {
             if (parts.argc != 2) {
+                recordRequest(metrics::RequestOperation::Other);
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 markRespTransactionError();
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
@@ -238,6 +294,8 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
 
         if (std::strcmp(parts.command, SET_STR) == 0) {
             if (parts.argc != 3 || parts.value == nullptr) {
+                recordRequest(metrics::RequestOperation::Other);
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 markRespTransactionError();
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
@@ -250,6 +308,8 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
 
         if (std::strcmp(parts.command, DEL_STR) == 0) {
             if (parts.argc != 2) {
+                recordRequest(metrics::RequestOperation::Other);
+                recordResponse(metrics::ResponseStatus::Error);
                 ++numErrors;
                 markRespTransactionError();
                 return makeErrorResponse(RequestProtocol::RESP, INVALID_COMMAND_FORMAT);
@@ -261,6 +321,8 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         }
 
         ++numErrors;
+        recordRequest(metrics::RequestOperation::Other);
+        recordResponse(metrics::ResponseStatus::Error);
         markRespTransactionError();
         return makeErrorResponse(RequestProtocol::RESP, UNKNOWN_COMMAND);
     }
@@ -268,6 +330,8 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     const auto firstSpace = request.payload.find(' ');
     if (firstSpace == std::string_view::npos) {
         ++numErrors;
+        recordRequest(metrics::RequestOperation::Other);
+        recordResponse(metrics::ResponseStatus::Error);
         return makeErrorResponse(RequestProtocol::Custom, UNABLE_TO_PARSE_REQUEST_ERROR);
     }
 
@@ -275,6 +339,8 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     const auto remainder = request.payload.substr(firstSpace + 1);
     if (remainder.empty()) {
         ++numErrors;
+        recordRequest(metrics::RequestOperation::Other);
+        recordResponse(metrics::ResponseStatus::Error);
         return makeErrorResponse(RequestProtocol::Custom, INVALID_COMMAND_FORMAT);
     }
 
@@ -288,21 +354,27 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     }
 
     if (command == GET_STR) {
+        recordRequest(metrics::RequestOperation::Get);
         return handleGet(keyPtr, RequestProtocol::Custom);
     }
 
     if (command == SET_STR) {
+        recordRequest(metrics::RequestOperation::Set);
         if (!valuePtr) {
             ++numErrors;
+            recordResponse(metrics::ResponseStatus::Error);
             return makeErrorResponse(RequestProtocol::Custom, INVALID_COMMAND_FORMAT);
         }
         return handleSet(keyPtr, valuePtr, RequestProtocol::Custom);
     }
 
     if (command == DEL_STR) {
+        recordRequest(metrics::RequestOperation::Del);
         return handleDel(keyPtr, RequestProtocol::Custom);
     }
 
+    recordRequest(metrics::RequestOperation::Other);
+    recordResponse(metrics::ResponseStatus::Error);
     ++numErrors;
     return makeErrorResponse(RequestProtocol::Custom, UNKNOWN_COMMAND);
 }
@@ -343,7 +415,7 @@ HandleReqTask CacheServer::handleRequests()
                     }
 
                     if (!it->second.flushWriteBatch(fd)) {
-                        connManager->closeConnection(fd);
+                        connManager->closeConnection(fd, metrics::CloseReason::Error);
                     }
                 }
             }
@@ -352,10 +424,11 @@ HandleReqTask CacheServer::handleRequests()
             std::vector<AsyncReadTask> readers;
             readers.reserve(MAX_EVENTS);
             numRequests += event_count;
+            std::size_t processedRequests = 0;
             for (int i = 0; i < event_count; ++i) {
                 auto client_fd = epoll_events[i].data.fd;
                 if ((epoll_events[i].events & (EPOLLERR | EPOLLHUP))) {
-                    connManager->closeConnection(client_fd);
+                    connManager->closeConnection(client_fd, metrics::CloseReason::Error);
                     continue;
                 }
 
@@ -363,7 +436,7 @@ HandleReqTask CacheServer::handleRequests()
                     auto it = connManager->connections.find(client_fd);
                     if (it != connManager->connections.end()) {
                         if (!it->second.flushWriteBatch(client_fd)) {
-                            connManager->closeConnection(client_fd);
+                            connManager->closeConnection(client_fd, metrics::CloseReason::Error);
                             continue;
                         }
                     }
@@ -394,14 +467,20 @@ HandleReqTask CacheServer::handleRequests()
                 while (!connData.pendingRequests.empty()) {
                     auto req = connData.pendingRequests.front();
                     connData.pendingRequests.pop_front();
+                    ++processedRequests;
                     responses.emplace_back(processRequestSync(req, connData));
                 }
                 if (connData.bytesToErase > 0) {
+                    bufferedReadBytes -= std::min<std::size_t>(bufferedReadBytes, connData.bytesToErase);
                     connData.readBuffer.erase(connData.readBuffer.begin(), connData.readBuffer.begin() + connData.bytesToErase);
                     connData.bytesToErase = 0;
+                    if (metrics) {
+                        metrics->setReadBufferUsageBytes(bufferedReadBytes);
+                    }
                 }
             }
 
+            std::size_t queuedBytes = 0;
             for (auto& [fd, responses] : responsesPerConn) {
                 if (responses.empty())
                     continue;
@@ -413,13 +492,25 @@ HandleReqTask CacheServer::handleRequests()
                 ConnectionData& conn = it->second;
 
                 for (const auto& resp : responses) {
+                    queuedBytes += resp.size;
                     conn.queueResponseChunk(resp.data, resp.size, resp.protocol);
+                    if (resp.protocol == RequestProtocol::Custom) {
+                        queuedBytes += 1;
+                    }
                 }
 
                 if(!conn.flushWriteBatch(fd)) {
                     ++numErrors;
-                    connManager->closeConnection(fd);
+                    connManager->closeConnection(fd, metrics::CloseReason::Error);
                 };
+            }
+
+            if (metrics) {
+                metrics->setWriteQueueDepth(queuedBytes);
+                metrics->recordBatch(processedRequests);
+                if (processedRequests > 0) {
+                    updateKvsMetrics();
+                }
             }
 
 #ifndef NDEBUG
@@ -456,11 +547,20 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
         }
 
         if (bytes_read == 0) {
-            connManager->closeConnection(client_fd);
+            bufferedReadBytes -= std::min<std::size_t>(bufferedReadBytes, connData.readBuffer.size());
+            if (metrics) {
+                metrics->setReadBufferUsageBytes(bufferedReadBytes);
+            }
+            connManager->closeConnection(client_fd, metrics::CloseReason::Client);
             co_return ReadRequestResult{ ReqReadOperationResult::Failure };
         }
 
         connData.readBuffer.insert(connData.readBuffer.end(), buffer, buffer + bytes_read);
+        bufferedReadBytes += static_cast<std::size_t>(bytes_read);
+        if (metrics) {
+            metrics->addBytesRx(static_cast<std::size_t>(bytes_read));
+            metrics->setReadBufferUsageBytes(bufferedReadBytes);
+        }
         ++read_attempts;
     }
 
@@ -484,7 +584,11 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
                 connData.pendingRequests.clear();
                 connData.readBuffer.clear();
                 connData.bytesToErase = 0;
-                connManager->closeConnection(client_fd);
+                bufferedReadBytes = 0;
+                if (metrics) {
+                    metrics->setReadBufferUsageBytes(bufferedReadBytes);
+                }
+                connManager->closeConnection(client_fd, metrics::CloseReason::Error);
                 co_return ReadRequestResult{ ReqReadOperationResult::Failure };
             }
 
@@ -514,6 +618,10 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
 
     if (start > 0) {
         connData.bytesToErase += start;
+    }
+
+    if (metrics) {
+        metrics->setReadBufferUsageBytes(bufferedReadBytes);
     }
 
     if (parsed) {
@@ -568,6 +676,9 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
         }
 
         totalSent += bytesSent;
+        if (metrics) {
+            metrics->addBytesTx(static_cast<std::size_t>(bytesSent));
+        }
 
         while (bytesSent > 0 && iov_idx < iov.size()) {
             if (static_cast<size_t>(bytesSent) >= iov[iov_idx].iov_len) {
@@ -583,6 +694,20 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
         msg.msg_iov = &iov[iov_idx];
         msg.msg_iovlen = iov.size() - iov_idx;
     }
+}
+
+void CacheServer::updateKvsMetrics()
+{
+    if (!metrics) {
+        return;
+    }
+
+    uint64_t totalItems = 0;
+    for (const auto& shard : serverShards) {
+        totalItems += shard.keyValueStore->getNumEntries();
+    }
+
+    metrics->setKvsState(totalItems, 0);
 }
 
 int CacheServer::Start()

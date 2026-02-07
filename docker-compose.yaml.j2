@@ -14,7 +14,7 @@ services:
       - cache_network
     ports:
       - "9001:9001"
-      - "8080:8080"
+      - "9100:9100"
 
   cache-cluster:
     build:
@@ -25,7 +25,7 @@ services:
     extends:
       file: common-compose-config.yaml
       service: cache-common
-    entrypoint: ["/app/pmc-cluster-launcher"]
+    entrypoint: ["/app/pmc-cluster-controller"]
     command: ["/app/poor-man-s-cache", "${CLUSTER_WORKERS:-8}", "${CLUSTER_BASE_PORT:-9001}"]
     environment:
       - CLUSTER_WORKERS=${CLUSTER_WORKERS:-8}
@@ -35,6 +35,62 @@ services:
     networks:
       - cache_network
     ports: []
+    expose:
+      - "9400"
+
+  mimir:
+    image: grafana/mimir:latest
+    profiles:
+      - monitoring
+    command:
+      - -config.file=/etc/mimir/mimir.yaml
+    volumes:
+      - ./observability/mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+    ports:
+      - "9009:9009"
+    networks:
+      - cache_network
+
+  alloy:
+    image: grafana/alloy:latest
+    profiles:
+      - monitoring
+    environment:
+      - PMC_PROM_SCRAPE_INTERVAL=${PMC_PROM_SCRAPE_INTERVAL:-5s}
+      - PMC_PROM_SCRAPE_TIMEOUT=${PMC_PROM_SCRAPE_TIMEOUT:-5s}
+      - PMC_PROM_DISCOVERY_REFRESH_INTERVAL=${PMC_PROM_DISCOVERY_REFRESH_INTERVAL:-5s}
+      - PMC_PROM_TARGET_1=${PMC_PROM_TARGET_1:-cache:9100}
+      - PMC_PROM_TARGET_2=${PMC_PROM_TARGET_2:-host.docker.internal:9100}
+      - PMC_PROM_DISCOVERY_URL=${PMC_PROM_DISCOVERY_URL:-http://cache-cluster:9400/discovery}
+      - PMC_MIMIR_REMOTE_WRITE_URL=${PMC_MIMIR_REMOTE_WRITE_URL:-http://mimir:9009/api/v1/push}
+    command:
+      - run
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - "12345:12345"
+    depends_on:
+      - mimir
+    networks:
+      - cache_network
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    profiles:
+      - monitoring
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - PMC_GRAFANA_PROMETHEUS_URL=${PMC_GRAFANA_PROMETHEUS_URL:-http://mimir:9009/prometheus}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - mimir
+    networks:
+      - cache_network
 
 {% for i in range(1, num_tests + 1) %}
   tests-{{ i }}:

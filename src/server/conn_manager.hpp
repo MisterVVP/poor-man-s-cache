@@ -16,6 +16,7 @@
 #include "../kvs/kvs.hpp"
 #include "../utils/time.hpp"
 #include "../non_copyable.hpp"
+#include "../metrics/metrics.hpp"
 #include "coroutines.hpp"
 #include "sockutils.hpp"
 #include "constants.hpp"
@@ -99,6 +100,7 @@ namespace server {
             std::deque<RequestView> pendingRequests;
             size_t bytesToErase = 0;
             std::unique_ptr<RespTransactionState> respTransaction;
+            metrics::MetricsCollector* metrics = nullptr;
 
             void queueResponseChunk(const char* data, std::size_t len, RequestProtocol protocol) noexcept
             {
@@ -183,6 +185,10 @@ namespace server {
 
                     remaining -= written;
 
+                    if (metrics) {
+                        metrics->addBytesTx(written);
+                    }
+
                     while (written > 0) {
                         const auto& ch = wb.chunks[idx];
                         auto chunkRemaining = ch.len - offsetInside;
@@ -237,7 +243,8 @@ namespace server {
             }
 
             ConnectionData() = default;
-            ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
+            ConnectionData(timespec ts, int epfd, metrics::MetricsCollector* metricsCollector = nullptr)
+                : lastActivity(ts), epoll_fd(epfd), metrics(metricsCollector) {
                 readBuffer.reserve(READ_BUFFER_SIZE);
             }
             ~ConnectionData();
@@ -265,12 +272,15 @@ namespace server {
                 }
                 timespec time{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
-                    auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd );
+                    auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd, metrics);
                     if (!success) {
 #ifndef NDEBUG
                         std::cerr << "Connection info already exists for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
 #endif
                         return 0;
+                    }
+                    if (metrics) {
+                        metrics->connectionAccepted();
                     }
                 } else {
                     perror("clock_gettime() failed when registering connection");
@@ -311,7 +321,7 @@ namespace server {
                 return true;
             };
 
-            void closeConnection(int fd) noexcept {
+            void closeConnection(int fd, metrics::CloseReason reason = metrics::CloseReason::Server) noexcept {
                 std::lock_guard<std::mutex> lock(conn_mutex);
                 if (!connections.contains(fd)) {
                     return;
@@ -330,6 +340,9 @@ namespace server {
 #ifndef NDEBUG
                     perror("Error when closing socket descriptor");
 #endif
+                }
+                if (metrics) {
+                    metrics->connectionClosed(reason);
                 }
                 connections.erase(fd);
             };
@@ -379,7 +392,12 @@ namespace server {
                 co_return 0;
             }
 
-            ConnManager(int epoll_fd): epoll_fd(epoll_fd) {}
+            ConnManager(int epoll_fd, metrics::MetricsCollector* metrics = nullptr): epoll_fd(epoll_fd), metrics(metrics) {}
+
+            void setMetrics(metrics::MetricsCollector* m) noexcept { metrics = m; }
+
+        private:
+            metrics::MetricsCollector* metrics = nullptr;
     };
 }
 
