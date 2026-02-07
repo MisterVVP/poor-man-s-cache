@@ -47,6 +47,7 @@ inline void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size)
                 auto entryIdx = tableToDelete[i].entries[j];
                 if (!entryIdx) continue;
                 entryPool.deallocate(entryIdx);
+                --numEntries;
             }
         }
         delete[] tableToDelete;
@@ -261,6 +262,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 
             if (strcmp(entry.key, key) == 0) {
                 entryPool.deallocate(entryIdx);
+                --numEntries;
                 return true;
             }
         }
