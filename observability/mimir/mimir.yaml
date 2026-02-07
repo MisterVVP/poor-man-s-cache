@@ -1,7 +1,7 @@
 multitenancy_enabled: false
 
 server:
-  http_listen_port: 9009
+  http_listen_port: 9200
 
 common:
   storage:

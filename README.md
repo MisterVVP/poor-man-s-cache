@@ -273,11 +273,11 @@ To launch the bundled Grafana stack with Grafana Alloy + Mimir (Prometheus-compa
 For local development, you can run only Grafana Alloy + Mimir + Grafana in Docker while scraping a cache cluster running directly on localhost by overriding discovery and target addresses, for example:
 
 ```bash
-PMC_PROM_TARGET_1=host.docker.internal:9100 \
-PMC_PROM_TARGET_2=host.docker.internal:9101 \
-PMC_PROM_DISCOVERY_URL=http://host.docker.internal:9400/discovery \
-PMC_GRAFANA_PROMETHEUS_URL=http://mimir:9009/prometheus \
-PMC_MIMIR_REMOTE_WRITE_URL=http://host.docker.internal:9009/api/v1/push \
+PMC_PROM_TARGET_1=172.17.0.1:9100 \
+PMC_PROM_TARGET_2=172.17.0.1:9101 \
+PMC_PROM_DISCOVERY_URL=http://172.17.0.1:9400/discovery \
+PMC_GRAFANA_PROMETHEUS_URL=http://mimir:9200/prometheus \
+PMC_MIMIR_REMOTE_WRITE_URL=http://172.17.0.1:9200/api/v1/push \
 docker compose --profile monitoring up
 ```
 
