@@ -15,9 +15,3 @@ blocks_storage:
     dir: /data/tsdb
   bucket_store:
     sync_dir: /data/tsdb-sync
-
-ruler:
-  storage:
-    type: local
-    local:
-      directory: /data/ruler

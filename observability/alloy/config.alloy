@@ -10,13 +10,13 @@ prometheus.scrape "pmc_single" {
 }
 
 // Cluster discovery targets
-prometheus.discovery.http "pmc_cluster" {
+discovery.http "pmc_cluster" {
   url = env("PMC_PROM_DISCOVERY_URL")
   refresh_interval = env("PMC_PROM_DISCOVERY_REFRESH_INTERVAL")
 }
 
 prometheus.scrape "pmc_cluster" {
-  targets = prometheus.discovery.http.pmc_cluster.targets
+  targets = discovery.http.pmc_cluster.targets
   scrape_interval = env("PMC_PROM_SCRAPE_INTERVAL")
   forward_to = [prometheus.remote_write.mimir.receiver]
 }
