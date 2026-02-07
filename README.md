@@ -266,21 +266,22 @@ After the server has started, run the test script:
 docker compose -f docker-compose-local.yaml --profile tests up
 ```
 
-You can check Prometheus metrics while tests are running by opening http://localhost:9100/metrics. Monitoring assets now live under `./observability`.
+You can check Prometheus metrics while tests are running by opening http://localhost:9100/metrics. Monitoring assets now live under `./observability` and are driven by Grafana Alloy.
 
-To launch the bundled Prometheus and Grafana stack against containers in the same compose project, use `docker compose --profile main --profile cluster --profile monitoring up` and open Grafana at http://localhost:3000 with the pre-provisioned "Poor Man's Cache - Cluster" dashboard.
+To launch the bundled Grafana stack with Grafana Alloy + Mimir (Prometheus-compatible backend) against containers in the same compose project, use `docker compose --profile main --profile cluster --profile monitoring up` and open Grafana at http://localhost:3000 with the pre-provisioned "Poor Man's Cache - Cluster" dashboard.
 
-For local development, you can run only Prometheus/Grafana in Docker while scraping a cache cluster running directly on localhost by overriding discovery and target addresses, for example:
+For local development, you can run only Grafana Alloy + Mimir + Grafana in Docker while scraping a cache cluster running directly on localhost by overriding discovery and target addresses, for example:
 
 ```bash
 PMC_PROM_TARGET_1=host.docker.internal:9100 \
 PMC_PROM_TARGET_2=host.docker.internal:9101 \
 PMC_PROM_DISCOVERY_URL=http://host.docker.internal:9400/discovery \
-PMC_GRAFANA_PROMETHEUS_URL=http://prometheus:9090 \
+PMC_GRAFANA_PROMETHEUS_URL=http://mimir:9009/prometheus \
+PMC_MIMIR_REMOTE_WRITE_URL=http://host.docker.internal:9009/api/v1/push \
 docker compose --profile monitoring up
 ```
 
-The cluster controller discovery endpoint defaults to `http://cache-cluster:9400/discovery` and can still be adjusted via `PMC_DISCOVERY_ADDR` and `PMC_SCRAPE_HOST`; Prometheus consumes it through HTTP service discovery so metrics targets are generated automatically from `CLUSTER_WORKERS` and the metrics base port.
+The cluster controller discovery endpoint defaults to `http://cache-cluster:9400/discovery` and can still be adjusted via `PMC_DISCOVERY_ADDR` and `PMC_SCRAPE_HOST`; Grafana Alloy consumes it through HTTP service discovery so metrics targets are generated automatically from `CLUSTER_WORKERS` and the metrics base port.
 
 Don't forget to shut the detached container down by issuing:
 ```

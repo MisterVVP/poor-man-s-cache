@@ -1,0 +1,23 @@
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data
+
+blocks_storage:
+  storage_prefix: blocks
+  tsdb:
+    dir: /data/tsdb
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /data/ruler

@@ -38,8 +38,21 @@ services:
     expose:
       - "9400"
 
-  prometheus:
-    image: prom/prometheus:latest
+  mimir:
+    image: grafana/mimir:latest
+    profiles:
+      - monitoring
+    command:
+      - -config.file=/etc/mimir/mimir.yaml
+    volumes:
+      - ./observability/mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+    ports:
+      - "9009:9009"
+    networks:
+      - cache_network
+
+  alloy:
+    image: grafana/alloy:latest
     profiles:
       - monitoring
     environment:
@@ -48,15 +61,16 @@ services:
       - PMC_PROM_TARGET_1=${PMC_PROM_TARGET_1:-cache:9100}
       - PMC_PROM_TARGET_2=${PMC_PROM_TARGET_2:-host.docker.internal:9100}
       - PMC_PROM_DISCOVERY_URL=${PMC_PROM_DISCOVERY_URL:-http://cache-cluster:9400/discovery}
-    entrypoint:
-      - /bin/sh
-      - -ec
-    command: >-
-      sed -e "s|$${PMC_PROM_SCRAPE_INTERVAL}|$$PMC_PROM_SCRAPE_INTERVAL|g" -e "s|$${PMC_PROM_DISCOVERY_REFRESH_INTERVAL}|$$PMC_PROM_DISCOVERY_REFRESH_INTERVAL|g" -e "s|$${PMC_PROM_TARGET_1}|$$PMC_PROM_TARGET_1|g" -e "s|$${PMC_PROM_TARGET_2}|$$PMC_PROM_TARGET_2|g" -e "s|$${PMC_PROM_DISCOVERY_URL}|$$PMC_PROM_DISCOVERY_URL|g" /etc/prometheus/prometheus.yml.tmpl > /etc/prometheus/prometheus.yml && exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml
+      - PMC_MIMIR_REMOTE_WRITE_URL=${PMC_MIMIR_REMOTE_WRITE_URL:-http://mimir:9009/api/v1/push}
+    command:
+      - run
+      - /etc/alloy/config.alloy
     volumes:
-      - ./observability/prometheus.yml.tmpl:/etc/prometheus/prometheus.yml.tmpl:ro
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
     ports:
-      - "9090:9090"
+      - "12345:12345"
+    depends_on:
+      - mimir
     networks:
       - cache_network
 
@@ -66,14 +80,14 @@ services:
       - monitoring
     environment:
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
-      - PMC_GRAFANA_PROMETHEUS_URL=${PMC_GRAFANA_PROMETHEUS_URL:-http://prometheus:9090}
+      - PMC_GRAFANA_PROMETHEUS_URL=${PMC_GRAFANA_PROMETHEUS_URL:-http://mimir:9009/prometheus}
     ports:
       - "3000:3000"
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana:/var/lib/grafana/dashboards:ro
     depends_on:
-      - prometheus
+      - mimir
     networks:
       - cache_network
 
