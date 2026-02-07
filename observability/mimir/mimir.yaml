@@ -15,3 +15,7 @@ blocks_storage:
     dir: /data/tsdb
   bucket_store:
     sync_dir: /data/tsdb-sync
+
+ingester:
+  ring:
+    replication_factor: 1

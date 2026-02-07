@@ -1,11 +1,13 @@
 apiVersion: 1
 
-dashboardproviders:
+providers:
   - name: 'pmc'
     orgId: 1
     folder: 'PMC'
     type: file
     disableDeletion: true
     editable: true
+    updateIntervalSeconds: 5
     options:
       path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
