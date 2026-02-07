@@ -4,8 +4,13 @@ logging {
 
 // Static targets (single node or local host overrides)
 prometheus.scrape "pmc_single" {
-  targets = [env("PMC_PROM_TARGET_1"), env("PMC_PROM_TARGET_2")]
+  job_name = "pmc_single"
+  targets = [
+    { __address__ = env("PMC_PROM_TARGET_1") },
+    { __address__ = env("PMC_PROM_TARGET_2") },
+  ]
   scrape_interval = env("PMC_PROM_SCRAPE_INTERVAL")
+  scrape_timeout = env("PMC_PROM_SCRAPE_TIMEOUT")
   forward_to = [prometheus.remote_write.mimir.receiver]
 }
 
@@ -16,8 +21,10 @@ discovery.http "pmc_cluster" {
 }
 
 prometheus.scrape "pmc_cluster" {
+  job_name = "pmc_cluster"
   targets = discovery.http.pmc_cluster.targets
   scrape_interval = env("PMC_PROM_SCRAPE_INTERVAL")
+  scrape_timeout = env("PMC_PROM_SCRAPE_TIMEOUT")
   forward_to = [prometheus.remote_write.mimir.receiver]
 }
 
