@@ -48,10 +48,18 @@ services:
       - PMC_PROM_TARGET_1=${PMC_PROM_TARGET_1:-cache:9100}
       - PMC_PROM_TARGET_2=${PMC_PROM_TARGET_2:-host.docker.internal:9100}
       - PMC_PROM_DISCOVERY_URL=${PMC_PROM_DISCOVERY_URL:-http://cache-cluster:9400/discovery}
-    command:
+    entrypoint:
       - /bin/sh
       - -ec
-      - cp /etc/prometheus/prometheus.yml.tmpl /etc/prometheus/prometheus.yml && sed -i "s|$${PMC_PROM_SCRAPE_INTERVAL}|$$PMC_PROM_SCRAPE_INTERVAL|g; s|$${PMC_PROM_DISCOVERY_REFRESH_INTERVAL}|$$PMC_PROM_DISCOVERY_REFRESH_INTERVAL|g; s|$${PMC_PROM_TARGET_1}|$$PMC_PROM_TARGET_1|g; s|$${PMC_PROM_TARGET_2}|$$PMC_PROM_TARGET_2|g; s|$${PMC_PROM_DISCOVERY_URL}|$$PMC_PROM_DISCOVERY_URL|g" /etc/prometheus/prometheus.yml && exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml
+    command: >-
+      cp /etc/prometheus/prometheus.yml.tmpl /etc/prometheus/prometheus.yml &&
+      sed -i "s|$${PMC_PROM_SCRAPE_INTERVAL}|$$PMC_PROM_SCRAPE_INTERVAL|g;
+      s|$${PMC_PROM_DISCOVERY_REFRESH_INTERVAL}|$$PMC_PROM_DISCOVERY_REFRESH_INTERVAL|g;
+      s|$${PMC_PROM_TARGET_1}|$$PMC_PROM_TARGET_1|g;
+      s|$${PMC_PROM_TARGET_2}|$$PMC_PROM_TARGET_2|g;
+      s|$${PMC_PROM_DISCOVERY_URL}|$$PMC_PROM_DISCOVERY_URL|g"
+      /etc/prometheus/prometheus.yml &&
+      exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml
     volumes:
       - ./observability/prometheus.yml.tmpl:/etc/prometheus/prometheus.yml.tmpl:ro
     ports:
