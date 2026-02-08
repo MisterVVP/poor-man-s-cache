@@ -157,6 +157,7 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
                 if (entry.key) {
                     if (strcmp(entry.key, key) == 0) {
                         entryPool.deallocate(entryIdx);
+                        --numEntries;
                     } else {
                         continue;
                     }
