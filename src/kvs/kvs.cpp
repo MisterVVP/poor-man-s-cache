@@ -134,6 +134,27 @@ inline void KeyValueStore::copyEntry(Entry &dest, const Entry &src) {
     dest.compressed = src.compressed;
 }
 
+inline void KeyValueStore::updateEntryValue(Entry &entry, const char *value, size_t vSize) {
+    delete[] entry.value;
+    entry.value = nullptr;
+    entry.vSize = 0;
+    entry.compressed = false;
+
+    if (compressionEnabled && vSize >= MIN_SIZE_TO_COMPRESS) {
+        auto compressed = GzipCompressor::Compress(value);
+        if (compressed.operationResult == 0) {
+            entry.value = compressed.data;
+            entry.vSize = compressed.size;
+            entry.compressed = true;
+            return;
+        }
+    }
+
+    entry.value = new char[vSize];
+    entry.vSize = vSize;
+    memcpy(entry.value, value, vSize);
+}
+
 bool KeyValueStore::set(const char *key, const char *value) {
     auto primaryHash = hashFunc(key);
     return set(key, value, primaryHash);
@@ -153,11 +174,11 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             auto entryIdx = table[idx].entries[i];
             if (entryIdx) {
-                auto entry = entryPool.get(entryIdx);
+                auto &entry = entryPool.get(entryIdx);
                 if (entry.key) {
                     if (strcmp(entry.key, key) == 0) {
-                        entryPool.deallocate(entryIdx);
-                        --numEntries;
+                        updateEntryValue(entry, value, vSize);
+                        return true;
                     } else {
                         continue;
                     }
