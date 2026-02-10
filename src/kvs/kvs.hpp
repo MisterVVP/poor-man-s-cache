@@ -129,7 +129,6 @@ namespace kvs
             bool isResizing = false;
             void resize();
             void copyEntry(Entry &dest, const Entry &src);
-            void updateEntryValue(Entry &entry, const char *value, size_t vSize);
             uint_fast64_t insertEntry(const char *key, const char *value, size_t kSize, size_t vSize);
             void migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx);
             const char* decompressEntry(const Entry &entry);

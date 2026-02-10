@@ -47,7 +47,6 @@ inline void KeyValueStore::cleanTable(Bucket *tableToDelete, uint_fast64_t size)
                 auto entryIdx = tableToDelete[i].entries[j];
                 if (!entryIdx) continue;
                 entryPool.deallocate(entryIdx);
-                --numEntries;
             }
         }
         delete[] tableToDelete;
@@ -134,31 +133,6 @@ inline void KeyValueStore::copyEntry(Entry &dest, const Entry &src) {
     dest.compressed = src.compressed;
 }
 
-inline void KeyValueStore::updateEntryValue(Entry &entry, const char *value, size_t vSize) {
-    char *newValue = nullptr;
-    size_t newSize = 0;
-    bool newCompressed = false;
-    if (compressionEnabled && vSize >= MIN_SIZE_TO_COMPRESS) {
-        auto compressed = GzipCompressor::Compress(value);
-        if (compressed.operationResult == 0) {
-            newValue = compressed.data;
-            newSize = compressed.size;
-            newCompressed = true;
-        }
-    }
-
-    if (!newValue) {
-        newValue = new char[vSize];
-        newSize = vSize;
-        memcpy(newValue, value, vSize);
-    }
-
-    delete[] entry.value;
-    entry.value = newValue;
-    entry.vSize = newSize;
-    entry.compressed = newCompressed;
-}
-
 bool KeyValueStore::set(const char *key, const char *value) {
     auto primaryHash = hashFunc(key);
     return set(key, value, primaryHash);
@@ -178,11 +152,10 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
         for (int i = 0; i < BUCKET_SIZE; ++i) {
             auto entryIdx = table[idx].entries[i];
             if (entryIdx) {
-                auto &entry = entryPool.get(entryIdx);
+                auto entry = entryPool.get(entryIdx);
                 if (entry.key) {
                     if (strcmp(entry.key, key) == 0) {
-                        updateEntryValue(entry, value, vSize);
-                        return true;
+                        entryPool.deallocate(entryIdx);
                     } else {
                         continue;
                     }
@@ -288,7 +261,6 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 
             if (strcmp(entry.key, key) == 0) {
                 entryPool.deallocate(entryIdx);
-                --numEntries;
                 return true;
             }
         }
