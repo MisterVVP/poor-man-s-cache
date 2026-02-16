@@ -3,6 +3,7 @@
   "uid": "pmc-cluster",
   "schemaVersion": 38,
   "version": 1,
+  "refresh": "10s",
   "tags": ["pmc", "cache"],
   "panels": [
     {
@@ -27,9 +28,26 @@
       ]
     },
     {
+      "type": "timeseries",
+      "title": "Request rate per shard",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {"expr": "sum by (shard) (rate(pmc_requests_total[1m]))", "legendFormat": "shard {{shard}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Bytes in/out per shard",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {"expr": "sum by (shard) (rate(pmc_bytes_rx_total[1m]))", "legendFormat": "rx shard {{shard}}"},
+        {"expr": "sum by (shard) (rate(pmc_bytes_tx_total[1m]))", "legendFormat": "tx shard {{shard}}"}
+      ]
+    },
+    {
       "type": "stat",
       "title": "Connections",
-      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 16},
       "targets": [
         {"expr": "sum(pmc_connections_current)", "legendFormat": "current"},
         {"expr": "sum(pmc_connections_accepted_total)", "legendFormat": "accepted"}
@@ -38,11 +56,80 @@
     },
     {
       "type": "timeseries",
+      "title": "Connection closures by reason",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 16},
+      "targets": [
+        {"expr": "sum(rate(pmc_connections_closed_total{reason=\"client\"}[1m]))", "legendFormat": "client"},
+        {"expr": "sum(rate(pmc_connections_closed_total{reason=\"server\"}[1m]))", "legendFormat": "server"},
+        {"expr": "sum(rate(pmc_connections_closed_total{reason=\"error\"}[1m]))", "legendFormat": "error"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Write queue depth",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 16},
+      "targets": [
+        {"expr": "sum(pmc_write_queue_depth)", "legendFormat": "depth"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Read buffer usage",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 16},
+      "targets": [
+        {"expr": "sum(pmc_read_buffer_usage_bytes)", "legendFormat": "bytes"}
+      ]
+    },
+    {
+      "type": "timeseries",
       "title": "Bytes in/out",
-      "gridPos": {"h": 6, "w": 12, "x": 6, "y": 8},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 22},
       "targets": [
         {"expr": "sum(rate(pmc_bytes_rx_total[1m]))", "legendFormat": "rx"},
         {"expr": "sum(rate(pmc_bytes_tx_total[1m]))", "legendFormat": "tx"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Batch rate",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 22},
+      "targets": [
+        {"expr": "sum(rate(pmc_batches_total[1m]))", "legendFormat": "batches"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Average requests per batch",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 22},
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_requests_per_batch_sum[1m])) / sum(rate(pmc_requests_per_batch_count[1m]))",
+          "legendFormat": "avg"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "KVS items",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 28},
+      "targets": [
+        {"expr": "sum(pmc_kvs_items)", "legendFormat": "items"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "KVS bytes used",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 28},
+      "targets": [
+        {"expr": "sum(pmc_kvs_bytes_used)", "legendFormat": "bytes"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "KVS evictions",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 28},
+      "targets": [
+        {"expr": "sum(rate(pmc_kvs_evictions_total[1m]))", "legendFormat": "evictions"}
       ]
     }
   ]
