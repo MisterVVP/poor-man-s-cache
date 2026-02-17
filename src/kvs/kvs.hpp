@@ -58,10 +58,53 @@ namespace kvs
             Entry *pool;
             size_t capacity;
             std::atomic<size_t> freeListHead;
+            size_t minCapacity;
             Primegen primegen;
+
+            static constexpr size_t POOL_RESERVED_ENTRY_COUNT = 1;
+            static constexpr size_t POOL_MIN_CAPACITY = 2053;
+            static constexpr size_t SHRINK_THRESHOLD_DIVISOR = 5;
+            static constexpr size_t SHRINK_CAPACITY_DIVISOR = 2;
+
+            void rebuildFreeList() {
+                freeListHead = 0;
+                for (size_t i = capacity - 1; i >= 1; --i) {
+                    if (!pool[i].key) {
+                        pool[i].nextFree = freeListHead;
+                        freeListHead = i;
+                    }
+                }
+            }
+
+            bool shrinkTo(size_t newCapacity) {
+                if (newCapacity >= capacity || newCapacity < minCapacity) {
+                    return false;
+                }
+
+                size_t highestActiveIndex = 0;
+                for (size_t i = capacity - 1; i >= 1; --i) {
+                    if (pool[i].key) {
+                        highestActiveIndex = i;
+                        break;
+                    }
+                }
+
+                if (highestActiveIndex >= newCapacity) {
+                    return false;
+                }
+
+                auto *newPool = new Entry[newCapacity];
+                memcpy(newPool, pool, newCapacity * sizeof(Entry));
+                delete[] pool;
+                pool = newPool;
+                capacity = newCapacity;
+                rebuildFreeList();
+                return true;
+            }
+
         public:
             explicit MemoryPool(size_t initialSize) 
-                : capacity(initialSize), freeListHead(0) {
+                : capacity(initialSize), minCapacity(initialSize), freeListHead(0) {
                 pool = new Entry[capacity];
                 for (size_t i = 1; i < capacity - 1; ++i) {
                     pool[i].nextFree = i + 1;
@@ -99,6 +142,24 @@ namespace kvs
 
             Entry& get(size_t i) {
                 return pool[i];
+            }
+
+            size_t getCapacity() const noexcept {
+                return capacity;
+            }
+
+            void maybeShrink(size_t activeEntries) {
+                if (capacity <= minCapacity || activeEntries >= (capacity / SHRINK_THRESHOLD_DIVISOR)) {
+                    return;
+                }
+
+                auto targetCapacity = std::max(minCapacity, capacity / SHRINK_CAPACITY_DIVISOR);
+                auto requiredCapacity = std::max(POOL_MIN_CAPACITY, activeEntries + POOL_RESERVED_ENTRY_COUNT);
+                if (targetCapacity < requiredCapacity) {
+                    targetCapacity = requiredCapacity;
+                }
+
+                shrinkTo(targetCapacity);
             }
 
             void expandPool(size_t newSize) {
@@ -152,6 +213,10 @@ namespace kvs
 
             uint_fast64_t getNumEntries() const noexcept {
                 return numEntries;
+            }
+
+            size_t getPoolCapacity() const noexcept {
+                return entryPool.getCapacity();
             }
 
             bool set(const char *key, const char *value);

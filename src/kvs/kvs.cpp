@@ -243,7 +243,6 @@ bool kvs::KeyValueStore::del(const char *key)
 
 bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 {
-    // TODO: consider shrinking in future
     uint_fast64_t attempt = 0, idx;
 
     do {
@@ -263,6 +262,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
                 entryPool.deallocate(entryIdx);
                 table[idx].entries[i] = 0;
                 --numEntries;
+                entryPool.maybeShrink(numEntries);
                 return true;
             }
         }

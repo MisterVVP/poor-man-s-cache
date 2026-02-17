@@ -173,6 +173,31 @@ TEST(KeyValueStoreTest, NumEntriesTracksInsertOverwriteAndDelete) {
     ASSERT_EQ(kvStore.getNumEntries(), 0);
 }
 
+TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
+    KeyValueStoreSettings settings;
+    settings.initialSize = 53;
+    settings.compressionEnabled = false;
+    KeyValueStore kvStore(settings);
+
+    for (int i = 0; i < 48; ++i) {
+        std::string key = "shrink-key-" + std::to_string(i);
+        std::string value = "value-" + std::to_string(i);
+        ASSERT_TRUE(kvStore.set(key.c_str(), value.c_str()));
+    }
+
+    auto capacityAfterGrow = kvStore.getPoolCapacity();
+    ASSERT_GT(capacityAfterGrow, settings.initialSize);
+
+    for (int i = 0; i < 47; ++i) {
+        std::string key = "shrink-key-" + std::to_string(i);
+        ASSERT_TRUE(kvStore.del(key.c_str()));
+    }
+
+    ASSERT_EQ(kvStore.getNumEntries(), 1);
+    ASSERT_LT(kvStore.getPoolCapacity(), capacityAfterGrow);
+    ASSERT_GE(kvStore.getPoolCapacity(), settings.initialSize);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
