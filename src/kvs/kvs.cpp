@@ -156,6 +156,7 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
                 if (entry.key) {
                     if (strcmp(entry.key, key) == 0) {
                         entryPool.deallocate(entryIdx);
+                        --numEntries;
                     } else {
                         continue;
                     }
@@ -244,7 +245,6 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 {
     // TODO: consider shrinking in future
     uint_fast64_t attempt = 0, idx;
-    auto kSize = strlen(key) + 1;
 
     do {
         idx = calcIndex(hash, attempt++, tableSize);
@@ -261,6 +261,8 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 
             if (strcmp(entry.key, key) == 0) {
                 entryPool.deallocate(entryIdx);
+                table[idx].entries[i] = 0;
+                --numEntries;
                 return true;
             }
         }

@@ -160,6 +160,19 @@ TEST(KeyValueStoreTest, DeleteNonexistentKey) {
     ASSERT_FALSE(kvStore.del("missing"));
 }
 
+TEST(KeyValueStoreTest, NumEntriesTracksInsertOverwriteAndDelete) {
+    KeyValueStore kvStore;
+
+    ASSERT_TRUE(kvStore.set("count-key", "value1"));
+    ASSERT_EQ(kvStore.getNumEntries(), 1);
+
+    ASSERT_TRUE(kvStore.set("count-key", "value2"));
+    ASSERT_EQ(kvStore.getNumEntries(), 1);
+
+    ASSERT_TRUE(kvStore.del("count-key"));
+    ASSERT_EQ(kvStore.getNumEntries(), 0);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
