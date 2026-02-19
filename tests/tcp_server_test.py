@@ -411,6 +411,12 @@ def main():
     time.sleep(delay_sec)
 
     result = run_workflow_tests()
+
+    time.sleep(delay_sec * 5)
+
+    # Cleanup
+    run_del_tests()
+
     sys.exit(result)
 
 main()

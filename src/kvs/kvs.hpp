@@ -208,6 +208,10 @@ namespace kvs
             }
 
             void expandPool(size_t newSize) {
+                if (newSize <= capacity) {
+                    return;
+                }
+
                 Entry *newPool = new Entry[newSize];
                 memcpy(newPool, pool, capacity * sizeof(Entry));
                 for (size_t i = capacity; i < newSize - 1; ++i) {

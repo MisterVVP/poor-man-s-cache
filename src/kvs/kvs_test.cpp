@@ -215,6 +215,21 @@ TEST(MemoryPoolTest, ExpandPreservesExistingFreeListEntries) {
     ASSERT_EQ(pool.getCapacity(), 97);
 }
 
+TEST(MemoryPoolTest, ExpandWithEqualOrSmallerCapacityIsNoOp) {
+    MemoryPool pool(53);
+
+    pool.expandPool(53);
+    ASSERT_EQ(pool.getCapacity(), 53);
+
+    pool.expandPool(41);
+    ASSERT_EQ(pool.getCapacity(), 53);
+
+    for (int i = 0; i < 52; ++i) {
+        auto entry = pool.allocate();
+        ASSERT_LT(entry.i, pool.getCapacity());
+    }
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
