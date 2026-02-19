@@ -199,6 +199,22 @@ TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     ASSERT_GE(kvStore.getPoolCapacity(), settings.initialSize);
 }
 
+TEST(MemoryPoolTest, ExpandPreservesExistingFreeListEntries) {
+    MemoryPool pool(53);
+
+    auto first = pool.allocate();
+    pool.deallocate(first.i);
+
+    pool.expandPool(97);
+    ASSERT_EQ(pool.getCapacity(), 97);
+
+    for (int i = 0; i < 45; ++i) {
+        (void)pool.allocate();
+    }
+
+    ASSERT_EQ(pool.getCapacity(), 97);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

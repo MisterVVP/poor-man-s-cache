@@ -70,6 +70,15 @@ namespace kvs
             static constexpr size_t SHRINK_CAPACITY_DIVISOR = 2;
             static constexpr size_t SHRINK_CHECK_INTERVAL = 1024;
 
+            static inline void releaseEntryBuffers(Entry &entry) {
+                delete[] entry.key;
+                delete[] entry.value;
+                entry.key = nullptr;
+                entry.value = nullptr;
+                entry.vSize = 0;
+                entry.compressed = false;
+            }
+
             void rebuildFreeList() {
                 freeListHead = 0;
                 for (size_t i = capacity - 1; i >= 1; --i) {
@@ -111,6 +120,10 @@ namespace kvs
                     return false;
                 }
 
+                for (size_t i = newCapacity; i < capacity; ++i) {
+                    releaseEntryBuffers(pool[i]);
+                }
+
                 auto *newPool = new Entry[newCapacity];
                 memcpy(newPool, pool, newCapacity * sizeof(Entry));
                 delete[] pool;
@@ -138,6 +151,9 @@ namespace kvs
             }
         
             ~MemoryPool() {
+                for (size_t i = 1; i < capacity; ++i) {
+                    releaseEntryBuffers(pool[i]);
+                }
                 delete[] pool;
             }
         
@@ -154,12 +170,7 @@ namespace kvs
 
             void deallocate(size_t i) {
                 auto &entry = pool[i];
-                delete[] entry.key;
-                delete[] entry.value;
-                entry.key = nullptr;
-                entry.value = nullptr;
-                entry.vSize = 0;
-                entry.compressed = false;
+                releaseEntryBuffers(entry);
 
                 if (i == highestActiveIndex) {
                     highestActiveIndexDirty = true;
@@ -202,7 +213,9 @@ namespace kvs
                 for (size_t i = capacity; i < newSize - 1; ++i) {
                     newPool[i].nextFree = i + 1;
                 }
-                newPool[newSize - 1].nextFree = 0;
+
+                auto previousFreeListHead = freeListHead.load();
+                newPool[newSize - 1].nextFree = previousFreeListHead;
         
                 delete[] pool;
                 pool = newPool;
