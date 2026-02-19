@@ -20,21 +20,17 @@ const char* ServerShard::processCommand(const Command& command)
     }
 }
 
-GetResult ServerShard::processQuery(const Query& query)
+const char* ServerShard::processQuery(const Query& query)
 {
-    GetResult result{};
+    const char* value = nullptr;
     switch (query.queryCode)
     {
         case QueryCode::GET:
-            result = keyValueStore->get(query.key.get(), query.hash);
-            if (!result.value) {
-                result.value = NOTHING;
-            }
-            return result;
+            value = keyValueStore->get(query.key.get(), query.hash);
+            return value ? value : NOTHING;
 
         default:
-            result.value = INVALID_QUERY_CODE;
-            return result;
+            return INVALID_QUERY_CODE;
     }
 }
 

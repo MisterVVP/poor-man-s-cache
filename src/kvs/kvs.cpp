@@ -201,13 +201,12 @@ uint_fast64_t KeyValueStore::insertEntry(const char *key, const char *value, siz
     return poolEntry.i;
 }
 
-GetResult KeyValueStore::get(const char *key) {
+const char* KeyValueStore::get(const char *key) {
     auto primaryHash = hashFunc(key);
     return get(key, primaryHash);
 }
 
-GetResult KeyValueStore::get(const char *key, uint_fast64_t hash) {
-    GetResult result{};
+const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
     uint_fast64_t attempt = 0, idx;
     do {
         idx = calcIndex(hash, attempt++, tableSize);
@@ -223,26 +222,25 @@ GetResult KeyValueStore::get(const char *key, uint_fast64_t hash) {
             }
 
             if (strcmp(entry.key, key) == 0) {
-                if (entry.compressed) {
-                    result.ownedValue = decompressEntry(entry);
-                    result.value = result.ownedValue.get();
-                } else {
-                    result.value = entry.value;
-                }
-                return result;
+                return entry.compressed ? decompressEntry(entry) : entry.value;
             }
         }
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
-    return result;
+    return nullptr;
 }
 
-inline std::unique_ptr<char[]> KeyValueStore::decompressEntry(const Entry &entry) {
+inline const char* KeyValueStore::decompressEntry(const Entry &entry) {
+    thread_local std::unique_ptr<char[]> decompressedBuffer;
+
     auto decompressed = GzipCompressor::Decompress(entry.value, entry.vSize);
     if (decompressed.operationResult != 0 || !decompressed.data) {
+        decompressedBuffer.reset();
         return nullptr;
     }
-    return std::unique_ptr<char[]>(decompressed.data);
+
+    decompressedBuffer.reset(decompressed.data);
+    return decompressedBuffer.get();
 }
 
 bool kvs::KeyValueStore::del(const char *key)

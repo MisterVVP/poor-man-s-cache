@@ -405,21 +405,6 @@ ResponsePacket makeCustomResponse(const char* message)
     return response;
 }
 
-ResponsePacket makeCustomResponseCopy(const char* message)
-{
-    ResponsePacket response{};
-    response.protocol = RequestProtocol::Custom;
-
-    const size_t len = std::strlen(message);
-    auto buffer = std::unique_ptr<char[]>(new char[len + 1]);
-    if (len) {
-        std::memcpy(buffer.get(), message, len);
-    }
-    buffer[len] = '\0';
-
-    response.setOwnedBuffer(std::move(buffer), len);
-    return response;
-}
 
 ResponsePacket makeRespSimpleString(const char* message)
 {
