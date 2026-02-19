@@ -58,8 +58,8 @@ TEST(KeyValueStoreTest, LargeJSONFiles) {
             std::string key = entry.path().stem().string();
             
             auto kvsValue = kvStore.get(key.c_str());
-            ASSERT_NE(kvsValue, nullptr);
-            ASSERT_STREQ(kvsValue, originalContent.c_str());
+            ASSERT_NE(kvsValue.value, nullptr);
+            ASSERT_STREQ(kvsValue.value, originalContent.c_str());
         }
     }
 }
@@ -79,8 +79,8 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
         auto key = generateKey(i);
         auto value = generateValue(i);
         auto kvsValue = kvStore.get(key);
-        ASSERT_NE(kvsValue, nullptr);
-        ASSERT_STREQ(kvsValue, value);
+        ASSERT_NE(kvsValue.value, nullptr);
+        ASSERT_STREQ(kvsValue.value, value);
         delete[] key;
         delete[] value;
     }
@@ -114,8 +114,8 @@ TEST(KeyValueStoreTest, OverwriteElements) {
         auto expectedValue = new char[expectedValueSize];
         snprintf(expectedValue, expectedValueSize, "new_value%zu", i);
         auto kvsValue = kvStore.get(key);
-        ASSERT_NE(kvsValue, nullptr);
-        ASSERT_STREQ(kvsValue, expectedValue);
+        ASSERT_NE(kvsValue.value, nullptr);
+        ASSERT_STREQ(kvsValue.value, expectedValue);
         delete[] key;
         delete[] expectedValue;
     }
@@ -143,16 +143,38 @@ TEST(KeyValueStoreTest, DeleteElements) {
         auto key = generateKey(i);
         auto kvsValue = kvStore.get(key);
         if (i % 2 == 0) {
-            ASSERT_EQ(kvsValue, nullptr);
+            ASSERT_EQ(kvsValue.value, nullptr);
         } else {
             auto value = generateValue(i);
-            ASSERT_NE(kvsValue, nullptr);
-            ASSERT_STREQ(kvsValue, value);
+            ASSERT_NE(kvsValue.value, nullptr);
+            ASSERT_STREQ(kvsValue.value, value);
             delete[] value;
         }
         delete[] key;
     }
 
+}
+
+
+TEST(KeyValueStoreTest, GetReturnsOwnedBufferOnlyForCompressedValues) {
+    KeyValueStoreSettings settings;
+    settings.compressionEnabled = true;
+    KeyValueStore kvStore(settings);
+
+    const std::string key = "compressed-key";
+    const std::string value = "This value is intentionally longer than thirty bytes to trigger compression.";
+
+    ASSERT_TRUE(kvStore.set(key.c_str(), value.c_str()));
+
+    auto firstRead = kvStore.get(key.c_str());
+    ASSERT_NE(firstRead.value, nullptr);
+    ASSERT_STREQ(firstRead.value, value.c_str());
+    ASSERT_NE(firstRead.ownedValue, nullptr);
+
+    auto secondRead = kvStore.get(key.c_str());
+    ASSERT_NE(secondRead.value, nullptr);
+    ASSERT_STREQ(secondRead.value, value.c_str());
+    ASSERT_NE(secondRead.ownedValue, nullptr);
 }
 
 TEST(KeyValueStoreTest, DeleteNonexistentKey) {
