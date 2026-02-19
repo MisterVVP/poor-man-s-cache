@@ -60,11 +60,15 @@ namespace kvs
             std::atomic<size_t> freeListHead;
             size_t minCapacity;
             Primegen primegen;
+            size_t highestActiveIndex;
+            bool highestActiveIndexDirty;
+            size_t deleteOpsSinceShrinkCheck;
 
             static constexpr size_t POOL_RESERVED_ENTRY_COUNT = 1;
             static constexpr size_t POOL_MIN_CAPACITY = 2053;
-            static constexpr size_t SHRINK_THRESHOLD_DIVISOR = 5;
+            static constexpr size_t SHRINK_THRESHOLD_DIVISOR = 2;
             static constexpr size_t SHRINK_CAPACITY_DIVISOR = 2;
+            static constexpr size_t SHRINK_CHECK_INTERVAL = 1024;
 
             void rebuildFreeList() {
                 freeListHead = 0;
@@ -76,18 +80,32 @@ namespace kvs
                 }
             }
 
+            void refreshHighestActiveIndex() {
+
+                if (!highestActiveIndexDirty) {
+                    return;
+                }
+
+                size_t i = std::min(highestActiveIndex, capacity - 1);
+                while (i >= 1) {
+                    if (pool[i].key) {
+                        highestActiveIndex = i;
+                        highestActiveIndexDirty = false;
+                        return;
+                    }
+                    --i;
+                }
+
+                highestActiveIndex = 0;
+                highestActiveIndexDirty = false;
+            }
+
             bool shrinkTo(size_t newCapacity) {
                 if (newCapacity >= capacity || newCapacity < minCapacity) {
                     return false;
                 }
 
-                size_t highestActiveIndex = 0;
-                for (size_t i = capacity - 1; i >= 1; --i) {
-                    if (pool[i].key) {
-                        highestActiveIndex = i;
-                        break;
-                    }
-                }
+                refreshHighestActiveIndex();
 
                 if (highestActiveIndex >= newCapacity) {
                     return false;
@@ -99,12 +117,18 @@ namespace kvs
                 pool = newPool;
                 capacity = newCapacity;
                 rebuildFreeList();
+                deleteOpsSinceShrinkCheck = 0;
                 return true;
             }
 
         public:
-            explicit MemoryPool(size_t initialSize) 
-                : capacity(initialSize), minCapacity(initialSize), freeListHead(0) {
+            explicit MemoryPool(size_t initialSize)
+                : capacity(initialSize),
+                  freeListHead(0),
+                  minCapacity(initialSize),
+                  highestActiveIndex(0),
+                  highestActiveIndexDirty(false),
+                  deleteOpsSinceShrinkCheck(0) {
                 pool = new Entry[capacity];
                 for (size_t i = 1; i < capacity - 1; ++i) {
                     pool[i].nextFree = i + 1;
@@ -124,6 +148,7 @@ namespace kvs
                 }
                 size_t i = freeListHead;
                 freeListHead = pool[i].nextFree;
+                highestActiveIndex = std::max(highestActiveIndex, i);
                 return PoolEntry { i, pool[i] };
             }
 
@@ -135,7 +160,12 @@ namespace kvs
                 entry.value = nullptr;
                 entry.vSize = 0;
                 entry.compressed = false;
-        
+
+                if (i == highestActiveIndex) {
+                    highestActiveIndexDirty = true;
+                }
+                ++deleteOpsSinceShrinkCheck;
+
                 entry.nextFree = freeListHead;
                 freeListHead = i;
             }
@@ -149,17 +179,21 @@ namespace kvs
             }
 
             void maybeShrink(size_t activeEntries) {
+
                 if (capacity <= minCapacity || activeEntries >= (capacity / SHRINK_THRESHOLD_DIVISOR)) {
                     return;
                 }
 
-                auto targetCapacity = std::max(minCapacity, capacity / SHRINK_CAPACITY_DIVISOR);
-                auto requiredCapacity = std::max(POOL_MIN_CAPACITY, activeEntries + POOL_RESERVED_ENTRY_COUNT);
-                if (targetCapacity < requiredCapacity) {
-                    targetCapacity = requiredCapacity;
-                }
+                if (deleteOpsSinceShrinkCheck >= SHRINK_CHECK_INTERVAL) {
+                    auto targetCapacity = std::max(minCapacity, capacity / SHRINK_CAPACITY_DIVISOR);
+                    auto requiredCapacity = std::max(POOL_MIN_CAPACITY, activeEntries + POOL_RESERVED_ENTRY_COUNT);
 
-                shrinkTo(targetCapacity);
+                    if (targetCapacity < requiredCapacity) {
+                        targetCapacity = requiredCapacity;
+                    }
+
+                    shrinkTo(targetCapacity);
+                }
             }
 
             void expandPool(size_t newSize) {

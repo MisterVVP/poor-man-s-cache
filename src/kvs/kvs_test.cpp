@@ -179,7 +179,8 @@ TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     settings.compressionEnabled = false;
     KeyValueStore kvStore(settings);
 
-    for (int i = 0; i < 48; ++i) {
+    constexpr int totalEntries = 2500;
+    for (int i = 0; i < totalEntries; ++i) {
         std::string key = "shrink-key-" + std::to_string(i);
         std::string value = "value-" + std::to_string(i);
         ASSERT_TRUE(kvStore.set(key.c_str(), value.c_str()));
@@ -188,7 +189,7 @@ TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     auto capacityAfterGrow = kvStore.getPoolCapacity();
     ASSERT_GT(capacityAfterGrow, settings.initialSize);
 
-    for (int i = 0; i < 47; ++i) {
+    for (int i = 1; i < totalEntries; ++i) {
         std::string key = "shrink-key-" + std::to_string(i);
         ASSERT_TRUE(kvStore.del(key.c_str()));
     }

@@ -292,6 +292,12 @@ def main() -> None:
 
     # No JSON preload for cluster tests yet; we focus on core workflow.
     result = run_workflow_tests()
+
+    time.sleep(delay_sec * 5)
+
+    # Cleanup
+    run_del_tests()
+
     sys.exit(result)
 
 

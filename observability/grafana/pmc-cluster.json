@@ -3,7 +3,7 @@
   "uid": "pmc-cluster",
   "schemaVersion": 38,
   "version": 1,
-  "refresh": "10s",
+  "refresh": "5s",
   "tags": ["pmc", "cache"],
   "panels": [
     {
