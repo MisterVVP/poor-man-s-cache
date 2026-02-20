@@ -58,8 +58,8 @@ TEST(KeyValueStoreTest, LargeJSONFiles) {
             std::string key = entry.path().stem().string();
             
             auto kvsValue = kvStore.get(key.c_str());
-            ASSERT_NE(kvsValue, nullptr);
-            ASSERT_STREQ(kvsValue, originalContent.c_str());
+            ASSERT_NE(kvsValue.value, nullptr);
+            ASSERT_STREQ(kvsValue.value, originalContent.c_str());
         }
     }
 }
@@ -79,8 +79,9 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
         auto key = generateKey(i);
         auto value = generateValue(i);
         auto kvsValue = kvStore.get(key);
-        ASSERT_NE(kvsValue, nullptr);
-        ASSERT_STREQ(kvsValue, value);
+        ASSERT_NE(kvsValue.value, nullptr);
+        ASSERT_STREQ(kvsValue.value, value);
+
         delete[] key;
         delete[] value;
     }
@@ -114,8 +115,8 @@ TEST(KeyValueStoreTest, OverwriteElements) {
         auto expectedValue = new char[expectedValueSize];
         snprintf(expectedValue, expectedValueSize, "new_value%zu", i);
         auto kvsValue = kvStore.get(key);
-        ASSERT_NE(kvsValue, nullptr);
-        ASSERT_STREQ(kvsValue, expectedValue);
+        ASSERT_NE(kvsValue.value, nullptr);
+        ASSERT_STREQ(kvsValue.value, expectedValue);
         delete[] key;
         delete[] expectedValue;
     }
@@ -143,11 +144,11 @@ TEST(KeyValueStoreTest, DeleteElements) {
         auto key = generateKey(i);
         auto kvsValue = kvStore.get(key);
         if (i % 2 == 0) {
-            ASSERT_EQ(kvsValue, nullptr);
+            ASSERT_EQ(kvsValue.value, nullptr);
         } else {
             auto value = generateValue(i);
-            ASSERT_NE(kvsValue, nullptr);
-            ASSERT_STREQ(kvsValue, value);
+            ASSERT_NE(kvsValue.value, nullptr);
+            ASSERT_STREQ(kvsValue.value, value);
             delete[] value;
         }
         delete[] key;
@@ -171,6 +172,77 @@ TEST(KeyValueStoreTest, NumEntriesTracksInsertOverwriteAndDelete) {
 
     ASSERT_TRUE(kvStore.del("count-key"));
     ASSERT_EQ(kvStore.getNumEntries(), 0);
+}
+
+TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
+    KeyValueStoreSettings settings;
+    settings.initialSize = 53;
+    settings.compressionEnabled = false;
+    KeyValueStore kvStore(settings);
+
+    constexpr int totalEntries = 2500;
+    for (int i = 0; i < totalEntries; ++i) {
+        std::string key = "shrink-key-" + std::to_string(i);
+        std::string value = "value-" + std::to_string(i);
+        ASSERT_TRUE(kvStore.set(key.c_str(), value.c_str()));
+    }
+
+    auto capacityAfterGrow = kvStore.getPoolCapacity();
+    ASSERT_GT(capacityAfterGrow, settings.initialSize);
+
+    for (int i = 1; i < totalEntries; ++i) {
+        std::string key = "shrink-key-" + std::to_string(i);
+        ASSERT_TRUE(kvStore.del(key.c_str()));
+    }
+
+    ASSERT_EQ(kvStore.getNumEntries(), 1);
+    ASSERT_LT(kvStore.getPoolCapacity(), capacityAfterGrow);
+    ASSERT_GE(kvStore.getPoolCapacity(), settings.initialSize);
+}
+
+TEST(MemoryPoolTest, ExpandPreservesExistingFreeListEntries) {
+    MemoryPool pool(53);
+
+    auto first = pool.allocate();
+    pool.deallocate(first.i);
+
+    pool.expandPool(97);
+    ASSERT_EQ(pool.getCapacity(), 97);
+
+    for (int i = 0; i < 45; ++i) {
+        (void)pool.allocate();
+    }
+
+    ASSERT_EQ(pool.getCapacity(), 97);
+}
+
+TEST(MemoryPoolTest, ExpandWithEqualOrSmallerCapacityIsNoOp) {
+    MemoryPool pool(53);
+
+    pool.expandPool(53);
+    ASSERT_EQ(pool.getCapacity(), 53);
+
+    pool.expandPool(41);
+    ASSERT_EQ(pool.getCapacity(), 53);
+
+    for (int i = 0; i < 52; ++i) {
+        auto entry = pool.allocate();
+        ASSERT_LT(entry.i, pool.getCapacity());
+    }
+}
+
+TEST(MemoryPoolTest, AllocateExpandsPastCurrentCapacityWhenPrimeGeneratorLags) {
+    MemoryPool pool(53);
+
+    for (int i = 0; i < 52; ++i) {
+        auto entry = pool.allocate();
+        ASSERT_NE(entry.i, 0u);
+    }
+
+    auto previousCapacity = pool.getCapacity();
+    auto expandedEntry = pool.allocate();
+    ASSERT_NE(expandedEntry.i, 0u);
+    ASSERT_GT(pool.getCapacity(), previousCapacity);
 }
 
 int main(int argc, char** argv) {

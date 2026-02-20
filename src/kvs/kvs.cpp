@@ -201,12 +201,13 @@ uint_fast64_t KeyValueStore::insertEntry(const char *key, const char *value, siz
     return poolEntry.i;
 }
 
-const char* KeyValueStore::get(const char *key) {
+GetResult KeyValueStore::get(const char *key) {
     auto primaryHash = hashFunc(key);
     return get(key, primaryHash);
 }
 
-const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
+GetResult KeyValueStore::get(const char *key, uint_fast64_t hash) {
+    GetResult result{};
     uint_fast64_t attempt = 0, idx;
     do {
         idx = calcIndex(hash, attempt++, tableSize);
@@ -222,17 +223,26 @@ const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
             }
 
             if (strcmp(entry.key, key) == 0) {
-                return entry.compressed ? decompressEntry(entry) : entry.value;
+                if (entry.compressed) {
+                    result.ownedValue = decompressEntry(entry);
+                    result.value = result.ownedValue.get();
+                } else {
+                    result.value = entry.value;
+                }
+                return result;
             }
         }
     } while (attempt < MAX_READ_WRITE_ATTEMPTS);
 
-    return nullptr;
+    return result;
 }
 
-inline const char* KeyValueStore::decompressEntry(const Entry &entry) {
+inline std::unique_ptr<char[]> KeyValueStore::decompressEntry(const Entry &entry) {
     auto decompressed = GzipCompressor::Decompress(entry.value, entry.vSize);
-    return decompressed.operationResult == 0 ? decompressed.data : nullptr;
+    if (decompressed.operationResult != 0 || !decompressed.data) {
+        return nullptr;
+    }
+    return std::unique_ptr<char[]>(decompressed.data);
 }
 
 bool kvs::KeyValueStore::del(const char *key)
@@ -243,7 +253,6 @@ bool kvs::KeyValueStore::del(const char *key)
 
 bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 {
-    // TODO: consider shrinking in future
     uint_fast64_t attempt = 0, idx;
 
     do {
@@ -263,6 +272,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
                 entryPool.deallocate(entryIdx);
                 table[idx].entries[i] = 0;
                 --numEntries;
+                entryPool.maybeShrink(numEntries);
                 return true;
             }
         }
