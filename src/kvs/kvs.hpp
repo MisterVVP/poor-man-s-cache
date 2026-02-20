@@ -29,6 +29,10 @@
 
 namespace kvs
 {
+    static constexpr size_t SHRINK_THRESHOLD_DIVISOR = 4;
+    static constexpr size_t SHRINK_CAPACITY_DIVISOR = 2;
+    static constexpr size_t SHRINK_CHECK_INTERVAL = 262144;
+
     struct KeyValueStoreSettings {
         uint_fast64_t initialSize = 2053;
         bool compressionEnabled = true;
@@ -70,9 +74,6 @@ namespace kvs
 
             static constexpr size_t POOL_RESERVED_ENTRY_COUNT = 1;
             static constexpr size_t POOL_MIN_CAPACITY = 2053;
-            static constexpr size_t SHRINK_THRESHOLD_DIVISOR = 2;
-            static constexpr size_t SHRINK_CAPACITY_DIVISOR = 2;
-            static constexpr size_t SHRINK_CHECK_INTERVAL = 1024;
 
             static inline void releaseEntryBuffers(Entry &entry) {
                 delete[] entry.key;
@@ -244,10 +245,14 @@ namespace kvs
             uint_fast64_t numEntries;
             uint_fast64_t numCollisions;
             uint_fast32_t numResizes;
+            uint_fast64_t minTableSize;
+            uint_fast64_t deleteOpsSinceTableShrinkCheck;
 
             MemoryPool entryPool;
             bool isResizing = false;
             void resize();
+            void maybeShrinkTable();
+            void rehash(uint_fast64_t newTableSize);
             void copyEntry(Entry &dest, const Entry &src);
             uint_fast64_t insertEntry(const char *key, const char *value, size_t kSize, size_t vSize);
             void migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx);
@@ -272,6 +277,10 @@ namespace kvs
 
             uint_fast64_t getNumEntries() const noexcept {
                 return numEntries;
+            }
+
+            uint_fast64_t getTableSize() const noexcept {
+                return tableSize;
             }
 
             size_t getPoolCapacity() const noexcept {

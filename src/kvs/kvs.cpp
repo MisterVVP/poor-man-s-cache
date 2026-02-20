@@ -8,6 +8,8 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
       numCollisions(0),
       numResizes(0),
       isResizing(false),
+      minTableSize(settings.initialSize),
+      deleteOpsSinceTableShrinkCheck(0),
       compressionEnabled(settings.compressionEnabled),
       usePrimeNumbers(settings.usePrimeNumbers),
       entryPool(settings.initialSize) {
@@ -67,6 +69,24 @@ void KeyValueStore::resize() {
     std::cout << "Resizing started! numEntries = " << numEntries << " tableSize = " << tableSize << std::endl;
 #endif
     uint_fast64_t newTableSize = usePrimeNumbers ? primegen.PopNext() : tableSize * 2;
+    while (newTableSize <= tableSize) {
+        newTableSize = usePrimeNumbers ? primegen.PopNext() : (tableSize * 2);
+    }
+
+    rehash(newTableSize);
+#ifndef NDEBUG
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+    std::cout << "Resizing finished in " << duration.count() << " ms ! numEntries = " << numEntries 
+              << " tableSize = " << tableSize << std::endl;
+#endif
+}
+
+void KeyValueStore::rehash(uint_fast64_t newTableSize) {
+    if (newTableSize <= 0 || newTableSize == tableSize) {
+        isResizing = false;
+        return;
+    }
 
     entryPool.expandPool(newTableSize);
     auto *newTable = new Bucket[newTableSize];
@@ -88,12 +108,35 @@ void KeyValueStore::resize() {
     tableSize = newTableSize;
     isResizing = false;
     ++numResizes;
-#ifndef NDEBUG
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-    std::cout << "Resizing finished in " << duration.count() << " ms ! numEntries = " << numEntries 
-              << " tableSize = " << tableSize << std::endl;
-#endif
+}
+
+void KeyValueStore::maybeShrinkTable() {
+    if (tableSize <= minTableSize) {
+        return;
+    }
+
+    ++deleteOpsSinceTableShrinkCheck;
+    if (deleteOpsSinceTableShrinkCheck < SHRINK_CHECK_INTERVAL) {
+        return;
+    }
+
+    deleteOpsSinceTableShrinkCheck = 0;
+
+    if (numEntries >= (tableSize / SHRINK_THRESHOLD_DIVISOR)) {
+        return;
+    }
+
+    uint_fast64_t targetSize = std::max(minTableSize, tableSize / SHRINK_CAPACITY_DIVISOR);
+    uint_fast64_t requiredSize = std::max<uint_fast64_t>(1, (numEntries * 100 + RESIZE_THRESHOLD_PERCENTAGE - 1) / RESIZE_THRESHOLD_PERCENTAGE);
+    targetSize = std::max(targetSize, requiredSize);
+
+    if (targetSize >= tableSize) {
+        return;
+    }
+
+    isResizing = true;
+    rehash(targetSize);
+
 }
 
 void KeyValueStore::migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx) {
@@ -273,6 +316,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
                 table[idx].entries[i] = 0;
                 --numEntries;
                 entryPool.maybeShrink(numEntries);
+                maybeShrinkTable();
                 return true;
             }
         }
