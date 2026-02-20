@@ -38,6 +38,7 @@ namespace kvs
     struct alignas(64) Entry {
         char *key = nullptr;
         char *value = nullptr;
+        char *decompressedValue = nullptr;
         size_t vSize = 0;
         bool compressed = false;
         size_t nextFree = 0;
@@ -72,8 +73,10 @@ namespace kvs
             static inline void releaseEntryBuffers(Entry &entry) {
                 delete[] entry.key;
                 delete[] entry.value;
+                delete[] entry.decompressedValue;
                 entry.key = nullptr;
                 entry.value = nullptr;
+                entry.decompressedValue = nullptr;
                 entry.vSize = 0;
                 entry.compressed = false;
             }
@@ -242,7 +245,7 @@ namespace kvs
             void copyEntry(Entry &dest, const Entry &src);
             uint_fast64_t insertEntry(const char *key, const char *value, size_t kSize, size_t vSize);
             void migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx);
-            const char* decompressEntry(const Entry &entry);
+            const char* decompressEntry(Entry &entry);
             void initializeTable(Bucket *table, uint_fast64_t size);
             void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
             uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;

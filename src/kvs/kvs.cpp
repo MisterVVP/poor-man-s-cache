@@ -216,7 +216,7 @@ const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
                 continue;
             }
 
-            auto entry = entryPool.get(entryIdx);
+            auto &entry = entryPool.get(entryIdx);
             if (!entry.key) {
                 continue;
             }
@@ -230,17 +230,18 @@ const char* KeyValueStore::get(const char *key, uint_fast64_t hash) {
     return nullptr;
 }
 
-inline const char* KeyValueStore::decompressEntry(const Entry &entry) {
-    thread_local std::unique_ptr<char[]> decompressedBuffer;
+inline const char* KeyValueStore::decompressEntry(Entry &entry) {
+    if (entry.decompressedValue) {
+        return entry.decompressedValue;
+    }
 
     auto decompressed = GzipCompressor::Decompress(entry.value, entry.vSize);
     if (decompressed.operationResult != 0 || !decompressed.data) {
-        decompressedBuffer.reset();
         return nullptr;
     }
 
-    decompressedBuffer.reset(decompressed.data);
-    return decompressedBuffer.get();
+    entry.decompressedValue = decompressed.data;
+    return entry.decompressedValue;
 }
 
 bool kvs::KeyValueStore::del(const char *key)
