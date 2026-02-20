@@ -289,7 +289,6 @@ docker compose -f docker-compose-local.yaml --profile main down
 ```
 
 #### To run only unit tests
-
 ```
 docker build -f Dockerfile.utests . -t cache-tests:latest
 docker run -it cache-tests:latest
