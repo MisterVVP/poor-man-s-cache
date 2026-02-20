@@ -39,6 +39,6 @@ namespace server {
             };
 
             const char* processCommand(const Command& command);
-            const char* processQuery(const Query& query);
+            GetResult processQuery(const Query& query);
     };
 }

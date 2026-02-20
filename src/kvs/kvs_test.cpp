@@ -58,8 +58,8 @@ TEST(KeyValueStoreTest, LargeJSONFiles) {
             std::string key = entry.path().stem().string();
             
             auto kvsValue = kvStore.get(key.c_str());
-            ASSERT_NE(kvsValue, nullptr);
-            ASSERT_STREQ(kvsValue, originalContent.c_str());
+            ASSERT_NE(kvsValue.value, nullptr);
+            ASSERT_STREQ(kvsValue.value, originalContent.c_str());
         }
     }
 }
@@ -79,8 +79,9 @@ TEST(KeyValueStoreTest, AddAndRetrieveElements) {
         auto key = generateKey(i);
         auto value = generateValue(i);
         auto kvsValue = kvStore.get(key);
-        ASSERT_NE(kvsValue, nullptr);
-        ASSERT_STREQ(kvsValue, value);
+        ASSERT_NE(kvsValue.value, nullptr);
+        ASSERT_STREQ(kvsValue.value, value);
+
         delete[] key;
         delete[] value;
     }
@@ -114,8 +115,8 @@ TEST(KeyValueStoreTest, OverwriteElements) {
         auto expectedValue = new char[expectedValueSize];
         snprintf(expectedValue, expectedValueSize, "new_value%zu", i);
         auto kvsValue = kvStore.get(key);
-        ASSERT_NE(kvsValue, nullptr);
-        ASSERT_STREQ(kvsValue, expectedValue);
+        ASSERT_NE(kvsValue.value, nullptr);
+        ASSERT_STREQ(kvsValue.value, expectedValue);
         delete[] key;
         delete[] expectedValue;
     }
@@ -146,8 +147,8 @@ TEST(KeyValueStoreTest, DeleteElements) {
             ASSERT_EQ(kvsValue, nullptr);
         } else {
             auto value = generateValue(i);
-            ASSERT_NE(kvsValue, nullptr);
-            ASSERT_STREQ(kvsValue, value);
+            ASSERT_NE(kvsValue.value, nullptr);
+            ASSERT_STREQ(kvsValue.value, value);
             delete[] value;
         }
         delete[] key;

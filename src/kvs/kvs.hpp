@@ -52,6 +52,10 @@ namespace kvs
         Entry& entry;
     };
 
+    struct GetResult {
+        const char* value = nullptr;
+        std::unique_ptr<char[]> ownedValue;
+    };
     
     class MemoryPool : NonCopyableOrMovable {
         private:
@@ -243,7 +247,7 @@ namespace kvs
             void copyEntry(Entry &dest, const Entry &src);
             uint_fast64_t insertEntry(const char *key, const char *value, size_t kSize, size_t vSize);
             void migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx);
-            const char* decompressEntry(const Entry &entry);
+            std::unique_ptr<char[]> decompressEntry(const Entry &entry);
             void initializeTable(Bucket *table, uint_fast64_t size);
             void cleanTable(Bucket* tableToDelete, uint_fast64_t size);
             uint_fast64_t calcIndex(uint_fast64_t hash, int attempt, uint_fast64_t tableSize) const;
@@ -273,8 +277,8 @@ namespace kvs
             bool set(const char *key, const char *value);
             bool set(const char *key, const char *value, uint_fast64_t hash);
 
-            const char* get(const char *key);
-            const char* get(const char *key, uint_fast64_t hash);
+            GetResult get(const char *key);
+            GetResult get(const char *key, uint_fast64_t hash);
 
             bool del(const char *key);
             bool del(const char *key, uint_fast64_t hash);

@@ -114,14 +114,24 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
         auto& shard = serverShards[hash % numShards];
         Query query{QueryCode::GET, keyPtr, hash};
         auto result = shard.processQuery(query);
-        if (result == NOTHING) {
+        if (result.value == NOTHING) {
             recordResponse(metrics::ResponseStatus::NotFound);
-        } else if (result) {
+        } else if (result.value) {
             recordResponse(metrics::ResponseStatus::Ok);
         } else {
             recordResponse(metrics::ResponseStatus::Error);
         }
-        return protocol == RequestProtocol::RESP ? makeRespBulkString(result) : makeCustomResponse(result);
+
+        if (protocol == RequestProtocol::RESP) {
+            return makeRespBulkString(result.value);
+        }
+
+        if (result.ownedValue) {
+            return makeCustomResponseCopy(result.value);
+        }
+
+        return makeCustomResponse(result.value);
+
     };
 
     auto handleSet = [&](const char* keyPtr, const char* valuePtr, RequestProtocol protocol) -> ResponsePacket {
