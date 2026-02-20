@@ -144,7 +144,7 @@ TEST(KeyValueStoreTest, DeleteElements) {
         auto key = generateKey(i);
         auto kvsValue = kvStore.get(key);
         if (i % 2 == 0) {
-            ASSERT_EQ(kvsValue, nullptr);
+            ASSERT_EQ(kvsValue.value, nullptr);
         } else {
             auto value = generateValue(i);
             ASSERT_NE(kvsValue.value, nullptr);
