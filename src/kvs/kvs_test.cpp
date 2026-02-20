@@ -231,6 +231,20 @@ TEST(MemoryPoolTest, ExpandWithEqualOrSmallerCapacityIsNoOp) {
     }
 }
 
+TEST(MemoryPoolTest, AllocateExpandsPastCurrentCapacityWhenPrimeGeneratorLags) {
+    MemoryPool pool(53);
+
+    for (int i = 0; i < 52; ++i) {
+        auto entry = pool.allocate();
+        ASSERT_NE(entry.i, 0u);
+    }
+
+    auto previousCapacity = pool.getCapacity();
+    auto expandedEntry = pool.allocate();
+    ASSERT_NE(expandedEntry.i, 0u);
+    ASSERT_GT(pool.getCapacity(), previousCapacity);
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
