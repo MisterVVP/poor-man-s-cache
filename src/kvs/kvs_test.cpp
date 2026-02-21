@@ -180,7 +180,7 @@ TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     settings.compressionEnabled = false;
     KeyValueStore kvStore(settings);
 
-    constexpr int totalEntries = 2500;
+    constexpr int totalEntries = 1000000;
     for (int i = 0; i < totalEntries; ++i) {
         std::string key = "shrink-key-" + std::to_string(i);
         std::string value = "value-" + std::to_string(i);
@@ -198,6 +198,33 @@ TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     ASSERT_EQ(kvStore.getNumEntries(), 1);
     ASSERT_LT(kvStore.getPoolCapacity(), capacityAfterGrow);
     ASSERT_GE(kvStore.getPoolCapacity(), settings.initialSize);
+}
+
+TEST(KeyValueStoreTest, DeleteCanShrinkHashTable) {
+    KeyValueStoreSettings settings;
+    settings.initialSize = 53;
+    settings.compressionEnabled = false;
+    settings.usePrimeNumbers = false;
+    KeyValueStore kvStore(settings);
+
+    constexpr int totalEntries = 1000000;
+    for (int i = 0; i < totalEntries; ++i) {
+        std::string key = "table-shrink-key-" + std::to_string(i);
+        std::string value = "value-" + std::to_string(i);
+        ASSERT_TRUE(kvStore.set(key.c_str(), value.c_str()));
+    }
+
+    auto sizeAfterGrow = kvStore.getTableSize();
+    ASSERT_GT(sizeAfterGrow, settings.initialSize);
+
+    for (int i = 1; i < totalEntries; ++i) {
+        std::string key = "table-shrink-key-" + std::to_string(i);
+        ASSERT_TRUE(kvStore.del(key.c_str()));
+    }
+
+    ASSERT_EQ(kvStore.getNumEntries(), 1);
+    ASSERT_LT(kvStore.getTableSize(), sizeAfterGrow);
+    ASSERT_GE(kvStore.getTableSize(), settings.initialSize);
 }
 
 TEST(MemoryPoolTest, ExpandPreservesExistingFreeListEntries) {
