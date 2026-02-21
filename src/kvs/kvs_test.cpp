@@ -174,6 +174,30 @@ TEST(KeyValueStoreTest, NumEntriesTracksInsertOverwriteAndDelete) {
     ASSERT_EQ(kvStore.getNumEntries(), 0);
 }
 
+
+TEST(KeyValueStoreTest, DataBytesUsedTracksMutations) {
+    KeyValueStoreSettings settings;
+    settings.initialSize = 53;
+    settings.compressionEnabled = false;
+    KeyValueStore kvStore(settings);
+
+    ASSERT_EQ(kvStore.getDataBytesUsed(), 0);
+
+    ASSERT_TRUE(kvStore.set("k1", "value"));
+    ASSERT_EQ(kvStore.getDataBytesUsed(), std::strlen("k1") + 1 + std::strlen("value") + 1);
+
+    ASSERT_TRUE(kvStore.set("k1", "v"));
+    ASSERT_EQ(kvStore.getDataBytesUsed(), std::strlen("k1") + 1 + std::strlen("v") + 1);
+
+    ASSERT_TRUE(kvStore.set("k2", "abc"));
+    const size_t expected = (std::strlen("k1") + 1 + std::strlen("v") + 1) +
+                            (std::strlen("k2") + 1 + std::strlen("abc") + 1);
+    ASSERT_EQ(kvStore.getDataBytesUsed(), expected);
+
+    ASSERT_TRUE(kvStore.del("k1"));
+    ASSERT_EQ(kvStore.getDataBytesUsed(), std::strlen("k2") + 1 + std::strlen("abc") + 1);
+}
+
 TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     KeyValueStoreSettings settings;
     settings.initialSize = 53;

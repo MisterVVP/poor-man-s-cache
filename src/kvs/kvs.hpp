@@ -194,6 +194,10 @@ namespace kvs
                 return pool[i];
             }
 
+            const Entry& get(size_t i) const {
+                return pool[i];
+            }
+
             size_t getCapacity() const noexcept {
                 return capacity;
             }
@@ -247,6 +251,7 @@ namespace kvs
             uint_fast32_t numResizes;
             uint_fast64_t minTableSize;
             uint_fast64_t deleteOpsSinceTableShrinkCheck;
+            size_t dataBytesUsed;
 
             MemoryPool entryPool;
             bool isResizing = false;
@@ -254,6 +259,7 @@ namespace kvs
             void maybeShrinkTable();
             void rehash(uint_fast64_t newTableSize);
             void copyEntry(Entry &dest, const Entry &src);
+            size_t getEntryBytesUsed(const Entry &entry) const noexcept;
             uint_fast64_t insertEntry(const char *key, const char *value, size_t kSize, size_t vSize);
             void migrateEntry(Bucket *newTable, uint_fast64_t newTableSize, uint_fast64_t entryIdx);
             std::unique_ptr<char[]> decompressEntry(const Entry &entry);
@@ -286,6 +292,8 @@ namespace kvs
             size_t getPoolCapacity() const noexcept {
                 return entryPool.getCapacity();
             }
+
+            size_t getDataBytesUsed() const noexcept;
 
             bool set(const char *key, const char *value);
             bool set(const char *key, const char *value, uint_fast64_t hash);

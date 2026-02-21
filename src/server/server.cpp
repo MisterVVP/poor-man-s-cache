@@ -713,11 +713,13 @@ void CacheServer::updateKvsMetrics()
     }
 
     uint64_t totalItems = 0;
+    uint64_t totalBytesUsed = 0;
     for (const auto& shard : serverShards) {
         totalItems += shard.keyValueStore->getNumEntries();
+        totalBytesUsed += shard.keyValueStore->getDataBytesUsed();
     }
 
-    metrics->setKvsState(totalItems, 0);
+    metrics->setKvsState(totalItems, totalBytesUsed);
 }
 
 int CacheServer::Start()
