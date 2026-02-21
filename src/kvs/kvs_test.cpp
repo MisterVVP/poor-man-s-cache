@@ -180,7 +180,7 @@ TEST(KeyValueStoreTest, DeleteCanShrinkMemoryPool) {
     settings.compressionEnabled = false;
     KeyValueStore kvStore(settings);
 
-    constexpr int totalEntries = 2500;
+    constexpr int totalEntries = 1000000;
     for (int i = 0; i < totalEntries; ++i) {
         std::string key = "shrink-key-" + std::to_string(i);
         std::string value = "value-" + std::to_string(i);
@@ -207,7 +207,7 @@ TEST(KeyValueStoreTest, DeleteCanShrinkHashTable) {
     settings.usePrimeNumbers = false;
     KeyValueStore kvStore(settings);
 
-    constexpr int totalEntries = 2500;
+    constexpr int totalEntries = 1000000;
     for (int i = 0; i < totalEntries; ++i) {
         std::string key = "table-shrink-key-" + std::to_string(i);
         std::string value = "value-" + std::to_string(i);
