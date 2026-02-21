@@ -327,3 +327,26 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 #endif
     return false;
 }
+
+size_t KeyValueStore::getDataBytesUsed() const noexcept {
+    size_t bytesUsed = 0;
+
+    for (uint_fast64_t i = 0; i < tableSize; ++i) {
+        for (int j = 0; j < BUCKET_SIZE; ++j) {
+            const auto entryIdx = table[i].entries[j];
+            if (!entryIdx) {
+                continue;
+            }
+
+            const auto& entry = entryPool.get(entryIdx);
+            if (!entry.key || !entry.value) {
+                continue;
+            }
+
+            bytesUsed += std::strlen(entry.key) + 1;
+            bytesUsed += entry.vSize;
+        }
+    }
+
+    return bytesUsed;
+}

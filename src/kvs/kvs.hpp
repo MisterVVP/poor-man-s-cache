@@ -194,6 +194,10 @@ namespace kvs
                 return pool[i];
             }
 
+            const Entry& get(size_t i) const {
+                return pool[i];
+            }
+
             size_t getCapacity() const noexcept {
                 return capacity;
             }
@@ -286,6 +290,8 @@ namespace kvs
             size_t getPoolCapacity() const noexcept {
                 return entryPool.getCapacity();
             }
+
+            size_t getDataBytesUsed() const noexcept;
 
             bool set(const char *key, const char *value);
             bool set(const char *key, const char *value, uint_fast64_t hash);
