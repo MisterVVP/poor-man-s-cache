@@ -181,6 +181,9 @@ func startWorkerOnce(ctx context.Context, cfg Config, i int) (*os.Process, error
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("PMC_SHARD=%d", i),
 		fmt.Sprintf("PMC_NODE=%s", "local"),
+		fmt.Sprintf("PMC_CPU=%d", i),
+		fmt.Sprintf("PMC_NUMA=%d", node),
+		fmt.Sprintf("PMC_NIC_QUEUE_ID=%d", i),
 		fmt.Sprintf("METRICS_PORT=%d", metricsPort),
 		"METRICS_PORT_OFFSET=0",
 	)
