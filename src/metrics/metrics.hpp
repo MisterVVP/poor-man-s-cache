@@ -54,8 +54,6 @@ struct MetricsSnapshot {
 
     uint64_t kvsItems = 0;
     uint64_t kvsBytesUsed = 0;
-    uint64_t kvsEvictions = 0;
-
     uint64_t writeQueueDepth = 0;
     uint64_t readBufferUsageBytes = 0;
 };
