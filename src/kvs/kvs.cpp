@@ -10,6 +10,7 @@ KeyValueStore::KeyValueStore(KeyValueStoreSettings settings)
       isResizing(false),
       minTableSize(settings.initialSize),
       deleteOpsSinceTableShrinkCheck(0),
+      dataBytesUsed(0),
       compressionEnabled(settings.compressionEnabled),
       usePrimeNumbers(settings.usePrimeNumbers),
       entryPool(settings.initialSize) {
@@ -176,6 +177,14 @@ inline void KeyValueStore::copyEntry(Entry &dest, const Entry &src) {
     dest.compressed = src.compressed;
 }
 
+size_t KeyValueStore::getEntryBytesUsed(const Entry &entry) const noexcept {
+    if (!entry.key || !entry.value) {
+        return 0;
+    }
+
+    return std::strlen(entry.key) + 1 + entry.vSize;
+}
+
 bool KeyValueStore::set(const char *key, const char *value) {
     auto primaryHash = hashFunc(key);
     return set(key, value, primaryHash);
@@ -198,6 +207,7 @@ bool KeyValueStore::set(const char *key, const char *value, uint_fast64_t hash) 
                 auto entry = entryPool.get(entryIdx);
                 if (entry.key) {
                     if (strcmp(entry.key, key) == 0) {
+                        dataBytesUsed -= getEntryBytesUsed(entry);
                         entryPool.deallocate(entryIdx);
                         --numEntries;
                     } else {
@@ -240,6 +250,7 @@ uint_fast64_t KeyValueStore::insertEntry(const char *key, const char *value, siz
         memcpy(allocatedEntry.value, value, vSize);
     }
 
+    dataBytesUsed += getEntryBytesUsed(allocatedEntry);
     ++numEntries;
     return poolEntry.i;
 }
@@ -312,6 +323,7 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
             }
 
             if (strcmp(entry.key, key) == 0) {
+                dataBytesUsed -= getEntryBytesUsed(entry);
                 entryPool.deallocate(entryIdx);
                 table[idx].entries[i] = 0;
                 --numEntries;
@@ -329,24 +341,5 @@ bool kvs::KeyValueStore::del(const char *key, uint_fast64_t hash)
 }
 
 size_t KeyValueStore::getDataBytesUsed() const noexcept {
-    size_t bytesUsed = 0;
-
-    for (uint_fast64_t i = 0; i < tableSize; ++i) {
-        for (int j = 0; j < BUCKET_SIZE; ++j) {
-            const auto entryIdx = table[i].entries[j];
-            if (!entryIdx) {
-                continue;
-            }
-
-            const auto& entry = entryPool.get(entryIdx);
-            if (!entry.key || !entry.value) {
-                continue;
-            }
-
-            bytesUsed += std::strlen(entry.key) + 1;
-            bytesUsed += entry.vSize;
-        }
-    }
-
-    return bytesUsed;
+    return dataBytesUsed;
 }
