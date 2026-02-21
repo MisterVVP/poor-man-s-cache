@@ -164,8 +164,6 @@ std::string MetricsCollector::renderPrometheus() const {
 
     appendMetric(oss, "pmc_kvs_items", labels, snap.kvsItems);
     appendMetric(oss, "pmc_kvs_bytes_used", labels, snap.kvsBytesUsed);
-    appendMetric(oss, "pmc_kvs_evictions_total", labels, snap.kvsEvictions);
-
     appendMetric(oss, "pmc_write_queue_depth", labels, snap.writeQueueDepth);
     appendMetric(oss, "pmc_read_buffer_usage_bytes", labels, snap.readBufferUsageBytes);
 
