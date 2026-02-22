@@ -2,7 +2,7 @@
   "title": "Poor Man's Cache - Cluster",
   "uid": "pmc-cluster",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "refresh": "5s",
   "tags": [
     "pmc",
@@ -340,6 +340,168 @@
           "unit": "bytes"
         },
         "overrides": []
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Per-worker request rate heatmap",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum by (shard) (rate(pmc_requests_total[1m]))",
+          "legendFormat": "shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "In-flight requests per shard",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "pmc_in_flight_requests",
+          "legendFormat": "shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Epoll activity per shard",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "rate(pmc_epoll_wait_total[1m])",
+          "legendFormat": "epoll_wait shard {{shard}}"
+        },
+        {
+          "expr": "rate(pmc_epoll_events_total[1m])",
+          "legendFormat": "epoll_events shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Syscalls per shard (recv/send/accept)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "rate(pmc_syscall_recv_total[1m])",
+          "legendFormat": "recv shard {{shard}}"
+        },
+        {
+          "expr": "rate(pmc_syscall_send_total[1m])",
+          "legendFormat": "send shard {{shard}}"
+        },
+        {
+          "expr": "rate(pmc_syscall_accept_total[1m])",
+          "legendFormat": "accept shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Hot key hashes (debug sampler)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "topk(20, pmc_hotkey_hash_hits_total)",
+          "legendFormat": "hash {{hash}} shard {{shard}}"
+        },
+        {
+          "expr": "sum(rate(pmc_hotkey_samples_dropped_total[1m])) by (shard)",
+          "legendFormat": "dropped shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Batch size histogram buckets",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(pmc_batch_size_bucket[1m]))",
+          "legendFormat": "<= {{le}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "text",
+      "title": "Shard placement metadata (/shard)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "options": {
+        "content": "Use the launcher discovery targets and query each worker `/shard` endpoint to inspect worker-index, CPU, NUMA node, NIC queue, memory arena usage. Example: `curl http://cache-host:9100/shard`.",
+        "mode": "markdown"
       }
     }
   ]
