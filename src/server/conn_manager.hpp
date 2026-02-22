@@ -355,6 +355,9 @@ namespace server {
                     int lastError = 0;
                     while (isRunning.load(std::memory_order_relaxed)) {
                         auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
+                        if (metrics) {
+                            metrics->incrementSyscallAccept();
+                        }
                         if (client_fd >= 0) {
                             if (registerConnection(epoll_fd, client_fd) == -1) {
                                 continue;

@@ -111,6 +111,9 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     auto handleGet = [&](const char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
         recordRequest(metrics::RequestOperation::Get);
         auto hash = hashFunc(keyPtr);
+        if (metrics) {
+            metrics->sampleKeyHash(hash);
+        }
         auto& shard = serverShards[hash % numShards];
         Query query{QueryCode::GET, keyPtr, hash};
         auto result = shard.processQuery(query);
@@ -137,6 +140,9 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     auto handleSet = [&](const char* keyPtr, const char* valuePtr, RequestProtocol protocol) -> ResponsePacket {
         recordRequest(metrics::RequestOperation::Set);
         auto hash = hashFunc(keyPtr);
+        if (metrics) {
+            metrics->sampleKeyHash(hash);
+        }
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::SET, keyPtr, valuePtr, hash};
         auto result = shard.processCommand(cmd);
@@ -154,6 +160,9 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
     auto handleDel = [&](const char* keyPtr, RequestProtocol protocol) -> ResponsePacket {
         recordRequest(metrics::RequestOperation::Del);
         auto hash = hashFunc(keyPtr);
+        if (metrics) {
+            metrics->sampleKeyHash(hash);
+        }
         auto& shard = serverShards[hash % numShards];
         Command cmd{CommandCode::DEL, keyPtr, nullptr, hash};
         auto result = shard.processCommand(cmd);
@@ -397,6 +406,9 @@ HandleReqTask CacheServer::handleRequests()
 #endif
 
         int event_count = epoll_wait(epoll_fd, epoll_events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MSEC);
+        if (metrics && event_count >= 0) {
+            metrics->incrementEpollWait(static_cast<std::size_t>(event_count));
+        }
         if (event_count == -1) {
             if (errno == EINTR) {
 #ifndef NDEBUG
@@ -460,6 +472,9 @@ HandleReqTask CacheServer::handleRequests()
                 }
             }
             std::unordered_map<int, std::vector<ResponsePacket>> responsesPerConn;
+            if (metrics) {
+                metrics->setInFlightRequests(readers.size());
+            }
             for (int i = 0; i < readers.size(); ++i) {
                 const std::lock_guard<std::mutex> lock(req_handle_mutex);
                 auto fd = readers[i].client_fd;
@@ -467,6 +482,9 @@ HandleReqTask CacheServer::handleRequests()
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
 #endif
                 auto readResult = co_await readers[i];
+                if (metrics) {
+                    metrics->setInFlightRequests(readers.size() - static_cast<std::size_t>(i + 1));
+                }
 
                 if (readResult.operationResult == ReqReadOperationResult::Failure || readResult.operationResult == ReqReadOperationResult::AwaitingData) {
                     continue;
@@ -543,6 +561,9 @@ AsyncReadTask server::CacheServer::readRequestAsync(int client_fd)
     bool parsed = false;
     auto& connData = connManager->connections[client_fd];
     while (read_attempts < READ_MAX_ATTEMPTS) {
+        if (metrics) {
+            metrics->incrementSyscallRecv();
+        }
         ssize_t bytes_read = co_await AsyncReadAwaiter(client_fd, buffer, sizeof(buffer));
         if (bytes_read == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -673,6 +694,9 @@ void CacheServer::sendResponses(int client_fd, const std::vector<ResponsePacket>
     msg.msg_iovlen = iov.size();
 
     while (totalSent < totalRequired) {
+        if (metrics) {
+            metrics->incrementSyscallSend();
+        }
         auto bytesSent = sendmsg(client_fd, &msg, 0);
 
         if (bytesSent == -1) {

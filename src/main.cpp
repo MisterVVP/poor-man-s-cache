@@ -31,6 +31,11 @@ int main(int argc, char* argv[]) {
     auto metricsPortOffset = getFromEnv<int>("METRICS_PORT_OFFSET", false, 0);
     auto shardLabel = std::string{getFromEnv<const char*>("PMC_SHARD", false, "0")};
     auto nodeLabel = std::string{getFromEnv<const char*>("PMC_NODE", false, "local")};
+    auto workerCpu = std::string{getFromEnv<const char*>("PMC_CPU", false, "-1")};
+    auto workerNuma = std::string{getFromEnv<const char*>("PMC_NUMA", false, "-1")};
+    auto nicQueueId = std::string{getFromEnv<const char*>("PMC_NIC_QUEUE_ID", false, "-1")};
+    auto hotKeySamplerEnabled = getFromEnv<bool>("PMC_DEBUG_HOT_KEYS", false, false);
+    auto hotKeyTopN = getFromEnv<std::size_t>("PMC_HOTKEY_TOP_N", false, static_cast<std::size_t>(8));
 
     if (!metricsListen.empty()) {
         auto colonPos = metricsListen.rfind(':');
@@ -49,7 +54,8 @@ int main(int argc, char* argv[]) {
     metricsPort += metricsPortOffset;
 
     metrics::MetricsConfig metricsConfig{metricsHost, metricsPort, shardLabel, nodeLabel};
-    auto metricsCollector = std::make_shared<metrics::MetricsCollector>(shardLabel, nodeLabel);
+    metrics::ShardInfo shardInfo{shardLabel, workerCpu, workerNuma, nicQueueId};
+    auto metricsCollector = std::make_shared<metrics::MetricsCollector>(shardLabel, nodeLabel, shardInfo, hotKeySamplerEnabled, hotKeyTopN);
     metrics::MetricsHttpServer metricsServer{metricsConfig, *metricsCollector};
 
     ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression, respInlineCapacity };
