@@ -3,6 +3,9 @@
 #include <arpa/inet.h>
 #include <chrono>
 #include <cstring>
+#if defined(__GLIBC__)
+#include <features.h>
+#endif
 #include <malloc.h>
 #include <netinet/in.h>
 #include <algorithm>
@@ -43,7 +46,19 @@ std::size_t batchBucketFor(std::size_t requestsInBatch) {
             return i;
         }
     }
-    return BATCH_BUCKET_BOUNDS.size() - 1;
+    return BATCH_BUCKET_BOUNDS.size();
+}
+
+uint64_t readArenaBytes() {
+#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+    return static_cast<uint64_t>(mallinfo2().uordblks);
+#else
+    return static_cast<uint64_t>(mallinfo().uordblks);
+#endif
+#else
+    return 0;
+#endif
 }
 
 } // namespace
@@ -127,7 +142,10 @@ void MetricsCollector::recordBatch(std::size_t requestsInBatch) noexcept {
     ++metrics.batchesTotal;
     metrics.requestsPerBatchSum += requestsInBatch;
     ++metrics.requestsPerBatchCount;
-    ++metrics.batchHistogram[batchBucketFor(requestsInBatch)];
+    const auto bucket = batchBucketFor(requestsInBatch);
+    if (bucket < MetricsSnapshot::BatchHistogramBucketCount) {
+        ++metrics.batchHistogram[bucket];
+    }
 }
 
 void MetricsCollector::setWriteQueueDepth(std::size_t depth) noexcept {
@@ -265,7 +283,7 @@ std::string MetricsCollector::renderPrometheus() const {
 
 std::string MetricsCollector::renderShardInfoJson() const {
     const auto snap = snapshot();
-    const auto arenaBytes = static_cast<uint64_t>(mallinfo2().uordblks);
+    const auto arenaBytes = readArenaBytes();
     std::ostringstream oss;
     oss << "{"
         << "\"worker_index\":\"" << shardInfo.workerIndex << "\"," 

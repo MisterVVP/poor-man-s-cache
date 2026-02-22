@@ -482,6 +482,9 @@ HandleReqTask CacheServer::handleRequests()
                 std::cout << "reading request from client_fd = " << fd  << ", epoll_fd = " << epoll_fd << std::endl;
 #endif
                 auto readResult = co_await readers[i];
+                if (metrics) {
+                    metrics->setInFlightRequests(readers.size() - static_cast<std::size_t>(i + 1));
+                }
 
                 if (readResult.operationResult == ReqReadOperationResult::Failure || readResult.operationResult == ReqReadOperationResult::AwaitingData) {
                     continue;
@@ -502,9 +505,6 @@ HandleReqTask CacheServer::handleRequests()
                     if (metrics) {
                         metrics->setReadBufferUsageBytes(bufferedReadBytes);
                     }
-                }
-                if (metrics) {
-                    metrics->setInFlightRequests(readers.size() - static_cast<std::size_t>(i + 1));
                 }
             }
 

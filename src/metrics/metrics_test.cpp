@@ -24,6 +24,7 @@ TEST(MetricsCollectorTest, RenderPrometheusIncludesPhase5ObservabilityMetrics) {
     collector.connectionAccepted();
     collector.recordBatch(3);
     collector.recordBatch(120);
+    collector.recordBatch(500);
     collector.setWriteQueueDepth(11);
     collector.setReadBufferUsageBytes(22);
     collector.setKvsState(4, 321);
@@ -46,7 +47,7 @@ TEST(MetricsCollectorTest, RenderPrometheusIncludesPhase5ObservabilityMetrics) {
     EXPECT_NE(rendered.find("pmc_syscall_send_total{shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
     EXPECT_NE(rendered.find("pmc_batch_size_bucket{le=\"4\",shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
     EXPECT_NE(rendered.find("pmc_batch_size_bucket{le=\"128\",shard=\"2\",node=\"node-a\"} 2"), std::string::npos);
-    EXPECT_NE(rendered.find("pmc_batch_size_bucket{le=\"+Inf\",shard=\"2\",node=\"node-a\"} 2"), std::string::npos);
+    EXPECT_NE(rendered.find("pmc_batch_size_bucket{le=\"+Inf\",shard=\"2\",node=\"node-a\"} 3"), std::string::npos);
     EXPECT_NE(rendered.find("pmc_hotkey_hash_hits_total{hash=\"42\",shard=\"2\",node=\"node-a\"} 2"), std::string::npos);
 }
 
