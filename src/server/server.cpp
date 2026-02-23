@@ -759,7 +759,14 @@ int CacheServer::Start()
 
     auto hrt = handleRequests();
 
-    setWorkerState(WorkerReadinessState::READY);
+    if (isRunning.load(std::memory_order_acquire)) {
+        auto expected = static_cast<uint8_t>(WorkerReadinessState::STARTING);
+        workerState.compare_exchange_strong(
+            expected,
+            static_cast<uint8_t>(WorkerReadinessState::READY),
+            std::memory_order_release,
+            std::memory_order_relaxed);
+    }
 
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
     try {
