@@ -1,29 +1,18 @@
 #include "metrics.hpp"
 
-#include <arpa/inet.h>
-#include <chrono>
-#include <cstring>
 #if defined(__GLIBC__)
 #include <features.h>
 #endif
 #include <malloc.h>
-#include <netinet/in.h>
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <sstream>
-#include <stdexcept>
-#include <string_view>
-#include <sys/socket.h>
-#include <unistd.h>
 
 using namespace metrics;
 
 namespace {
 
-constexpr std::string_view METRICS_PATH = "/metrics";
-constexpr std::string_view SHARD_PATH = "/shard";
-constexpr std::string_view HTTP_GET = "GET";
 constexpr std::array<uint64_t, MetricsSnapshot::BatchHistogramBucketCount> BATCH_BUCKET_BOUNDS{1, 2, 4, 8, 16, 32, 64, 128};
 
 std::string buildLabels(std::string_view shard, std::string_view node, std::string_view extra = {}) {
@@ -60,6 +49,8 @@ uint64_t readArenaBytes() {
     return 0;
 #endif
 }
+
+
 
 } // namespace
 
@@ -296,131 +287,3 @@ std::string MetricsCollector::renderShardInfoJson() const {
     return oss.str();
 }
 
-MetricsHttpServer::MetricsHttpServer(MetricsConfig cfg, MetricsCollector& collector)
-    : config(std::move(cfg)), collector(collector) {}
-
-MetricsHttpServer::~MetricsHttpServer() { stop(); }
-
-void MetricsHttpServer::start() {
-    if (running.load()) {
-        return;
-    }
-
-    server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (!server_fd || *server_fd < 0) {
-        throw std::runtime_error("Failed to create metrics socket");
-    }
-
-    int flag = 1;
-    if (setsockopt(*server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
-        throw std::runtime_error("Failed to set SO_REUSEADDR for metrics socket");
-    }
-
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_port = htons(static_cast<uint16_t>(config.listenPort));
-    address.sin_addr.s_addr = inet_addr(config.listenHost.c_str());
-
-    if (bind(*server_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == -1) {
-        throw std::runtime_error("Failed to bind metrics socket");
-    }
-
-    if (listen(*server_fd, 16) == -1) {
-        throw std::runtime_error("Failed to listen on metrics socket");
-    }
-
-    running = true;
-    worker = std::thread([this]() { serveLoop(); });
-}
-
-void MetricsHttpServer::stop() {
-    if (!running.exchange(false)) {
-        return;
-    }
-
-    if (server_fd && *server_fd >= 0) {
-        ::shutdown(*server_fd, SHUT_RDWR);
-        ::close(*server_fd);
-    }
-
-    if (worker.joinable()) {
-        worker.join();
-    }
-}
-
-void MetricsHttpServer::serveLoop() {
-    while (running.load()) {
-        sockaddr_in client{};
-        socklen_t client_len = sizeof(client);
-        int client_fd = accept(server_fd.value(), reinterpret_cast<sockaddr*>(&client), &client_len);
-        if (client_fd < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            if (!running.load()) {
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            continue;
-        }
-
-        handleClient(client_fd);
-        ::close(client_fd);
-    }
-}
-
-void MetricsHttpServer::handleClient(int client_fd) {
-    constexpr std::size_t BUF_SIZE = 1024;
-    char buffer[BUF_SIZE];
-    ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
-        return;
-    }
-
-    buffer[bytes_read] = '\0';
-    std::string_view request(buffer, static_cast<std::size_t>(bytes_read));
-
-    auto endOfLine = request.find('\n');
-    if (endOfLine == std::string_view::npos) {
-        return;
-    }
-
-    auto firstLine = request.substr(0, endOfLine);
-    if (!firstLine.starts_with(HTTP_GET)) {
-        return;
-    }
-
-    std::string body;
-    std::string_view contentType = "text/plain; version=0.0.4";
-    if (firstLine.find(METRICS_PATH) != std::string_view::npos) {
-        body = collector.renderPrometheus();
-    } else if (firstLine.find(SHARD_PATH) != std::string_view::npos) {
-        body = collector.renderShardInfoJson();
-        contentType = "application/json";
-    } else {
-        return;
-    }
-
-    std::ostringstream response;
-    response << "HTTP/1.1 200 OK\r\n";
-    response << "Content-Type: " << contentType << "\r\n";
-    response << "Content-Length: " << body.size() << "\r\n";
-    response << "Connection: close\r\n\r\n";
-    response << body;
-
-    auto payload = response.str();
-    auto remaining = payload.size();
-    const char* data = payload.data();
-
-    while (remaining > 0) {
-        auto sent = send(client_fd, data, remaining, MSG_NOSIGNAL);
-        if (sent <= 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            break;
-        }
-        remaining -= static_cast<std::size_t>(sent);
-        data += sent;
-    }
-}

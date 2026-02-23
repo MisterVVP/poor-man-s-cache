@@ -3,52 +3,54 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <chrono>
 
 using namespace server;
 
 ConnectionData::~ConnectionData() = default;
 
 CacheServer::CacheServer(const ServerSettings settings, std::shared_ptr<metrics::MetricsCollector> metricsCollector)
-    : numShards(settings.numShards), port(settings.port), metrics(std::move(metricsCollector))
+    : numShards(settings.numShards), port(settings.port), metrics(std::move(metricsCollector)), drainTimeout(static_cast<int64_t>(settings.drainTimeoutMs)), drainMaxConnClosePerTick(settings.drainMaxConnClosePerTick)
 {
     setRespInlineCapacity(settings.respInlineCapacity);
 
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
+    const auto listenFd = socket(AF_INET, SOCK_STREAM, 0);
+    server_fd.store(listenFd, std::memory_order_release);
+    if (listenFd == -1) {
         throw std::system_error(errno, std::system_category(), "Socket creation failed");
     }
 
     int flag = 1;
-    if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) == -1) {
-        close(server_fd);
+    if (setsockopt(listenFd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) == -1) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Failed to set TCP_NODELAY for server socket");
     }
-    if (setsockopt(server_fd, IPPROTO_TCP, TCP_DEFER_ACCEPT, &flag, sizeof(flag)) == -1) {
-        close(server_fd);
+    if (setsockopt(listenFd, IPPROTO_TCP, TCP_DEFER_ACCEPT, &flag, sizeof(flag)) == -1) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Failed to set TCP_DEFER_ACCEPT for server socket");
     }
-    if (setsockopt(server_fd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag)) == -1) {
-        close(server_fd);
+    if (setsockopt(listenFd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag)) == -1) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Failed to set TCP_QUICKACK for server socket");
     }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
-        close(server_fd);
+    if (setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Failed to set SO_REUSEADDR for server socket");
     }
 
     int qlen = 2048;
-    if (setsockopt(server_fd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
-        close(server_fd);
+    if (setsockopt(listenFd, SOL_TCP, TCP_FASTOPEN, &qlen, sizeof(qlen)) == -1) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Failed to set TCP_FASTOPEN for server socket");
     }
 
-    if (setSocketBuffers(server_fd, settings.sockBuffer, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
-        close(server_fd);
+    if (setSocketBuffers(listenFd, settings.sockBuffer, SOCK_BUF_OPTS::SOCK_BUF_ALL) == -1) {
+        close(listenFd);
         throw std::runtime_error("Failed to set socket buffer options for server socket");
     }
 
-    if (setNonBlocking(server_fd) == -1) {
-        close(server_fd);
+    if (setNonBlocking(listenFd) == -1) {
+        close(listenFd);
         throw std::runtime_error("Failed to set O_NONBLOCK for server socket");
     }
 
@@ -57,13 +59,13 @@ CacheServer::CacheServer(const ServerSettings settings, std::shared_ptr<metrics:
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(port);
 
-    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        close(server_fd);
+    if (bind(listenFd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Bind failed");
     }
 
-    if (listen(server_fd, settings.connQueueLimit) < 0) {
-        close(server_fd);
+    if (listen(listenFd, settings.connQueueLimit) < 0) {
+        close(listenFd);
         throw std::system_error(errno, std::system_category(), "Listen failed");
     }
 
@@ -85,14 +87,11 @@ CacheServer::CacheServer(const ServerSettings settings, std::shared_ptr<metrics:
 }
 
 CacheServer::~CacheServer() {
-    if (server_fd >= 0) {
-        close(server_fd);
-    }
+    disableAccepting();
     if (epoll_fd >= 0) {
         close(epoll_fd);
     }
 }
-
 
 ResponsePacket CacheServer::processRequestSync(const RequestView& request, ConnectionData& connData)
 {
@@ -400,7 +399,7 @@ ResponsePacket CacheServer::processRequestSync(const RequestView& request, Conne
 
 HandleReqTask CacheServer::handleRequests()
 {
-    while (isRunning) {
+    while (isRunning.load(std::memory_order_acquire) || !connManager->connections.empty()) {
 #ifndef NDEBUG
         auto start = std::chrono::high_resolution_clock::now();
 #endif
@@ -512,11 +511,11 @@ HandleReqTask CacheServer::handleRequests()
             for (auto& [fd, responses] : responsesPerConn) {
                 if (responses.empty())
                     continue;
-        
+
                 auto it = connManager->connections.find(fd);
                 if (it == connManager->connections.end())
                     continue;
-        
+
                 ConnectionData& conn = it->second;
 
                 for (const auto& resp : responses) {
@@ -748,19 +747,32 @@ void CacheServer::updateKvsMetrics()
 
 int CacheServer::Start()
 {
-    isRunning = true;
+    isRunning.store(true, std::memory_order_release);
+    setWorkerState(WorkerReadinessState::STARTING);
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready\n";
 
     int resultCode = 0;
 
-    auto acceptTask = connManager->acceptConnections(server_fd, isRunning);
-
+    auto acceptTask = connManager->acceptConnections(server_fd.load(std::memory_order_acquire), isRunning);
     auto hrt = handleRequests();
 
+    if (isRunning.load(std::memory_order_acquire)) {
+        auto expected = static_cast<uint8_t>(WorkerReadinessState::STARTING);
+        workerState.compare_exchange_strong(
+            expected,
+            static_cast<uint8_t>(WorkerReadinessState::READY),
+            std::memory_order_release,
+            std::memory_order_relaxed);
+    }
+
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
+
     try {
-        while (isRunning) {
+        bool drainingStarted = false;
+        auto drainStartedAt = std::chrono::steady_clock::now();
+
+        while (true) {
             auto accepted_count = acceptTask.next_value();
             auto events_processed = hrt.next_value();
             if (accepted_count < 0 || events_processed < 0) {
@@ -768,15 +780,57 @@ int CacheServer::Start()
                 break;
             }
 
-            if (accepted_count == 0 && events_processed <= 0) {
-                std::this_thread::sleep_for(PROCESS_REQ_DELAY);
+            if (isRunning.load(std::memory_order_acquire)) {
+                if (accepted_count == 0 && events_processed <= 0) {
+                    std::this_thread::sleep_for(PROCESS_REQ_DELAY);
+                }
+                continue;
             }
-            // TODO: try to recover when events_processed = -1
+
+            if (!drainingStarted) {
+                drainingStarted = true;
+                drainStartedAt = std::chrono::steady_clock::now();
+                disableAccepting();
+                setWorkerState(WorkerReadinessState::DRAINING);
+            }
+
+            if (connManager->connections.empty()) {
+                break;
+            }
+
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - drainStartedAt);
+            if (elapsed >= drainTimeout) {
+                std::vector<int> fdsToClose;
+                const auto maxClose = std::max<uint_fast32_t>(1, drainMaxConnClosePerTick);
+                fdsToClose.reserve(std::min<std::size_t>(connManager->connections.size(), maxClose));
+
+                for (const auto& [fd, _] : connManager->connections) {
+                    if (fdsToClose.size() >= maxClose) {
+                        break;
+                    }
+                    fdsToClose.push_back(fd);
+                }
+
+                for (int fd : fdsToClose) {
+                    connManager->closeConnection(fd, metrics::CloseReason::Server);
+                }
+
+                if (connManager->connections.empty()) {
+                    break;
+                }
+            }
+
+            std::this_thread::sleep_for(PROCESS_REQ_DELAY);
         }
+
+        setWorkerState(WorkerReadinessState::STOPPED);
+        std::cout << "Server stopped.\n";
     }
     catch (const std::exception& ex) {
         std::cerr << "Unrecoverable exception during requests handling: " << ex.what() << '\n';
         Stop();
+        setWorkerState(WorkerReadinessState::STOPPED);
+        resultCode = -1;
     }
 
     return resultCode;
@@ -784,11 +838,30 @@ int CacheServer::Start()
 
 void CacheServer::Stop() noexcept
 {
-    if (!isRunning) {
+    const auto wasRunning = isRunning.exchange(false, std::memory_order_acq_rel);
+    if (!wasRunning) {
         return;
     }
 
     std::cout << "Stopping server…\n";
-    isRunning = false;
-    std::cout << "Server stopped.\n";
+    setWorkerState(WorkerReadinessState::DRAINING);
+    disableAccepting();
+}
+
+void CacheServer::disableAccepting() noexcept
+{
+    const int fd = server_fd.exchange(-1, std::memory_order_acq_rel);
+    if (fd >= 0) {
+        close(fd);
+    }
+}
+
+void CacheServer::setWorkerState(WorkerReadinessState next) noexcept
+{
+    workerState.store(static_cast<uint8_t>(next), std::memory_order_release);
+}
+
+WorkerReadinessState CacheServer::workerReadinessState() const noexcept
+{
+    return static_cast<WorkerReadinessState>(workerState.load(std::memory_order_acquire));
 }

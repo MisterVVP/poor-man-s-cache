@@ -13,6 +13,7 @@ add_executable(
   primegen/primegen.cpp
   kvs/kvs.cpp
   metrics/metrics.cpp
+  http/http_server.cpp
   compressor/gzip_compressor.cpp
 )
 
