@@ -2,6 +2,7 @@
 #include <iostream>
 #include <signal.h>
 #include "metrics/metrics.hpp"
+#include "http/http_server.hpp"
 #include "server/server.hpp"
 #include "env.hpp"
 
@@ -53,14 +54,18 @@ int main(int argc, char* argv[]) {
 
     metricsPort += metricsPortOffset;
 
-    metrics::MetricsConfig metricsConfig{metricsHost, metricsPort, shardLabel, nodeLabel};
+    http::HttpServerConfig httpServerConfig{metricsHost, metricsPort};
     metrics::ShardInfo shardInfo{shardLabel, workerCpu, workerNuma, nicQueueId};
     auto metricsCollector = std::make_shared<metrics::MetricsCollector>(shardLabel, nodeLabel, shardInfo, hotKeySamplerEnabled, hotKeyTopN);
-    metrics::MetricsHttpServer metricsServer{metricsConfig, *metricsCollector};
 
     ServerSettings serverSettings { serverPort, numShards, sockBufferSize, connQueueLimit, enableCompression, respInlineCapacity };
 
     CacheServer cacheServer { serverSettings, metricsCollector };
+    httpServerConfig.readinessProbe = [&cacheServer]() noexcept {
+        return cacheServer.workerReadinessState() == WorkerReadinessState::READY;
+    };
+
+    http::HttpServer metricsServer{httpServerConfig, *metricsCollector};
 
     static std::function<void(int)> signalHandler = [&cacheServer](int signal) {
         if (signal == SIGINT || signal == SIGTERM) {

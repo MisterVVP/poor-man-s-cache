@@ -749,6 +749,7 @@ void CacheServer::updateKvsMetrics()
 int CacheServer::Start()
 {
     isRunning = true;
+    setWorkerState(WorkerReadinessState::STARTING);
 
     std::cout << "Server started on port " << port << ", " << numShards << " shards are ready\n";
 
@@ -757,6 +758,8 @@ int CacheServer::Start()
     auto acceptTask = connManager->acceptConnections(server_fd, isRunning);
 
     auto hrt = handleRequests();
+
+    setWorkerState(WorkerReadinessState::READY);
 
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
     try {
@@ -789,6 +792,18 @@ void CacheServer::Stop() noexcept
     }
 
     std::cout << "Stopping server…\n";
+    setWorkerState(WorkerReadinessState::DRAINING);
     isRunning = false;
+    setWorkerState(WorkerReadinessState::STOPPED);
     std::cout << "Server stopped.\n";
+}
+
+void CacheServer::setWorkerState(WorkerReadinessState next) noexcept
+{
+    workerState.store(static_cast<uint8_t>(next), std::memory_order_release);
+}
+
+WorkerReadinessState CacheServer::workerReadinessState() const noexcept
+{
+    return static_cast<WorkerReadinessState>(workerState.load(std::memory_order_acquire));
 }

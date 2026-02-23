@@ -29,6 +29,13 @@
 
 namespace server {
 
+    enum class WorkerReadinessState : uint8_t {
+        STARTING = 0,
+        READY = 1,
+        DRAINING = 2,
+        STOPPED = 3,
+    };
+
     using namespace kvs;
 
     struct CacheServerMetrics {
@@ -107,6 +114,7 @@ namespace server {
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<bool> isRunning = false;
+            std::atomic<uint8_t> workerState{static_cast<uint8_t>(WorkerReadinessState::STARTING)};
             std::shared_ptr<metrics::MetricsCollector> metrics;
             std::size_t bufferedReadBytes = 0;
 
@@ -122,6 +130,7 @@ namespace server {
             HandleReqTask handleRequests();
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
             void updateKvsMetrics();
+            void setWorkerState(WorkerReadinessState next) noexcept;
         public:
             CacheServer(const ServerSettings settings = ServerSettings{}, std::shared_ptr<metrics::MetricsCollector> metrics = nullptr);
             ~CacheServer();
@@ -129,6 +138,8 @@ namespace server {
             /// @brief Starts processing incoming requests
             /// @return operation result, 0 - success, other values - failure
             int Start();
+
+            WorkerReadinessState workerReadinessState() const noexcept;
 
             /// @brief Gracefully stops server, restart is not (yet) supported
             void Stop() noexcept;

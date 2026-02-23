@@ -23,6 +23,7 @@ TEST(RespProtocolTest, ParseRespMessageLengthIncomplete)
     ASSERT_EQ(result.status, RespParseStatus::Incomplete);
 }
 
+
 TEST(RespProtocolTest, ParseRespCommandGet)
 {
     std::string payload = "*2\r\n$3\r\nGET\r\n$3\r\nbar\r\n";
