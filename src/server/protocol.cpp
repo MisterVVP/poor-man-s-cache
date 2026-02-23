@@ -355,7 +355,6 @@ RespParseResult parseRespMessageLength(const std::vector<char>& buffer, size_t s
     return {RespParseStatus::Complete, idx - start};
 }
 
-
 bool parseRespCommand(std::string_view payload, RespCommandParts& parts)
 {
     if (payload.empty() || payload.front() != RESP_ARRAY_PREFIX) return false;

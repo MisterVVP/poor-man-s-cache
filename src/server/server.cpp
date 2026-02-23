@@ -93,7 +93,6 @@ CacheServer::~CacheServer() {
     }
 }
 
-
 ResponsePacket CacheServer::processRequestSync(const RequestView& request, ConnectionData& connData)
 {
     auto recordRequest = [&](metrics::RequestOperation op) {
@@ -512,11 +511,11 @@ HandleReqTask CacheServer::handleRequests()
             for (auto& [fd, responses] : responsesPerConn) {
                 if (responses.empty())
                     continue;
-        
+
                 auto it = connManager->connections.find(fd);
                 if (it == connManager->connections.end())
                     continue;
-        
+
                 ConnectionData& conn = it->second;
 
                 for (const auto& resp : responses) {
