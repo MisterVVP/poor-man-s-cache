@@ -67,6 +67,35 @@ python3 ./tcp_server_cluster_test.py -p -b 2048
 
 Tweak batch size (-b) based on your system and network.
 
+### Worker HTTP control-plane endpoints
+
+Each cache worker now exposes lightweight HTTP endpoints on the metrics HTTP server (default `METRICS_PORT`, e.g. `9100`). The cache TCP protocol port (`CACHE_PORT`) remains data-only and does **not** serve HTTP.
+
+- `GET /healthz` → always `200 OK` while the process is alive.
+- `GET /readyz` → `200 OK` only when worker state is `READY`; returns `503 Service Unavailable` during `STARTING`, `DRAINING`, and `STOPPED`.
+- `GET /metrics` and `GET /shard` remain available on the same HTTP server.
+
+Readiness state transitions are monotonic per worker:
+
+`STARTING -> READY -> DRAINING -> STOPPED`
+
+On `SIGTERM`/`SIGINT`, readiness flips to `503` immediately (`DRAINING`) so new traffic can be removed quickly by orchestrators/load-balancers.
+
+### Graceful shutdown and drain
+
+The server implements bounded graceful shutdown for worker processes:
+
+1. Stop accepting new TCP connections.
+2. Keep processing existing active connections while draining.
+3. Exit when all active connections are closed, or force-close remaining connections after a timeout.
+
+New runtime knobs:
+
+- `--drain-timeout-ms` (env: `DRAIN_TIMEOUT_MS`, default: `5000`)
+- `--drain-max-conn-close-per-tick` (env: `DRAIN_MAX_CONN_CLOSE_PER_TICK`, default: `1024`)
+
+These options bound worst-case shutdown time and cap per-tick forced closes to avoid long latency spikes during teardown.
+
 ### Functional tests
 
 #### Testing method
