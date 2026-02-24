@@ -3,11 +3,9 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -79,13 +77,6 @@ struct ShardInfo {
     std::string nicQueueId = "-1";
 };
 
-struct MetricsConfig {
-    std::string listenHost = "0.0.0.0";
-    int listenPort = 9100;
-    std::string shardLabel = "0";
-    std::string nodeLabel = "local";
-};
-
 class MetricsCollector {
   public:
     MetricsCollector(std::string shardLabel, std::string nodeLabel, ShardInfo shardInfo = {}, bool hotKeySamplerEnabled = false, std::size_t hotKeyTopN = 8);
@@ -121,23 +112,5 @@ class MetricsCollector {
     std::size_t hotKeyTopN = 8;
 };
 
-class MetricsHttpServer {
-  public:
-    MetricsHttpServer(MetricsConfig config, MetricsCollector& collector);
-    ~MetricsHttpServer();
-
-    void start();
-    void stop();
-
-  private:
-    void serveLoop();
-    void handleClient(int client_fd);
-
-    MetricsConfig config;
-    MetricsCollector& collector;
-    std::optional<int> server_fd;
-    std::thread worker;
-    std::atomic<bool> running{false};
-};
 
 } // namespace metrics

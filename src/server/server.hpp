@@ -8,6 +8,7 @@
 #include <mutex>
 #include <functional>
 #include <thread>
+#include <chrono>
 #include <vector>
 #include <queue>
 #include <string_view>
@@ -28,6 +29,13 @@
 #include "coroutines.hpp"
 
 namespace server {
+
+    enum class WorkerReadinessState : uint8_t {
+        STARTING = 0,
+        READY = 1,
+        DRAINING = 2,
+        STOPPED = 3,
+    };
 
     using namespace kvs;
 
@@ -90,6 +98,12 @@ namespace server {
 
         /// @brief Inline RESP response capacity before falling back to heap allocations
         std::size_t respInlineCapacity = 255;
+
+        /// @brief Maximum drain duration before force-closing remaining connections
+        uint_fast32_t drainTimeoutMs = 5000;
+
+        /// @brief Max number of connections to force-close per drain tick
+        uint_fast32_t drainMaxConnClosePerTick = 1024;
     };
 
     class CacheServer : NonCopyableOrMovable {
@@ -107,14 +121,17 @@ namespace server {
             std::atomic<uint_fast64_t> numErrors = 0;
             std::atomic<uint_fast64_t> numRequests = 0;
             std::atomic<bool> isRunning = false;
+            std::atomic<uint8_t> workerState{static_cast<uint8_t>(WorkerReadinessState::STARTING)};
             std::shared_ptr<metrics::MetricsCollector> metrics;
             std::size_t bufferedReadBytes = 0;
 
             uint_fast16_t numShards;
             std::vector<ServerShard> serverShards;
             int port;
-            int server_fd;
+            std::atomic<int> server_fd{-1};
             int epoll_fd;
+            std::chrono::milliseconds drainTimeout{5000};
+            uint_fast32_t drainMaxConnClosePerTick = 1024;
             epoll_event epoll_events[MAX_EVENTS];
 
             AsyncReadTask readRequestAsync(int client_fd);
@@ -122,6 +139,8 @@ namespace server {
             HandleReqTask handleRequests();
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
             void updateKvsMetrics();
+            void setWorkerState(WorkerReadinessState next) noexcept;
+            void disableAccepting() noexcept;
         public:
             CacheServer(const ServerSettings settings = ServerSettings{}, std::shared_ptr<metrics::MetricsCollector> metrics = nullptr);
             ~CacheServer();
@@ -129,6 +148,8 @@ namespace server {
             /// @brief Starts processing incoming requests
             /// @return operation result, 0 - success, other values - failure
             int Start();
+
+            WorkerReadinessState workerReadinessState() const noexcept;
 
             /// @brief Gracefully stops server, restart is not (yet) supported
             void Stop() noexcept;

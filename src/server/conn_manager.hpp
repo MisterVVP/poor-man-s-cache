@@ -381,6 +381,13 @@ namespace server {
                             break;
                         }
 
+                        if ((lastError == EBADF || lastError == EINVAL) && !isRunning.load(std::memory_order_acquire)) {
+                            // Stop() may close the listen socket while accept loop is winding down.
+                            // Treat this as a graceful shutdown signal rather than a fatal accept error.
+                            lastError = 0;
+                            break;
+                        }
+
                         perror("Failed to accept connection");
                         acceptedCount = -1;
                         break;
@@ -403,4 +410,3 @@ namespace server {
             metrics::MetricsCollector* metrics = nullptr;
     };
 }
-

@@ -1,10 +1,45 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <atomic>
+#include <thread>
+#include <chrono>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 #include "metrics.hpp"
+#include "../http/http_server.hpp"
 
 namespace {
+
+
+std::string sendHttpRequest(int port, std::string_view request) {
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    EXPECT_GE(fd, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(port));
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    EXPECT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+
+    auto sent = ::send(fd, request.data(), request.size(), 0);
+    EXPECT_EQ(sent, static_cast<ssize_t>(request.size()));
+
+    std::string response;
+    char buffer[1024];
+    while (true) {
+        auto n = ::recv(fd, buffer, sizeof(buffer), 0);
+        if (n <= 0) {
+            break;
+        }
+        response.append(buffer, static_cast<std::size_t>(n));
+    }
+
+    ::close(fd);
+    return response;
+}
 
 TEST(MetricsCollectorTest, RenderPrometheusIncludesPhase5ObservabilityMetrics) {
     metrics::ShardInfo shardInfo{"2", "4", "1", "4"};
@@ -64,6 +99,32 @@ TEST(MetricsCollectorTest, RenderShardInfoJsonIncludesPlacementMetadata) {
     EXPECT_NE(body.find("\"nic_queue_id\":\"3\""), std::string::npos);
     EXPECT_NE(body.find("\"memory_arena_bytes\":"), std::string::npos);
     EXPECT_NE(body.find("\"in_flight_requests\":2"), std::string::npos);
+}
+
+
+TEST(MetricsHttpServerTest, HealthzAndReadyzReflectProbeState) {
+    std::atomic<bool> ready{false};
+    metrics::ShardInfo shardInfo{"1", "0", "0", "0"};
+    metrics::MetricsCollector collector("1", "node", shardInfo, false, 4);
+
+    http::HttpServerConfig config{"127.0.0.1", 19100};
+    config.readinessProbe = [&ready]() noexcept { return ready.load(std::memory_order_acquire); };
+
+    http::HttpServer server(config, collector);
+    server.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    const auto health = sendHttpRequest(19100, "GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    EXPECT_NE(health.find("HTTP/1.1 200 OK"), std::string::npos);
+
+    const auto notReady = sendHttpRequest(19100, "GET /readyz HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    EXPECT_NE(notReady.find("HTTP/1.1 503 Service Unavailable"), std::string::npos);
+
+    ready.store(true, std::memory_order_release);
+    const auto readyResponse = sendHttpRequest(19100, "GET /readyz HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    EXPECT_NE(readyResponse.find("HTTP/1.1 200 OK"), std::string::npos);
+
+    server.stop();
 }
 
 } // namespace
