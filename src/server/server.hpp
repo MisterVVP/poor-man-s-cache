@@ -11,6 +11,7 @@
 #include <chrono>
 #include <vector>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <fcntl.h>
 #include <unistd.h>
@@ -148,6 +149,8 @@ namespace server {
             /// @brief Starts processing incoming requests
             /// @return operation result, 0 - success, other values - failure
             int Start();
+
+            bool runStartupSelfChecks(std::string* error = nullptr) const noexcept;
 
             WorkerReadinessState workerReadinessState() const noexcept;
 

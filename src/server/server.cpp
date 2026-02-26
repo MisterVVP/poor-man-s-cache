@@ -836,6 +836,62 @@ int CacheServer::Start()
     return resultCode;
 }
 
+bool CacheServer::runStartupSelfChecks(std::string* error) const noexcept
+{
+    if (server_fd.load(std::memory_order_acquire) < 0) {
+        if (error) {
+            *error = "startup self-check failed: data port is not bound";
+        }
+        return false;
+    }
+
+    if (epoll_fd < 0) {
+        if (error) {
+            *error = "startup self-check failed: epoll is not initialized";
+        }
+        return false;
+    }
+
+    if (!connManager) {
+        if (error) {
+            *error = "startup self-check failed: connection manager is not initialized";
+        }
+        return false;
+    }
+
+    if (numShards == 0) {
+        if (error) {
+            *error = "startup self-check failed: number of shards must be greater than zero";
+        }
+        return false;
+    }
+
+    if (serverShards.size() != numShards) {
+        if (error) {
+            *error = "startup self-check failed: shard count mismatch";
+        }
+        return false;
+    }
+
+    for (std::size_t i = 0; i < serverShards.size(); ++i) {
+        const auto& shard = serverShards[i];
+        if (!shard.keyValueStore) {
+            if (error) {
+                *error = "startup self-check failed: shard KVS is missing";
+            }
+            return false;
+        }
+        if (shard.keyValueStore->getPoolCapacity() == 0) {
+            if (error) {
+                *error = "startup self-check failed: shard memory arena is not allocated";
+            }
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void CacheServer::Stop() noexcept
 {
     const auto wasRunning = isRunning.exchange(false, std::memory_order_acq_rel);

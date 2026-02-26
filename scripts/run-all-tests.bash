@@ -8,6 +8,7 @@ g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ -L
 g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ compressor/*.cpp -lz -lgtest -lgtest_main -o ../test_gzip
 g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ server/protocol.cpp server/protocol_test.cpp -lgtest -lgtest_main -o ../protocol_test
 g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ metrics/metrics.cpp http/http_server.cpp metrics/metrics_test.cpp -lgtest -lgtest_main -o ../metrics_test
+g++ -std=c++23 -O3 -s -DNDEBUG -pthread -I/usr/include/ -I/usr/local/include/ server/server.cpp server/shard.cpp server/protocol.cpp server/sockutils.cpp server/coroutines.cpp utils/time.cpp hash/MurmurHash3.cpp hash/hash.cpp kvs/kvs.cpp primegen/primegen.cpp compressor/gzip_compressor.cpp metrics/metrics.cpp server/server_startup_test.cpp -lz -lgtest -lgtest_main -o ../server_startup_test
 popd > /dev/null
 
 export NUM_ELEMENTS=10000000
@@ -26,5 +27,9 @@ echo 'Running gzip tests...'
 echo 'Running metrics tests...'
 
 ./metrics_test
+
+echo 'Running server startup tests...'
+
+./server_startup_test
 
 echo 'All tests completed successfully.'
