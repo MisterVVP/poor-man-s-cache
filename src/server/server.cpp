@@ -758,7 +758,7 @@ int CacheServer::Start()
     auto hrt = handleRequests();
 
     if (isRunning.load(std::memory_order_acquire)) {
-        setWorkerState(WorkerReadinessState::READY);
+        transitionWorkerState(WorkerReadinessState::STARTING, WorkerReadinessState::READY);
     }
 
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
@@ -935,6 +935,35 @@ void CacheServer::setWorkerState(WorkerReadinessState next) noexcept
             metrics->setWorkerState(metrics::WorkerState::Draining);
             break;
     }
+}
+
+bool CacheServer::transitionWorkerState(WorkerReadinessState expected, WorkerReadinessState next) noexcept
+{
+    auto expectedValue = static_cast<uint8_t>(expected);
+    const auto nextValue = static_cast<uint8_t>(next);
+    if (!workerState.compare_exchange_strong(expectedValue, nextValue, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        return false;
+    }
+
+    if (!metrics) {
+        return true;
+    }
+
+    switch (next) {
+        case WorkerReadinessState::STARTING:
+            metrics->setWorkerState(metrics::WorkerState::Starting);
+            break;
+        case WorkerReadinessState::READY:
+            metrics->setWorkerState(metrics::WorkerState::Ready);
+            break;
+        case WorkerReadinessState::DRAINING:
+        case WorkerReadinessState::STOPPED:
+        default:
+            metrics->setWorkerState(metrics::WorkerState::Draining);
+            break;
+    }
+
+    return true;
 }
 
 WorkerReadinessState CacheServer::workerReadinessState() const noexcept
