@@ -57,6 +57,11 @@ TEST(MetricsCollectorTest, RenderPrometheusIncludesPhase5ObservabilityMetrics) {
     collector.addBytesRx(128);
     collector.addBytesTx(64);
     collector.connectionAccepted();
+    collector.setWorkerState(metrics::WorkerState::Ready);
+    collector.incrementShutdown(metrics::ShutdownReason::Sigterm);
+    collector.incrementShutdown(metrics::ShutdownReason::Sigint);
+    collector.incrementShutdown(metrics::ShutdownReason::Other);
+    collector.incrementDrainTimeout();
     collector.recordBatch(3);
     collector.recordBatch(120);
     collector.recordBatch(500);
@@ -84,6 +89,11 @@ TEST(MetricsCollectorTest, RenderPrometheusIncludesPhase5ObservabilityMetrics) {
     EXPECT_NE(rendered.find("pmc_batch_size_bucket{le=\"128\",shard=\"2\",node=\"node-a\"} 2"), std::string::npos);
     EXPECT_NE(rendered.find("pmc_batch_size_bucket{le=\"+Inf\",shard=\"2\",node=\"node-a\"} 3"), std::string::npos);
     EXPECT_NE(rendered.find("pmc_hotkey_hash_hits_total{hash=\"42\",shard=\"2\",node=\"node-a\"} 2"), std::string::npos);
+    EXPECT_NE(rendered.find("pmc_worker_state{shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
+    EXPECT_NE(rendered.find("pmc_shutdowns_total{reason=\"sigterm\",shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
+    EXPECT_NE(rendered.find("pmc_shutdowns_total{reason=\"sigint\",shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
+    EXPECT_NE(rendered.find("pmc_shutdowns_total{reason=\"other\",shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
+    EXPECT_NE(rendered.find("pmc_drain_timeout_total{shard=\"2\",node=\"node-a\"} 1"), std::string::npos);
 }
 
 TEST(MetricsCollectorTest, RenderShardInfoJsonIncludesPlacementMetadata) {

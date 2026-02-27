@@ -35,7 +35,7 @@ To start a local 24-worker cluster:
 ```bash
 cmake --preset Release
 cmake --build ./out/build/Release
-go build -C ./launcher -o ../pmc-cluster-controller
+go build -C ./controller -o ../pmc-cluster-controller
 ./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 
@@ -123,7 +123,7 @@ Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>)
 - N - total number of requests 
 
 ##### Cluster (experimental)
-- Golang launcher is used to spawn and shut down multiple processes of cache server.
+- Controller is used to spawn and shut down multiple processes of cache server.
 - Cluster consists of `CLUSTER_WORKERS` workers. It's set to 24 locally and to 4 in github (limited by CPUs of github hosted runner)
 - Separate python test script is used for testing, but it's scenarios are identical to tcp_server_test.py
 
@@ -138,7 +138,7 @@ Start the cluster:
 ```bash
 cmake --preset Release
 cmake --build ./out/build/Release
-go build -C ./launcher -o ../pmc-cluster-controller
+go build -C ./controller -o ../pmc-cluster-controller
 ./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 24 9001
 ```
 

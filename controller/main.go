@@ -93,6 +93,7 @@ func discoveryHandler(cfg Config) http.Handler {
 }
 
 func startDiscoveryServer(ctx context.Context, cfg Config) {
+	log.Printf("starting discovery server on %s%s", cfg.DiscoveryAddr, cfg.DiscoveryEndpoint)
 	mux := http.NewServeMux()
 	mux.Handle(cfg.DiscoveryEndpoint, discoveryHandler(cfg))
 
@@ -102,6 +103,7 @@ func startDiscoveryServer(ctx context.Context, cfg Config) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		log.Printf("stopping discovery server")
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
@@ -113,12 +115,14 @@ func startDiscoveryServer(ctx context.Context, cfg Config) {
 }
 
 func spawnWorkers(ctx context.Context, cfg Config) error {
+	log.Printf("spawning %d workers (base_port=%d metrics_base=%d)", cfg.WorkerCount, cfg.BasePort, cfg.MetricsPortBase)
 	workerProcs := make([]*os.Process, cfg.WorkerCount)
 
 	for i := range cfg.WorkerCount {
 		idx := i
 
 		go func() {
+			restarts := 0
 			for {
 				select {
 				case <-ctx.Done():
@@ -126,15 +130,24 @@ func spawnWorkers(ctx context.Context, cfg Config) error {
 				default:
 				}
 
+				startedAt := time.Now()
 				proc, err := startWorkerOnce(ctx, cfg, idx)
 				if proc != nil {
 					workerProcs[idx] = proc
 				}
+				if ctx.Err() != nil {
+					return
+				}
 
+				uptime := time.Since(startedAt).Round(time.Millisecond)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "worker %d crashed: %v\n", idx, err)
+					restarts++
+					log.Printf("worker=%d pid=%d exited with error after %s: %v", idx, pidOf(proc), uptime, err)
+					log.Printf("worker=%d restart_attempt=%d scheduled_in=1s", idx, restarts)
 				} else {
-					fmt.Fprintf(os.Stderr, "worker %d exited\n", idx)
+					restarts++
+					log.Printf("worker=%d pid=%d exited after %s", idx, pidOf(proc), uptime)
+					log.Printf("worker=%d restart_attempt=%d scheduled_in=1s", idx, restarts)
 				}
 
 				select {
@@ -150,9 +163,10 @@ func spawnWorkers(ctx context.Context, cfg Config) error {
 
 	<-ctx.Done()
 
-	fmt.Fprintf(os.Stderr, "sending SIGTERM to all workers...\n")
-	for _, p := range workerProcs {
+	log.Printf("controller shutdown started; sending SIGTERM to all workers")
+	for idx, p := range workerProcs {
 		if p != nil {
+			log.Printf("worker=%d pid=%d signal=SIGTERM", idx, p.Pid)
 			_ = p.Signal(unix.SIGTERM)
 		}
 	}
@@ -196,10 +210,14 @@ func startWorkerOnce(ctx context.Context, cfg Config, i int) (*os.Process, error
 
 	var mask unix.CPUSet
 	mask.Set(i)
-	_ = unix.SchedSetaffinity(proc.Pid, &mask)
-	_ = setRealtimePriority(proc.Pid)
+	if err := unix.SchedSetaffinity(proc.Pid, &mask); err != nil {
+		log.Printf("worker=%d pid=%d failed to pin cpu=%d: %v", i, proc.Pid, i, err)
+	}
+	if err := setRealtimePriority(proc.Pid); err != nil {
+		log.Printf("worker=%d pid=%d failed to set realtime priority: %v", i, proc.Pid, err)
+	}
 
-	fmt.Printf("Started worker %d on port %d (NUMA node %d) (CPU %d)\n", i, port, node, i)
+	log.Printf("worker=%d pid=%d started data_port=%d metrics_port=%d numa_node=%d cpu=%d", i, proc.Pid, port, metricsPort, node, i)
 
 	waitDone := make(chan error, 1)
 	go func() {
@@ -215,6 +233,13 @@ func startWorkerOnce(ctx context.Context, cfg Config, i int) (*os.Process, error
 	case err := <-waitDone:
 		return proc, err
 	}
+}
+
+func pidOf(proc *os.Process) int {
+	if proc == nil {
+		return -1
+	}
+	return proc.Pid
 }
 
 func getNUMANodeForCPU(cpu int) int {
@@ -357,6 +382,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	log.Printf("controller config: server=%s workers=%d base_port=%d metrics_host=%s metrics_base=%d discovery=%s%s", cfg.ServerPath, cfg.WorkerCount, cfg.BasePort, cfg.MetricsHost, cfg.MetricsPortBase, cfg.DiscoveryAddr, cfg.DiscoveryEndpoint)
 	startDiscoveryServer(ctx, cfg)
 	fmt.Printf("Discovery endpoint available at %s%s (metrics host=%s base=%d)\n", cfg.DiscoveryAddr, cfg.DiscoveryEndpoint, cfg.MetricsHost, cfg.MetricsPortBase)
 
@@ -365,11 +391,11 @@ func main() {
 
 	go func() {
 		sig := <-sigs
-		fmt.Fprintf(os.Stderr, "controller received signal: %v — shutting down...\n", sig)
+		log.Printf("controller received signal=%v; initiating shutdown", sig)
 		cancel() // broadcast shutdown
 	}()
 
-	fmt.Println("Launching workers...")
+	log.Printf("launching workers")
 	if err := spawnWorkers(ctx, cfg); err != nil {
 		log.Fatalf("fatal: %v", err)
 	}

@@ -141,6 +141,7 @@ namespace server {
             void sendResponses(int client_fd, const std::vector<ResponsePacket>& responses);
             void updateKvsMetrics();
             void setWorkerState(WorkerReadinessState next) noexcept;
+            bool transitionWorkerState(WorkerReadinessState expected, WorkerReadinessState next) noexcept;
             void disableAccepting() noexcept;
         public:
             CacheServer(const ServerSettings settings = ServerSettings{}, std::shared_ptr<metrics::MetricsCollector> metrics = nullptr);
@@ -155,6 +156,6 @@ namespace server {
             WorkerReadinessState workerReadinessState() const noexcept;
 
             /// @brief Gracefully stops server, restart is not (yet) supported
-            void Stop() noexcept;
+            void Stop(metrics::ShutdownReason reason = metrics::ShutdownReason::Other) noexcept;
     };
 }

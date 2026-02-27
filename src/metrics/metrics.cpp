@@ -128,6 +128,32 @@ void MetricsCollector::connectionClosed(CloseReason reason) noexcept {
     }
 }
 
+void MetricsCollector::setWorkerState(WorkerState state) noexcept {
+    std::scoped_lock lock(mutex);
+    metrics.workerState = static_cast<uint64_t>(state);
+}
+
+void MetricsCollector::incrementShutdown(ShutdownReason reason) noexcept {
+    std::scoped_lock lock(mutex);
+    switch (reason) {
+        case ShutdownReason::Sigterm:
+            ++metrics.shutdownsSigterm;
+            break;
+        case ShutdownReason::Sigint:
+            ++metrics.shutdownsSigint;
+            break;
+        case ShutdownReason::Other:
+        default:
+            ++metrics.shutdownsOther;
+            break;
+    }
+}
+
+void MetricsCollector::incrementDrainTimeout() noexcept {
+    std::scoped_lock lock(mutex);
+    ++metrics.drainTimeoutTotal;
+}
+
 void MetricsCollector::recordBatch(std::size_t requestsInBatch) noexcept {
     std::scoped_lock lock(mutex);
     ++metrics.batchesTotal;
@@ -239,6 +265,11 @@ std::string MetricsCollector::renderPrometheus() const {
     appendMetric(oss, "pmc_connections_closed_total", buildLabels(shard, node, "reason=\"client\""), snap.connectionsClosedClient);
     appendMetric(oss, "pmc_connections_closed_total", buildLabels(shard, node, "reason=\"server\""), snap.connectionsClosedServer);
     appendMetric(oss, "pmc_connections_closed_total", buildLabels(shard, node, "reason=\"error\""), snap.connectionsClosedError);
+    appendMetric(oss, "pmc_worker_state", labels, snap.workerState);
+    appendMetric(oss, "pmc_shutdowns_total", buildLabels(shard, node, "reason=\"sigterm\""), snap.shutdownsSigterm);
+    appendMetric(oss, "pmc_shutdowns_total", buildLabels(shard, node, "reason=\"sigint\""), snap.shutdownsSigint);
+    appendMetric(oss, "pmc_shutdowns_total", buildLabels(shard, node, "reason=\"other\""), snap.shutdownsOther);
+    appendMetric(oss, "pmc_drain_timeout_total", labels, snap.drainTimeoutTotal);
 
     appendMetric(oss, "pmc_batches_total", labels, snap.batchesTotal);
     appendMetric(oss, "pmc_requests_per_batch_sum", labels, snap.requestsPerBatchSum);
@@ -286,4 +317,3 @@ std::string MetricsCollector::renderShardInfoJson() const {
         << "}";
     return oss.str();
 }
-

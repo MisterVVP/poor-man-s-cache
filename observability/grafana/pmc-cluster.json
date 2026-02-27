@@ -500,7 +500,7 @@
         "y": 50
       },
       "options": {
-        "content": "Use the launcher discovery targets and query each worker `/shard` endpoint to inspect worker-index, CPU, NUMA node, NIC queue, memory arena usage. Example: `curl http://cache-host:9100/shard`.",
+        "content": "Use the controller discovery targets and query each worker `/shard` endpoint to inspect worker-index, CPU, NUMA node, NIC queue, memory arena usage. Example: `curl http://cache-host:9100/shard`.",
         "mode": "markdown"
       }
     }

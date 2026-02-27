@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <optional>
 #include <memory>
+#include <atomic>
 #include <exception>
 #include "metrics/metrics.hpp"
 #include "http/http_server.hpp"
@@ -98,20 +99,30 @@ int main(int argc, char* argv[]) {
 
     std::unique_ptr<http::HttpServer> metricsServer;
 
-    static std::function<void(int)> signalHandler = [&cacheServer](int signal) {
+    static volatile sig_atomic_t pendingShutdownSignal = 0;
+    auto signalDispatcher = [](int signal) {
         if (signal == SIGINT || signal == SIGTERM) {
-            cacheServer.Stop();
-        }
-    };
-
-    auto signalDispatcher = [] (int signal) {
-        if (signalHandler) {
-            signalHandler(signal);
+            pendingShutdownSignal = signal;
         }
     };
 
     signal(SIGINT, signalDispatcher);
     signal(SIGTERM, signalDispatcher);
+
+    std::atomic<bool> shutdownWatcherRunning{true};
+    std::thread shutdownWatcher([&cacheServer, &shutdownWatcherRunning]() {
+        while (shutdownWatcherRunning.load(std::memory_order_acquire)) {
+            const auto signal = pendingShutdownSignal;
+            if (signal == SIGINT || signal == SIGTERM) {
+                const auto shutdownReason = signal == SIGTERM
+                    ? metrics::ShutdownReason::Sigterm
+                    : metrics::ShutdownReason::Sigint;
+                cacheServer.Stop(shutdownReason);
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
 
     if (metricsEnabled) {
         metricsServer = std::make_unique<http::HttpServer>(httpServerConfig, *metricsCollector);
@@ -119,7 +130,13 @@ int main(int argc, char* argv[]) {
         std::cout << "startup self-check: metrics port bind success" << std::endl;
     }
 
-    return cacheServer.Start();
+    const int startResult = cacheServer.Start();
+    shutdownWatcherRunning.store(false, std::memory_order_release);
+    if (shutdownWatcher.joinable()) {
+        shutdownWatcher.join();
+    }
+
+    return startResult;
     } catch (const std::exception& ex) {
         std::cerr << "fatal startup error: " << ex.what() << std::endl;
         return EXIT_FAILURE;

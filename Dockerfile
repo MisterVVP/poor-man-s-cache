@@ -12,7 +12,7 @@ RUN bash /app/scripts/run-all-tests.bash
 ARG BUILD_TYPE="Release"
 RUN mkdir build && cd build && cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=$BUILD_TYPE && cd /app/build && cmake --build .
 # Build the cluster controller from within its module directory so Go can resolve go.mod
-RUN cd launcher && go build -o /app/pmc-cluster-controller .
+RUN cd controller && go build -o /app/pmc-cluster-controller .
 
 
 FROM alpine:latest
