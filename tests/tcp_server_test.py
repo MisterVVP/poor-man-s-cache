@@ -16,6 +16,7 @@ pipelining_enabled = args.pipeline
 batch_size = args.batch_size
 use_redis = args.redis
 use_resp = args.resp
+force_final_cleanup = os.environ.get('FORCE_FINAL_DEL_CLEANUP', '0') == '1'
 
 if use_redis and use_resp:
     parser.error("--redis and --resp modes are mutually exclusive")
@@ -397,6 +398,13 @@ def run_workflow_tests():
         batch_size=batch_size,
     )
 
+
+def should_run_final_cleanup():
+    # Redis/RESP modes are substantially slower due to client-side protocol overhead.
+    # CI containers are ephemeral, so we skip the expensive final cleanup DEL pass
+    # unless explicitly requested.
+    return force_final_cleanup or (not use_redis and not use_resp)
+
 def main():
     if run_set_tests(): sys.exit(1)
     time.sleep(delay_sec)
@@ -415,8 +423,12 @@ def main():
     time.sleep(delay_sec * 5)
 
     # Cleanup
-    run_del_tests()
+    if should_run_final_cleanup():
+        run_del_tests()
+    else:
+        logger.info("Skipping final DEL cleanup for RESP/Redis mode (set FORCE_FINAL_DEL_CLEANUP=1 to enable).")
 
     sys.exit(result)
 
-main()
+if __name__ == "__main__":
+    main()
