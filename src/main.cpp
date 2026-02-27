@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <signal.h>
 #include <optional>
+#include <memory>
+#include <exception>
 #include "metrics/metrics.hpp"
 #include "http/http_server.hpp"
 #include "server/server.hpp"
@@ -11,6 +13,7 @@
 using namespace server;
 
 int main(int argc, char* argv[]) {
+    try {
     std::string cliListen;
     std::string metricsListen;
     std::optional<uint_fast32_t> cliDrainTimeoutMs;
@@ -47,6 +50,7 @@ int main(int argc, char* argv[]) {
         drainMaxConnClosePerTick = *cliDrainMaxClosePerTick;
     }
 
+    auto metricsEnabled = getFromEnv<bool>("METRICS_ENABLED", false, true);
     auto metricsHost = std::string{getFromEnv<const char*>("METRICS_HOST", false, "0.0.0.0")};
     auto metricsPort = getFromEnv<int>("METRICS_PORT", false, 9100);
     auto metricsPortOffset = getFromEnv<int>("METRICS_PORT_OFFSET", false, 0);
@@ -85,7 +89,14 @@ int main(int argc, char* argv[]) {
         return cacheServer.workerReadinessState() == WorkerReadinessState::READY;
     };
 
-    http::HttpServer metricsServer{httpServerConfig, *metricsCollector};
+    std::string startupCheckError;
+    if (!cacheServer.runStartupSelfChecks(&startupCheckError)) {
+        std::cerr << startupCheckError << std::endl;
+        return EXIT_FAILURE;
+    }
+    std::cout << "startup self-check: data port bind success and shard arenas allocated" << std::endl;
+
+    std::unique_ptr<http::HttpServer> metricsServer;
 
     static std::function<void(int)> signalHandler = [&cacheServer](int signal) {
         if (signal == SIGINT || signal == SIGTERM) {
@@ -102,6 +113,15 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, signalDispatcher);
     signal(SIGTERM, signalDispatcher);
 
-    metricsServer.start();
+    if (metricsEnabled) {
+        metricsServer = std::make_unique<http::HttpServer>(httpServerConfig, *metricsCollector);
+        metricsServer->start();
+        std::cout << "startup self-check: metrics port bind success" << std::endl;
+    }
+
     return cacheServer.Start();
+    } catch (const std::exception& ex) {
+        std::cerr << "fatal startup error: " << ex.what() << std::endl;
+        return EXIT_FAILURE;
+    }
 }
