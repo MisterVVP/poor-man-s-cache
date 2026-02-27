@@ -94,15 +94,15 @@ jobs:
     - name: Build cache server
       run: cmake --build out/build/Release
 
-    - name: Build cluster launcher
-      run: go build -C launcher -o ../pmc-cluster-launcher
+    - name: Build cluster controller
+      run: go build -C controller -o ../pmc-cluster-controller
 
     - name: Build C++ client integration test
       run: g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
 
     - name: Start cluster
       run: |
-        ./pmc-cluster-launcher ./out/build/Release/src/poor-man-s-cache 4 9101 > cluster.log 2>&1 &
+        ./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 4 9101 > cluster.log 2>&1 &
         echo $! > cluster.pid
         sleep 2
 
