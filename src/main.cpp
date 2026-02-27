@@ -100,7 +100,10 @@ int main(int argc, char* argv[]) {
 
     static std::function<void(int)> signalHandler = [&cacheServer](int signal) {
         if (signal == SIGINT || signal == SIGTERM) {
-            cacheServer.Stop();
+            const auto shutdownReason = signal == SIGTERM
+                ? metrics::ShutdownReason::Sigterm
+                : metrics::ShutdownReason::Sigint;
+            cacheServer.Stop(shutdownReason);
         }
     };
 

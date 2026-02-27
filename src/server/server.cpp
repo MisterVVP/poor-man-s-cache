@@ -758,18 +758,14 @@ int CacheServer::Start()
     auto hrt = handleRequests();
 
     if (isRunning.load(std::memory_order_acquire)) {
-        auto expected = static_cast<uint8_t>(WorkerReadinessState::STARTING);
-        workerState.compare_exchange_strong(
-            expected,
-            static_cast<uint8_t>(WorkerReadinessState::READY),
-            std::memory_order_release,
-            std::memory_order_relaxed);
+        setWorkerState(WorkerReadinessState::READY);
     }
 
     std::cout << "Cache server is ready to accept connections on port " << port << std::endl;
 
     try {
         bool drainingStarted = false;
+        bool drainTimeoutRecorded = false;
         auto drainStartedAt = std::chrono::steady_clock::now();
 
         while (true) {
@@ -800,6 +796,10 @@ int CacheServer::Start()
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - drainStartedAt);
             if (elapsed >= drainTimeout) {
+                if (!drainTimeoutRecorded && metrics) {
+                    metrics->incrementDrainTimeout();
+                    drainTimeoutRecorded = true;
+                }
                 std::vector<int> fdsToClose;
                 const auto maxClose = std::max<uint_fast32_t>(1, drainMaxConnClosePerTick);
                 fdsToClose.reserve(std::min<std::size_t>(connManager->connections.size(), maxClose));
@@ -892,7 +892,7 @@ bool CacheServer::runStartupSelfChecks(std::string* error) const noexcept
     return true;
 }
 
-void CacheServer::Stop() noexcept
+void CacheServer::Stop(metrics::ShutdownReason reason) noexcept
 {
     const auto wasRunning = isRunning.exchange(false, std::memory_order_acq_rel);
     if (!wasRunning) {
@@ -900,6 +900,9 @@ void CacheServer::Stop() noexcept
     }
 
     std::cout << "Stopping server…\n";
+    if (metrics) {
+        metrics->incrementShutdown(reason);
+    }
     setWorkerState(WorkerReadinessState::DRAINING);
     disableAccepting();
 }
@@ -915,6 +918,23 @@ void CacheServer::disableAccepting() noexcept
 void CacheServer::setWorkerState(WorkerReadinessState next) noexcept
 {
     workerState.store(static_cast<uint8_t>(next), std::memory_order_release);
+    if (!metrics) {
+        return;
+    }
+
+    switch (next) {
+        case WorkerReadinessState::STARTING:
+            metrics->setWorkerState(metrics::WorkerState::Starting);
+            break;
+        case WorkerReadinessState::READY:
+            metrics->setWorkerState(metrics::WorkerState::Ready);
+            break;
+        case WorkerReadinessState::DRAINING:
+        case WorkerReadinessState::STOPPED:
+        default:
+            metrics->setWorkerState(metrics::WorkerState::Draining);
+            break;
+    }
 }
 
 WorkerReadinessState CacheServer::workerReadinessState() const noexcept

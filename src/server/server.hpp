@@ -155,6 +155,6 @@ namespace server {
             WorkerReadinessState workerReadinessState() const noexcept;
 
             /// @brief Gracefully stops server, restart is not (yet) supported
-            void Stop() noexcept;
+            void Stop(metrics::ShutdownReason reason = metrics::ShutdownReason::Other) noexcept;
     };
 }

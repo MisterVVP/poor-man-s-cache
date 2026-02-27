@@ -30,6 +30,18 @@ enum class CloseReason : uint8_t {
     Error,
 };
 
+enum class ShutdownReason : uint8_t {
+    Sigterm,
+    Sigint,
+    Other,
+};
+
+enum class WorkerState : uint8_t {
+    Starting = 0,
+    Ready = 1,
+    Draining = 2,
+};
+
 struct MetricsSnapshot {
     uint64_t requestsGet = 0;
     uint64_t requestsSet = 0;
@@ -48,6 +60,11 @@ struct MetricsSnapshot {
     uint64_t connectionsClosedClient = 0;
     uint64_t connectionsClosedServer = 0;
     uint64_t connectionsClosedError = 0;
+    uint64_t workerState = 0;
+    uint64_t shutdownsSigterm = 0;
+    uint64_t shutdownsSigint = 0;
+    uint64_t shutdownsOther = 0;
+    uint64_t drainTimeoutTotal = 0;
 
     uint64_t batchesTotal = 0;
     uint64_t requestsPerBatchSum = 0;
@@ -87,6 +104,9 @@ class MetricsCollector {
     void addBytesTx(std::size_t amount) noexcept;
     void connectionAccepted() noexcept;
     void connectionClosed(CloseReason reason) noexcept;
+    void setWorkerState(WorkerState state) noexcept;
+    void incrementShutdown(ShutdownReason reason) noexcept;
+    void incrementDrainTimeout() noexcept;
     void recordBatch(std::size_t requestsInBatch) noexcept;
     void setWriteQueueDepth(std::size_t depth) noexcept;
     void setReadBufferUsageBytes(std::size_t bytes) noexcept;
