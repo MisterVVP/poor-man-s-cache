@@ -22,11 +22,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU
     endif ()
 endif ()
 
-find_package(prometheus-cpp CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
-
-if(NOT DEFINED prometheus-cpp_VERSION)
-  message(FATAL_ERROR "prometheus-cpp_VERSION is not defined")
-endif()
 
 add_subdirectory(src)

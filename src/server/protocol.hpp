@@ -111,6 +111,7 @@ namespace server {
     bool parseRespCommand(std::string_view payload, RespCommandParts& parts);
 
     ResponsePacket makeCustomResponse(const char* message);
+    ResponsePacket makeCustomResponseCopy(const char* message);
     ResponsePacket makeRespSimpleString(const char* message);
     ResponsePacket makeRespInteger(int64_t value);
     ResponsePacket makeRespBulkString(const char* value);

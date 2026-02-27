@@ -11,7 +11,6 @@ graph TD
     E --> F[ServerShard::processCommand / processQuery]
     F --> G[KeyValueStore]
     E --> H[sendResponses]
-    C --> I[metricsUpdaterThread] --> J[MetricsServer]
 ```
 
 ## Requests flow

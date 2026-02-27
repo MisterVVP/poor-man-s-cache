@@ -1,0 +1,21 @@
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9200
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data
+
+blocks_storage:
+  storage_prefix: blocks
+  tsdb:
+    dir: /data/tsdb
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+
+ingester:
+  ring:
+    replication_factor: 1

@@ -45,29 +45,6 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 140
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 140
 
-      - name: Fetch prometheus-cpp dependency
-        if: matrix.language == 'cpp'
-        run: |
-          if [ ! -d prometheus-cpp ]; then
-            git clone --depth 1 https://github.com/jupp0r/prometheus-cpp.git prometheus-cpp
-          fi
-          git -C prometheus-cpp submodule update --init --recursive
-
-      - name: Build prometheus-cpp dependency
-        if: matrix.language == 'cpp'
-        env:
-          CC: gcc-14
-          CXX: g++-14
-        run: |
-          cmake -S prometheus-cpp -B prometheus-cpp/_build -G Ninja \
-            -DBUILD_SHARED_LIBS=ON \
-            -DENABLE_TESTING=OFF \
-            -DENABLE_PUSH=OFF \
-            -DENABLE_COMPRESSION=OFF \
-            -DENABLE_LOGGING=OFF
-          cmake --build prometheus-cpp/_build --parallel
-          cmake --install prometheus-cpp/_build --prefix "${{ github.workspace }}/prometheus-cpp/_install"
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -82,8 +59,6 @@ jobs:
 
       - name: Configure project
         if: matrix.language == 'cpp'
-        env:
-          CMAKE_PREFIX_PATH: "${{ github.workspace }}/prometheus-cpp/_install"
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 

@@ -35,7 +35,7 @@ spec:
       containers:
         - name: {{ .Chart.Name }}
           env:
-          - name: SERVER_PORT 
+          - name: CACHE_PORT 
             value: "{{ .Values.service.port }}"
           - name: METRICS_PORT
             value: "{{ .Values.service.metricsPort }}"

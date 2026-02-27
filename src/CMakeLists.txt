@@ -13,16 +13,9 @@ add_executable(
   primegen/primegen.cpp
   kvs/kvs.cpp
   metrics/metrics.cpp
+  http/http_server.cpp
   compressor/gzip_compressor.cpp
 )
-
-if(PROMETHEUS_CPP_ENABLE_PUSH)
-  target_link_libraries(${PROJECT_NAME} PRIVATE prometheus-cpp::push $<$<BOOL:${WIN32}>:Ws2_32>)
-endif()
-
-if(PROMETHEUS_CPP_ENABLE_PULL)
-  target_link_libraries(${PROJECT_NAME} PRIVATE prometheus-cpp::pull)
-endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ZLIB::ZLIB)
 

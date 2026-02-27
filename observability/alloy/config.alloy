@@ -1,0 +1,35 @@
+logging {
+  level = "info"
+}
+
+// Static targets (single node or local host overrides)
+prometheus.scrape "pmc_single" {
+  job_name = "pmc_single"
+  targets = [
+    { __address__ = env("PMC_PROM_TARGET_1") },
+    { __address__ = env("PMC_PROM_TARGET_2") },
+  ]
+  scrape_interval = env("PMC_PROM_SCRAPE_INTERVAL")
+  scrape_timeout = env("PMC_PROM_SCRAPE_TIMEOUT")
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+// Cluster discovery targets
+discovery.http "pmc_cluster" {
+  url = env("PMC_PROM_DISCOVERY_URL")
+  refresh_interval = env("PMC_PROM_DISCOVERY_REFRESH_INTERVAL")
+}
+
+prometheus.scrape "pmc_cluster" {
+  job_name = "pmc_cluster"
+  targets = discovery.http.pmc_cluster.targets
+  scrape_interval = env("PMC_PROM_SCRAPE_INTERVAL")
+  scrape_timeout = env("PMC_PROM_SCRAPE_TIMEOUT")
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = env("PMC_MIMIR_REMOTE_WRITE_URL")
+  }
+}

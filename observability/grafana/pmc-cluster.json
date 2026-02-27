@@ -1,0 +1,508 @@
+{
+  "title": "Poor Man's Cache - Cluster",
+  "uid": "pmc-cluster",
+  "schemaVersion": 38,
+  "version": 2,
+  "refresh": "5s",
+  "tags": [
+    "pmc",
+    "cache"
+  ],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Request rate by operation",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_requests_total{op=\"get\"}[1m]))",
+          "legendFormat": "get"
+        },
+        {
+          "expr": "sum(rate(pmc_requests_total{op=\"set\"}[1m]))",
+          "legendFormat": "set"
+        },
+        {
+          "expr": "sum(rate(pmc_requests_total{op=\"del\"}[1m]))",
+          "legendFormat": "del"
+        },
+        {
+          "expr": "sum(rate(pmc_requests_total{op=\"other\"}[1m]))",
+          "legendFormat": "other"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Responses by status",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_responses_total{status=\"ok\"}[1m]))",
+          "legendFormat": "ok"
+        },
+        {
+          "expr": "sum(rate(pmc_responses_total{status=\"not_found\"}[1m]))",
+          "legendFormat": "not_found"
+        },
+        {
+          "expr": "sum(rate(pmc_responses_total{status=\"error\"}[1m]))",
+          "legendFormat": "error"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate per shard",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (shard) (rate(pmc_requests_total[1m]))",
+          "legendFormat": "shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bytes in/out per shard",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (shard) (rate(pmc_bytes_rx_total[1m]))",
+          "legendFormat": "rx shard {{shard}}"
+        },
+        {
+          "expr": "sum by (shard) (rate(pmc_bytes_tx_total[1m]))",
+          "legendFormat": "tx shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Connections",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(pmc_connections_current)",
+          "legendFormat": "current"
+        },
+        {
+          "expr": "sum(pmc_connections_accepted_total)",
+          "legendFormat": "accepted"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Connection closures by reason",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_connections_closed_total{reason=\"client\"}[1m]))",
+          "legendFormat": "client"
+        },
+        {
+          "expr": "sum(rate(pmc_connections_closed_total{reason=\"server\"}[1m]))",
+          "legendFormat": "server"
+        },
+        {
+          "expr": "sum(rate(pmc_connections_closed_total{reason=\"error\"}[1m]))",
+          "legendFormat": "error"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Write queue depth",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(pmc_write_queue_depth)",
+          "legendFormat": "depth"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Read buffer usage",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(pmc_read_buffer_usage_bytes)",
+          "legendFormat": "bytes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bytes in/out",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_bytes_rx_total[1m]))",
+          "legendFormat": "rx"
+        },
+        {
+          "expr": "sum(rate(pmc_bytes_tx_total[1m]))",
+          "legendFormat": "tx"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Batch rate",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_batches_total[1m]))",
+          "legendFormat": "batches"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Average requests per batch",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 22
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(pmc_requests_per_batch_sum[1m])) / sum(rate(pmc_requests_per_batch_count[1m]))",
+          "legendFormat": "avg"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "KVS items",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum(pmc_kvs_items)",
+          "legendFormat": "items"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "KVS bytes used",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum(pmc_kvs_bytes_used)",
+          "legendFormat": "bytes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "Per-worker request rate heatmap",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum by (shard) (rate(pmc_requests_total[1m]))",
+          "legendFormat": "shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "In-flight requests per shard",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "pmc_in_flight_requests",
+          "legendFormat": "shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Epoll activity per shard",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "rate(pmc_epoll_wait_total[1m])",
+          "legendFormat": "epoll_wait shard {{shard}}"
+        },
+        {
+          "expr": "rate(pmc_epoll_events_total[1m])",
+          "legendFormat": "epoll_events shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Syscalls per shard (recv/send/accept)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "rate(pmc_syscall_recv_total[1m])",
+          "legendFormat": "recv shard {{shard}}"
+        },
+        {
+          "expr": "rate(pmc_syscall_send_total[1m])",
+          "legendFormat": "send shard {{shard}}"
+        },
+        {
+          "expr": "rate(pmc_syscall_accept_total[1m])",
+          "legendFormat": "accept shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Hot key hashes (debug sampler)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "topk(20, pmc_hotkey_hash_hits_total)",
+          "legendFormat": "hash {{hash}} shard {{shard}}"
+        },
+        {
+          "expr": "sum(rate(pmc_hotkey_samples_dropped_total[1m])) by (shard)",
+          "legendFormat": "dropped shard {{shard}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Batch size histogram buckets",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (rate(pmc_batch_size_bucket[1m]))",
+          "legendFormat": "<= {{le}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "text",
+      "title": "Shard placement metadata (/shard)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "options": {
+        "content": "Use the controller discovery targets and query each worker `/shard` endpoint to inspect worker-index, CPU, NUMA node, NIC queue, memory arena usage. Example: `curl http://cache-host:9100/shard`.",
+        "mode": "markdown"
+      }
+    }
+  ]
+}

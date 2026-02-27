@@ -11,10 +11,12 @@
 #include <cstring>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/uio.h> 
 #include <netinet/in.h>
 #include "../kvs/kvs.hpp"
 #include "../utils/time.hpp"
 #include "../non_copyable.hpp"
+#include "../metrics/metrics.hpp"
 #include "coroutines.hpp"
 #include "sockutils.hpp"
 #include "constants.hpp"
@@ -54,18 +56,198 @@ namespace server {
         std::vector<QueuedCommand> queue;
         std::vector<std::unique_ptr<char[]>> storage;
     };
+
+    struct WriteBatch {
+        struct Chunk {
+            std::size_t offset;
+            std::size_t len;
+        };
+
+        std::vector<Chunk> chunks;
+        std::size_t totalBytes = 0;
+    };
+
     struct ConnectionData {
-        timespec lastActivity {0, 0};
-        int epoll_fd = -1;
-        std::vector<char> readBuffer;
-        std::deque<RequestView> pendingRequests;
-        size_t bytesToErase = 0;
-        std::unique_ptr<RespTransactionState> respTransaction;
-        ConnectionData() = default;
-        ConnectionData(timespec ts, int epfd) : lastActivity(ts), epoll_fd(epfd) {
-            readBuffer.reserve(READ_BUFFER_SIZE);
-        }
-        ~ConnectionData();
+        private:
+            WriteBatch writeBatch;
+            std::vector<char> writeStorage;
+            bool writeInterestEnabled = false;
+
+            void updateEpollWriteInterest(int fd, bool enable) noexcept
+            {
+                if (epoll_fd < 0 || writeInterestEnabled == enable) {
+                    return;
+                }
+
+                epoll_event event{};
+                event.data.fd = fd;
+                event.events = EPOLLIN | EPOLLET | (enable ? EPOLLOUT : 0);
+
+                if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, fd, &event) == -1) {
+#ifndef NDEBUG
+                    perror("Failed to update epoll events for connection");
+#endif
+                    return;
+                }
+
+                writeInterestEnabled = enable;
+            }
+
+        public:
+            timespec lastActivity {0, 0};
+            int epoll_fd = -1;
+            std::vector<char> readBuffer;
+            std::deque<RequestView> pendingRequests;
+            size_t bytesToErase = 0;
+            std::unique_ptr<RespTransactionState> respTransaction;
+            metrics::MetricsCollector* metrics = nullptr;
+
+            void queueResponseChunk(const char* data, std::size_t len, RequestProtocol protocol) noexcept
+            {
+                if (len == 0) {
+                    return;
+                }
+
+                WriteBatch& wb = writeBatch;
+
+                auto offset = writeStorage.size();
+                writeStorage.insert(writeStorage.end(), data, data + len);
+
+                wb.chunks.push_back({offset, len});
+                wb.totalBytes += len;
+
+
+                if (protocol == RequestProtocol::Custom) {
+                    const auto sep = MSG_SEPARATOR;
+                    std::size_t sepOffset = writeStorage.size();
+                    writeStorage.push_back(sep);
+
+                    wb.chunks.push_back({sepOffset, 1});
+                    wb.totalBytes += 1;
+                }
+            }
+            
+            bool flushWriteBatch(int fd) noexcept
+            {
+                WriteBatch& wb = writeBatch;
+
+                if (wb.chunks.empty()) {
+                    updateEpollWriteInterest(fd, false);
+                    return true;
+                }
+
+                char* base = writeStorage.data();
+                std::size_t remaining = wb.totalBytes;
+
+                std::size_t idx = 0;
+                std::size_t offsetInside = 0;
+                bool needMoreWrite = false;
+
+                while (remaining > 0 && idx < wb.chunks.size()) {
+
+                    std::vector<iovec> iov;
+                    iov.reserve(wb.chunks.size() - idx);
+
+                    {
+                        const auto& first = wb.chunks[idx];
+                        iovec chunkPartV{};
+                        chunkPartV.iov_base = base + first.offset + offsetInside;
+                        chunkPartV.iov_len  = first.len - offsetInside;
+                        iov.push_back(chunkPartV);
+                    }
+
+                    for (std::size_t c = idx + 1; c < wb.chunks.size(); c++) {
+                        const auto& ch = wb.chunks[c];
+                        iovec chunkV{};
+                        chunkV.iov_base = base + ch.offset;
+                        chunkV.iov_len  = ch.len;
+                        iov.push_back(chunkV);
+                    }
+
+                    msghdr msg{};
+                    msg.msg_iov = iov.data();
+                    msg.msg_iovlen = iov.size();
+
+                    auto bytesSent = ::sendmsg(fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
+                    if (bytesSent == -1) {
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            needMoreWrite = true;
+                            break;
+                        }
+                        return false;
+                    }
+
+                    auto written = static_cast<std::size_t>(bytesSent);
+                    if (written == 0) {
+                        needMoreWrite = true;
+                        break;
+                    }
+
+                    remaining -= written;
+
+                    if (metrics) {
+                        metrics->addBytesTx(written);
+                    }
+
+                    while (written > 0) {
+                        const auto& ch = wb.chunks[idx];
+                        auto chunkRemaining = ch.len - offsetInside;
+
+                        if (written >= chunkRemaining) {
+                            written -= chunkRemaining;
+                            idx++;
+                            offsetInside = 0;
+                            if (idx >= wb.chunks.size())
+                                break;
+                        } else {
+                            offsetInside += written;
+                            written = 0;
+                        }
+                    }
+                }
+
+                if (remaining == 0 && !needMoreWrite) {
+                    wb.totalBytes = 0;
+                    wb.chunks.clear();
+                    writeStorage.clear();
+                    updateEpollWriteInterest(fd, false);
+                    return true;
+                }
+
+                if (idx < wb.chunks.size()) {
+                    const auto dropBytes = wb.chunks[idx].offset + offsetInside;
+                    if (dropBytes > 0 && dropBytes <= writeStorage.size()) {
+                        writeStorage.erase(writeStorage.begin(), writeStorage.begin() + dropBytes);
+                    }
+
+                    std::vector<WriteBatch::Chunk> newChunks;
+                    newChunks.reserve(wb.chunks.size() - idx);
+
+                    auto firstLen = wb.chunks[idx].len > offsetInside ? (wb.chunks[idx].len - offsetInside) : 0;
+                    if (firstLen > 0) {
+                        newChunks.push_back({0, firstLen});
+                    }
+
+                    for (std::size_t c = idx + 1; c < wb.chunks.size(); ++c) {
+                        auto ch = wb.chunks[c];
+                        ch.offset -= dropBytes;
+                        newChunks.push_back(ch);
+                    }
+
+                    wb.chunks.swap(newChunks);
+                    wb.totalBytes = remaining;
+                }
+
+                updateEpollWriteInterest(fd, true);
+                return true;
+            }
+
+            ConnectionData() = default;
+            ConnectionData(timespec ts, int epfd, metrics::MetricsCollector* metricsCollector = nullptr)
+                : lastActivity(ts), epoll_fd(epfd), metrics(metricsCollector) {
+                readBuffer.reserve(READ_BUFFER_SIZE);
+            }
+            ~ConnectionData();
     };
 
     class ConnManager {
@@ -90,18 +272,20 @@ namespace server {
                 }
                 timespec time{0, 0};
                 if (clock_gettime(CLOCK_MONOTONIC_COARSE, &time) == 0) {
-                    auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd );
+                    auto [iterator, success] = connections.try_emplace(client_fd, time, epoll_fd, metrics);
                     if (!success) {
 #ifndef NDEBUG
                         std::cerr << "Connection info already exists for client_fd = " << client_fd << ", epoll_fd = " << epoll_fd << std::endl;
 #endif
                         return 0;
                     }
+                    if (metrics) {
+                        metrics->connectionAccepted();
+                    }
                 } else {
                     perror("clock_gettime() failed when registering connection");
                     return -1;
                 }
-                ++activeConnectionsCounter;
                 return 0; 
             };
 
@@ -123,7 +307,6 @@ namespace server {
             };
 
         public:
-            std::atomic<uint_fast32_t> activeConnectionsCounter;
             std::unordered_map<int, ConnectionData> connections;
 
             bool updateActivity(int fd) {
@@ -138,7 +321,7 @@ namespace server {
                 return true;
             };
 
-            void closeConnection(int fd) noexcept {
+            void closeConnection(int fd, metrics::CloseReason reason = metrics::CloseReason::Server) noexcept {
                 std::lock_guard<std::mutex> lock(conn_mutex);
                 if (!connections.contains(fd)) {
                     return;
@@ -158,42 +341,72 @@ namespace server {
                     perror("Error when closing socket descriptor");
 #endif
                 }
-                connections.erase(fd);
-                if (activeConnectionsCounter > 0) {
-                    --activeConnectionsCounter;
-                } else {
-#ifndef NDEBUG
-                    std::cout << "Attempt to decrease activeConnectionsCounter = 0\n";
-#endif
+                if (metrics) {
+                    metrics->connectionClosed(reason);
                 }
+                connections.erase(fd);
             };
 
-            void acceptConnections(int server_fd, std::stop_token stopToken) {
-                sockaddr_in client_address;
+            AcceptConnTask acceptConnections(int server_fd, std::atomic<bool>& isRunning) {
+                sockaddr_in client_address{};
                 socklen_t client_len = sizeof(client_address);
-                do {
-                    auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
-                    if (client_fd >= 0) {
-                        if (registerConnection(epoll_fd, client_fd) == -1) {
+                while (isRunning.load(std::memory_order_relaxed)) {
+                    int acceptedCount = 0;
+                    int lastError = 0;
+                    while (isRunning.load(std::memory_order_relaxed)) {
+                        auto client_fd = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
+                        if (metrics) {
+                            metrics->incrementSyscallAccept();
+                        }
+                        if (client_fd >= 0) {
+                            if (registerConnection(epoll_fd, client_fd) == -1) {
+                                continue;
+                            }
+                            ++acceptedCount;
+                            lastError = 0;
                             continue;
-                        };
-                    } else {
-                        if (activeConnectionsCounter > 0) {
+                        }
+
+                        lastError = errno;
+
+                        if (!connections.empty()) {
                             validateConnections();
                         }
-                        if (errno == EINTR) {
+
+                        if (lastError == EINTR) {
                             perror("Failed to accept connection: interruption signal received. Retrying...");
                             continue;
-                        } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                            std::this_thread::sleep_for(ACCEPT_CONN_DELAY);
-                        } else {
-                            perror("Failed to accept connection");
                         }
+                        if (lastError == EAGAIN || lastError == EWOULDBLOCK) {
+                            break;
+                        }
+
+                        if ((lastError == EBADF || lastError == EINVAL) && !isRunning.load(std::memory_order_acquire)) {
+                            // Stop() may close the listen socket while accept loop is winding down.
+                            // Treat this as a graceful shutdown signal rather than a fatal accept error.
+                            lastError = 0;
+                            break;
+                        }
+
+                        perror("Failed to accept connection");
+                        acceptedCount = -1;
+                        break;
                     }
-                } while (!stopToken.stop_requested());
+
+                    co_yield acceptedCount;
+
+                    if (lastError == EAGAIN || lastError == EWOULDBLOCK) {
+                        std::this_thread::sleep_for(ACCEPT_CONN_DELAY);
+                    }
+                }
+                co_return 0;
             }
 
-            ConnManager(int epoll_fd): epoll_fd(epoll_fd), activeConnectionsCounter(0) {}
+            ConnManager(int epoll_fd, metrics::MetricsCollector* metrics = nullptr): epoll_fd(epoll_fd), metrics(metrics) {}
+
+            void setMetrics(metrics::MetricsCollector* m) noexcept { metrics = m; }
+
+        private:
+            metrics::MetricsCollector* metrics = nullptr;
     };
 }
-

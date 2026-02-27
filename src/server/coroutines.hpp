@@ -259,7 +259,7 @@ namespace server {
     class HandleReqTask : NonCopyable {
         public:
             class promise_type;
-            using handle_type = std::coroutine_handle<promise_type>;    
+            using handle_type = std::coroutine_handle<promise_type>;
         private:
             handle_type c_handle;
             HandleReqTask(handle_type h) : c_handle(h) {};
@@ -270,7 +270,7 @@ namespace server {
                     std::suspend_always final_suspend() noexcept { return {}; }
 
                     void unhandled_exception() {}
-                    int event_count;
+                    int event_count = 0;
 
                     void return_value(int value) {
                         event_count = value;
@@ -319,5 +319,62 @@ namespace server {
                 }
             };
             friend class SuspendSelfAwaiter;
+    };
+
+    class AcceptConnTask : NonCopyable {
+        public:
+            class promise_type;
+            using handle_type = std::coroutine_handle<promise_type>;
+        private:
+            handle_type c_handle;
+            AcceptConnTask(handle_type h) : c_handle(h) {};
+        public:
+            class promise_type {
+                public:
+                    int accepted_count = 0;
+
+                    std::suspend_never initial_suspend() { return {}; }
+                    std::suspend_always final_suspend() noexcept { return {}; }
+
+                    void unhandled_exception() {}
+
+                    void return_value(int value) {
+                        accepted_count = value;
+                    }
+
+                    std::suspend_always yield_value(int value) {
+                        accepted_count = value;
+                        return {};
+                    }
+
+                    AcceptConnTask get_return_object() { return AcceptConnTask{handle_type::from_promise(*this)}; }
+            };
+
+            int next_value() {
+                auto& promise = c_handle.promise();
+                if (!c_handle.done()) {
+                    c_handle.resume();
+                }
+                return promise.accepted_count;
+            }
+
+            AcceptConnTask(AcceptConnTask &&act) : c_handle(act.c_handle) {
+                act.c_handle = nullptr;
+            }
+
+            AcceptConnTask &operator=(AcceptConnTask &&act) {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+                c_handle = act.c_handle;
+                act.c_handle = nullptr;
+                return *this;
+            }
+
+            ~AcceptConnTask() {
+                if (c_handle) {
+                    c_handle.destroy();
+                }
+            }
     };
 }

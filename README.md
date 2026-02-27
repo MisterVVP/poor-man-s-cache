@@ -17,14 +17,95 @@ High performance and minimalist cache server.
 
 ## Current progress
 
+### Clustered multi-worker mode (experimental)
+
+poor-man-s-cache can run as a cluster of N independent worker processes on a single host.
+
+Each worker:
+
+- runs in its own process
+- has its own in-memory key-value store
+- listens on its own TCP port
+
+There is **no shared memory and no replication** between workers. Each worker is a shard.
+Clients are responsible for routing keys to the correct shard (e.g. `shard = hash(key) % workerCount`).
+
+To start a local 24-worker cluster:
+
+```bash
+cmake --preset Release
+cmake --build ./out/build/Release
+go build -C ./controller -o ../pmc-cluster-controller
+./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 24 9001
+```
+
+> [!NOTE]
+> Cluster-aware client tests and CI jobs expect the following environment variables:
+> - `CACHE_HOST` – hostname for all shards (defaults to `127.0.0.1`).
+> - `CACHE_PORT` – base TCP port where shard 0 listens (defaults to `9001`).
+> - `CLUSTER_WORKERS` – number of shards to probe (required to enable cluster client flows).
+
+A lightweight three-step workflow is used in CI and can be mirrored locally:
+
+```bash
+# 1) Start cluster (runs in background); adjust shard count/port as needed
+./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache $CLUSTER_WORKERS $CACHE_PORT> cluster.log 2>&1 & echo $! > cluster.pid
+
+# 2) Build and run cluster-aware tests (C++ client and python functional checks)
+g++ -std=c++20 -Wall -Wextra -Werror -pedantic -O2 -pthread -Isrc tests/client_integration/client_integration_test.cpp -o client_integration_test
+./client_integration_test
+python3 tests/tcp_server_cluster_test.py -p -b 256
+
+# 3) Stop cluster
+kill "$(cat cluster.pid)"
+```
+
+To test clustered performance use
+```bash
+python3 ./tcp_server_cluster_test.py -p -b 2048
+```
+
+Tweak batch size (-b) based on your system and network.
+
+### Worker HTTP control-plane endpoints
+
+Each cache worker now exposes lightweight HTTP endpoints on the metrics HTTP server (default `METRICS_PORT`, e.g. `9100`). The cache TCP protocol port (`CACHE_PORT`) remains data-only and does **not** serve HTTP.
+
+- `GET /healthz` → always `200 OK` while the process is alive.
+- `GET /readyz` → `200 OK` only when worker state is `READY`; returns `503 Service Unavailable` during `STARTING`, `DRAINING`, and `STOPPED`.
+- `GET /metrics` and `GET /shard` remain available on the same HTTP server.
+
+Readiness state transitions are monotonic per worker:
+
+`STARTING -> READY -> DRAINING -> STOPPED`
+
+On `SIGTERM`/`SIGINT`, readiness flips to `503` immediately (`DRAINING`) so new traffic can be removed quickly by orchestrators/load-balancers.
+
+### Graceful shutdown and drain
+
+The server implements bounded graceful shutdown for worker processes:
+
+1. Stop accepting new TCP connections.
+2. Keep processing existing active connections while draining.
+3. Exit when all active connections are closed, or force-close remaining connections after a timeout.
+
+New runtime knobs:
+
+- `--drain-timeout-ms` (env: `DRAIN_TIMEOUT_MS`, default: `5000`)
+- `--drain-max-conn-close-per-tick` (env: `DRAIN_MAX_CONN_CLOSE_PER_TICK`, default: `1024`)
+
+These options bound worst-case shutdown time and cap per-tick forced closes to avoid long latency spikes during teardown.
+
 ### Functional tests
 
 #### Testing method
+
+##### Single node
 Local python script which is leveraging multiprocessing to send requests to the running server and await response from server.
 
 Example:
-```
-export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
+```bash
+python3 ./tcp_server_test.py -p -b 128
 ```
 
 There are few testing scenarios supported right now:
@@ -34,13 +115,40 @@ There are few testing scenarios supported right now:
 4. (SET key, GET key, GET non_existent_key) workflow
 5. Single request per single connection test (not recommended)
 
+For the single-request-per-connection scenario, set `SOCKET_TIMEOUT_SEC` if you need to tolerate slower responses when moving large payloads during CI runs.
+
 Functional RPS is calculated based on: (T<sub>client</sub> + T<sub>server</sub>) / N  
 - T<sub>client</sub> - time spent to send all the requests by client + time to receive and verify the responses
 - T<sub>server</sub> - time spent to process and respond to all the request by server
 - N - total number of requests 
 
+##### Cluster (experimental)
+- Controller is used to spawn and shut down multiple processes of cache server.
+- Cluster consists of `CLUSTER_WORKERS` workers. It's set to 24 locally and to 4 in github (limited by CPUs of github hosted runner)
+- Separate python test script is used for testing, but it's scenarios are identical to tcp_server_test.py
+
+Below is an example of how to run cluster and tests locally:
+
+Set env variables, for example:
+```bash
+source .env
+```
+
+Start the cluster:
+```bash
+cmake --preset Release
+cmake --build ./out/build/Release
+go build -C ./controller -o ../pmc-cluster-controller
+./pmc-cluster-controller ./out/build/Release/src/poor-man-s-cache 24 9001
+```
+
+Run tests from separate shell:
+```bash
+python3 tests/tcp_server_cluster_test.py -p -b 2048
+```
+
 #### Test setups
-Lunix kernel settings used as much as possible for both local and docker setups can be found in local_server_setup.bash
+Lunix kernel settings used as much as possible for both local and docker setups can be found in scripts/local_server_setup.bash
 
 ##### Local setup
 - Ubuntu 24.04 kernel 6.14.0-27-generic (with high end processor and half gbit internet).
@@ -49,15 +157,47 @@ Lunix kernel settings used as much as possible for both local and docker setups 
 ##### CI setup 
 Free github hosted runner hardware
 
-#### Test details results
-Local setup. 10 million requests per test suite, 96 test client processes forked
+#### Test details results (Cluster)
+Local setup. 10 million requests per test suite, `multiprocessing.cpu_count()` test client processes forked.
 
-##### Local Ubuntu  
+##### Local Ubuntu
+24 node cluster.
+
+###### Without pipelining
+- TBD
+
+###### With pipelining
+Pipelined batch size 2048. (`-b 2048`)
+- 3 000 000 to 4 000 000 RPS (GET/DEL/SET)
+- around 7 500 000 RPS (SET key, GET key, GET non_existent_key) workflow  
+
+##### Docker on Ubuntu  
+###### Without pipelining
+- TBD
+###### With pipelining
+- TBD  
+
+##### Docker on Windows
+- TBD
+
+##### CI setup.
+4 node cluster, 1 million requests total (4 processes and 250000 chunks per process), pipelined batch size 256 (`-b 256`).
+###### Without pipelining
+- TBD
+###### With pipelining
+- 500 000 RPS (GET/DEL/SET)
+- around 1 000 000 RPS (SET key, GET key, GET non_existent_key) workflow 
+
+#### Test details results (Single Node)
+Local setup. 10 million requests per test suite, `multiprocessing.cpu_count()` test client processes forked, pipelined batch size 128.
+
+##### Local Ubuntu
+
 ###### Without pipelining
 more than 100 000 RPS.
+
 ###### With pipelining
-- more than 1 500 000 RPS (GET/DEL)
-- more than 1 000 000 RPS (SET)
+- 1 000 000 to 2 000 000 RPS (GET/DEL/SET)
 - around 3 000 000 RPS (SET key, GET key, GET non_existent_key) workflow  
 
 ##### Docker on Ubuntu  
@@ -75,12 +215,12 @@ TBD
 around 22 500 RPS
 ###### With pipelining
 more than 200 000 RPS (SET/GET/DEL)
-more than 400 000 RPS (SET key, GET key, GET non_existent_key) workflow 
+more than 400 000 RPS (SET key, GET key, GET non_existent_key) workflow
 
 #### Goals
 Next step is 10M+ functional RPS on Ubuntu (with our without pipelining)
 
-### How Redis works with the same task
+### How Redis works with the same task (Single node comparison)
 Below are results that I got from using Redis.
 
 #### Ubuntu (with high end processor and half gbit internet)
@@ -88,7 +228,7 @@ Installed via https://redis.io/docs/latest/operate/oss_and_stack/install/install
 
 ##### Our own tests
 ```
-python3 ./tcp_server_test.py -p -b 100 --redis
+python3 ./tcp_server_test.py -p -b 128 --redis
 ```
 ###### Results
 around 120 000 RPS for GET / SET / DEL tests  
@@ -99,7 +239,7 @@ around 1 250 000 RPS for (SET key, GET key, GET non_existent_key) workflow tests
 
 ##### Redis benchmark
 ```
-redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
+redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 128
 ```
 ###### Results
 around 120 000 RPS for GET / SET tests  
@@ -117,7 +257,7 @@ docker compose -f docker-compose-local.yaml --profile redis up
 
 Run official redis-benchmark tool
 ```
-docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 100
+docker exec 2d279699e307 redis-benchmark -t set -r 1000000 -n 1000000 -d 12 -P 128
 ```
 
 ##### Results
@@ -155,7 +295,22 @@ After the server has started, run the test script:
 docker compose -f docker-compose-local.yaml --profile tests up
 ```
 
-You can check Prometheus metrics while tests are running by opening http://localhost:8080/metrics
+You can check Prometheus metrics while tests are running by opening http://localhost:9100/metrics. Monitoring assets now live under `./observability` and are driven by Grafana Alloy.
+
+To launch the bundled Grafana stack with Grafana Alloy + Mimir (Prometheus-compatible backend) against containers in the same compose project, use `docker compose --profile main --profile cluster --profile monitoring up` and open Grafana at http://localhost:3000 with the pre-provisioned "Poor Man's Cache - Cluster" dashboard.
+
+For local development, you can run only Grafana Alloy + Mimir + Grafana in Docker while scraping a cache cluster running directly on localhost by overriding discovery and target addresses, for example:
+
+```bash
+PMC_PROM_TARGET_1=172.17.0.1:9100 \
+PMC_PROM_TARGET_2=172.17.0.1:9101 \
+PMC_PROM_DISCOVERY_URL=http://172.17.0.1:9400/discovery \
+PMC_GRAFANA_PROMETHEUS_URL=http://mimir:9200/prometheus \
+PMC_MIMIR_REMOTE_WRITE_URL=http://172.17.0.1:9200/api/v1/push \
+docker compose --profile monitoring up
+```
+
+The cluster controller discovery endpoint defaults to `http://cache-cluster:9400/discovery` and can still be adjusted via `PMC_DISCOVERY_ADDR` and `PMC_SCRAPE_HOST`; Grafana Alloy consumes it through HTTP service discovery so metrics targets are generated automatically from `CLUSTER_WORKERS` and the metrics base port.
 
 Don't forget to shut the detached container down by issuing:
 ```
@@ -163,7 +318,6 @@ docker compose -f docker-compose-local.yaml --profile main down
 ```
 
 #### To run only unit tests
-
 ```
 docker build -f Dockerfile.utests . -t cache-tests:latest
 docker run -it cache-tests:latest
@@ -172,21 +326,13 @@ docker run -it cache-tests:latest
 ### Local Ubuntu with sudo access
 Open terminal in repository root and apply system configuration via
 ```
-sudo bash ./local_server_setup.bash
+sudo bash ./scripts/local_server_setup.bash
 ```
 
 Open second terminal somewhere on your hard drive and install required dependencies
 ```
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y git cmake build-essential libgtest-dev zlib1g-dev gcc-14 g++-14
-
-git clone https://github.com/jupp0r/prometheus-cpp.git && cd prometheus-cpp && \
-git submodule init && git submodule update && \
-mkdir _build && cd _build && \
-cmake .. -DBUILD_SHARED_LIBS=ON -DENABLE_PUSH=OFF -DENABLE_COMPRESSION=OFF && \
-cmake --build . --parallel $(nproc) && \
-ctest -V && \
-sudo cmake --install .
 ```
 
 Set env variables, for example:
@@ -196,12 +342,12 @@ source .env
 
 Run unit tests:
 ```
-./run-all-tests.bash
+./scripts/run-all-tests.bash
 ```
 
 ### Static analysis (CodeQL)
 
-The repository is scanned with GitHub CodeQL for C++, Python, and GitHub Actions sources. CodeQL analyses for Python and GitHub Actions run in `build-mode: none`, so no manual build steps are required for those languages. The C++ analysis path uses `build-mode: manual` to compile the project with GCC 14 and a locally installed copy of `prometheus-cpp`. To reproduce the same environment locally, use the following commands (they require sudo privileges):
+The repository is scanned with GitHub CodeQL for C++, Python, and GitHub Actions sources. CodeQL analyses for Python and GitHub Actions run in `build-mode: none`, so no manual build steps are required for those languages. The C++ analysis path uses `build-mode: manual` to compile the project with GCC 14. To reproduce the same environment locally, use the following commands (they require sudo privileges):
 
 ```bash
 sudo apt-get update
@@ -210,21 +356,7 @@ sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
 sudo apt-get update
 sudo apt-get install -y gcc-14 g++-14 cmake ninja-build pkg-config zlib1g-dev libgtest-dev
 
-if [ ! -d prometheus-cpp ]; then
-  git clone https://github.com/jupp0r/prometheus-cpp.git prometheus-cpp
-fi
-git -C prometheus-cpp submodule update --init --recursive
-
-cmake -S prometheus-cpp -B prometheus-cpp/_build -G Ninja \
-  -DBUILD_SHARED_LIBS=ON \
-  -DENABLE_TESTING=OFF \
-  -DENABLE_PUSH=OFF \
-  -DENABLE_COMPRESSION=OFF \
-  -DENABLE_LOGGING=OFF
-cmake --build prometheus-cpp/_build --parallel
-cmake --install prometheus-cpp/_build --prefix "$(pwd)/prometheus-cpp/_install"
-
-CMAKE_PREFIX_PATH="$(pwd)/prometheus-cpp/_install" cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 ```
 
@@ -243,7 +375,7 @@ cd tests && \
 virtualenv .venv && \
 source .venv/bin/activate && \
 pip install -r requirements.txt && \
-export TEST_POOL_SIZE=96 && python3 ./tcp_server_test.py -p -b 100
+python3 ./tcp_server_test.py -p -b 128
 ```
 
 > [!TIP]
@@ -258,7 +390,7 @@ valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --verbose .
 
 Run python tests, e.g. from tests folder:
 ```
-python3 ./tcp_server_test.py -p -b 100
+python3 ./tcp_server_test.py -p -b 128
 ```
 
 #### Profiling (callgrind)
@@ -345,7 +477,7 @@ docker compose -f docker-compose-local.yaml --profile tests-callgrind up
 
 ### Various helpful shell commands
 `sysctl -a` - Check that all required sysctl options were overwritten successfully in Docker.
-`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `sockmon.bash`).
+`netstat -an | grep 'TIME_WAIT' | wc -l` or `netstat -an | grep 'ESTABLISHED|CONNECTED' | wc -l` - Check what's going on with sockets, useful during execution of the Python test script (example in `scripts/sockmon.bash`).
 `echo -ne "SET key1 value1\x1F" | nc localhost 9001` - Send a single SET request to cache server (nice for quick testing)
 `echo -ne "GET key1\x1F" | nc localhost 9001` - Send a single GET request to cache server (nice for quick testing)
 
@@ -359,6 +491,7 @@ done
 ```
 
 ## TODO
+- Finish clustered setup and get above 10M RPS locally
 - Try some super fast hashtable (like the one from Google or boost), if it can increase performance by 20% -> use it, else just continue with the existing one and iterate on improvements.
 - Test edge case scenarios
 - Integrate valgrind checks into CI
@@ -374,6 +507,7 @@ done
 - Check why Valgrind always shows a tiny memory leak from the Prometheus-cpp lib (`116 bytes in 1 block are still reachable in loss record 1 of 1`).
 - Read http://www.kegel.com/c10k.html
 - Continue reading https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/coroutines-c++20/
+- Revamp this README (build wiki, split documentation)
 
 ## Good articles and guidelines
 - https://beej.us/guide/bgnet/html/#close-and-shutdownget-outta-my-face

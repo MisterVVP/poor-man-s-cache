@@ -53,3 +53,9 @@ out
 callgrind.out.*
 prometheus-cpp/
 tests/__pycache__/
+logs
+pmc-cluster-controller
+pmc-cluster-controller
+!controller/go.mod
+cluster.*
+client_integration_test
